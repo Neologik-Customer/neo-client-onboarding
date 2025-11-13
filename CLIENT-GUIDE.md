@@ -154,7 +154,13 @@ The script will display your next steps. You need to:
 ✉️ Send the **JSON configuration file** (`NeologikConfiguration_[date].json`) to Neologik at support@neologik.ai
 
 ### 2. Upload Your TLS Certificate
-📁 Upload your TLS certificate (.pfx file) to the Azure Storage Account:
+
+� **First, create your certificate:**
+   - Follow the detailed instructions in **[PFX-CERT-GUIDE.md](PFX-CERT-GUIDE.md)**
+   - This guide explains how to create a self-signed certificate or convert an existing certificate to .pfx format
+   - You'll need the .pfx file and its password for the next steps
+
+📁 **Then, upload the .pfx file** to the Azure Storage Account:
    - **Storage Account**: `stneodeploy[your-org][env][region][index]`
    - **Container**: `certificate`
    - **Authentication**: Use Microsoft Entra ID (your Azure account)
