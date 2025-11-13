@@ -18,17 +18,32 @@
 
 Download the `Install-NeologikEnvironment.ps1` file from this repository to your computer.
 
-### 2. Open PowerShell as Administrator
+### 2. Open PowerShell 7 as Administrator
 
-⚠️ **CRITICAL**: You MUST run PowerShell as Administrator or the script will not work.
+⚠️ **CRITICAL**: You MUST use **PowerShell 7** (not Windows PowerShell 5.1) and run as Administrator.
 
+**Finding PowerShell 7:**
 - Click the **Start menu**
-- Type **"PowerShell"**
-- Right-click on **"PowerShell"** or **"Windows PowerShell"**
+- Type **"PowerShell"** 
+- Look for **"PowerShell 7"** or just **"PowerShell"** (with the modern icon)
+- **DO NOT** use "Windows PowerShell" (the old version 5.1 will cause errors)
+
+**If PowerShell 7 is not installed:**
+- The script will offer to install it automatically
+- Or download it manually from: https://aka.ms/powershell
+
+**To run as Administrator:**
+- Right-click on **"PowerShell 7"**
 - Click **"Run as administrator"**
 - Click **"Yes"** when prompted
 
-You should see "Administrator" in the window title if done correctly.
+You should see "Administrator: PowerShell 7" in the window title if done correctly.
+
+**Verify you're using PowerShell 7:**
+```powershell
+$PSVersionTable.PSVersion
+```
+You should see version 7.4 or higher. If you see 5.1, you opened the wrong PowerShell!
 
 ### 3. Navigate to the Script Location
 
@@ -104,10 +119,10 @@ The script will then:
 - **Module Installation**: If needed, press **Enter** to install
 - **Re-authentication Prompt**: If you're already logged in, you'll be asked if you want to re-authenticate
   - Press **N** to continue with your current login (recommended)
-  - Press **Y** to login again (useful if you need to switch accounts)
+   - Press **Y** to login again (useful if you need to switch accounts)
 - **Azure Login**: A browser window will open - sign in with your Azure account (if re-authenticating or not logged in)
 
-### 7. Wait for Completion
+### 8. Wait for Completion
 
 The script will automatically create all required Azure resources. This may take 5-10 minutes.
 
@@ -118,9 +133,7 @@ You'll see messages like:
 - ✓ Creating Storage Account (for certificates)
 - ✓ Configuring permissions
 
-### 8. Review the Results
-
-When complete, you'll see a green success message and a summary of what was created.
+### 9. Review the ResultsWhen complete, you'll see a green success message and a summary of what was created.
 
 Two files will be saved in the same folder:
 - `NeologikConfiguration_[date].json` - Configuration details
