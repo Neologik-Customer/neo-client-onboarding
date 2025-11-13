@@ -6,7 +6,9 @@
    - **Owner** role at the subscription level (not just "Contributor")
    - **Global Administrator** role in Azure AD (Entra ID)
 
-⚠️ **Important**: The "Owner" role is required to assign role-based access control (RBAC) permissions. "Subscription Owner" or "Contributor" roles alone are not sufficient.
+⚠️ **Important Permissions:**
+- The **Owner** role is required to assign role-based access control (RBAC) permissions. "Subscription Owner" or "Contributor" roles alone are not sufficient.
+- The **Global Administrator** role is required to assign Entra ID roles. Without this, some role assignments will be skipped and must be done manually later.
 
 ✅ **Administrator access** on your Windows computer
 

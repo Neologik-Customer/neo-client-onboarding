@@ -1246,8 +1246,15 @@ function Set-AppRegistrationRoles {
                     $roleAssigned = $true
                 }
                 catch {
+                    # Check if it's a permission error (Forbidden/Authorization)
+                    if ($_.Exception.Message -match "Forbidden|Authorization_RequestDenied|Insufficient privileges") {
+                        Write-Log "ERROR: Insufficient permissions to assign Application Administrator role" -Level Error
+                        Write-Log "You need Global Administrator or Privileged Role Administrator permissions" -Level Error
+                        Write-Log "Application Administrator role assignment failed - this role may need to be assigned manually" -Level Warning
+                        $roleAssigned = $true  # Mark as handled to continue
+                    }
                     # Handle case where member already exists (race condition or previous partial run)
-                    if ($_.Exception.Message -match "already exist") {
+                    elseif ($_.Exception.Message -match "already exist") {
                         Write-Log "Application Administrator role already assigned (detected on add)" -Level Info
                         $roleAssigned = $true
                     }
