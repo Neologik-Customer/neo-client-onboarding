@@ -156,7 +156,7 @@ The script automatically creates resources with names that include your organiza
 ✅ **Security Groups** (3 groups)
    - Neologik User Group - abc-dev
    - Neologik NCE User Group - abc-dev
-   - Neologik Admin User Group - abc-dev (you're added to this)
+   - Neologik Admin User Group - abc-dev
 
 ✅ **App Registration** for GitHub deployments
    - Name: Neologik GitHub Service Connection - abc-dev
