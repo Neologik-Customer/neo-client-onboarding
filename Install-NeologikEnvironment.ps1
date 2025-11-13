@@ -946,7 +946,7 @@ function Set-NeologikRoleAssignments {
         else {
             # Add retry logic for newly created security groups
             $retryCount = 0
-            $maxRetries = 5
+            $maxRetries = 10
             $roleAssigned = $false
 
             while (-not $roleAssigned -and $retryCount -lt $maxRetries) {
@@ -1167,7 +1167,7 @@ function Set-AppRegistrationRoles {
             else {
                 # Add retry logic for newly created service principals
                 $retryCount = 0
-                $maxRetries = 5
+                $maxRetries = 10
                 $roleAssigned = $false
 
                 while (-not $roleAssigned -and $retryCount -lt $maxRetries) {
@@ -1232,7 +1232,7 @@ function Set-AppRegistrationRoles {
         else {
             # Add retry logic for newly created service principals
             $retryCount = 0
-            $maxRetries = 5
+            $maxRetries = 10
             $roleAssigned = $false
 
             while (-not $roleAssigned -and $retryCount -lt $maxRetries) {
@@ -1421,7 +1421,7 @@ function New-NeologikKeyVault {
         $secretName = "neologik-deployment-service-principle-secret"
         
         $retryCount = 0
-        $maxRetries = 5
+        $maxRetries = 10
         $secretStored = $false
 
         while (-not $secretStored -and $retryCount -lt $maxRetries) {
@@ -1684,7 +1684,7 @@ function New-NeologikManagedIdentities {
                 else {
                     # Add retry logic as role assignment might need time after MI creation
                     $retryCount = 0
-                    $maxRetries = 5
+                    $maxRetries = 10
                     $assigned = $false
 
                     while (-not $assigned -and $retryCount -lt $maxRetries) {
