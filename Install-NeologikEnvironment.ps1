@@ -2030,7 +2030,6 @@ function Start-NeologikOnboarding {
 
         # Step 3: Check if user wants to re-authenticate
         $currentContext = Get-AzContext -ErrorAction SilentlyContinue
-        $forceReauth = $false
         
         if ($currentContext -and $currentContext.Account) {
             Write-Host "`n╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
@@ -2055,7 +2054,6 @@ function Start-NeologikOnboarding {
             
             if ($reauth -eq 'Y' -or $reauth -eq 'y') {
                 Write-Host "You will be prompted to login to Azure..." -ForegroundColor Green
-                $forceReauth = $true
                 # Disconnect current session
                 Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
                 Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
