@@ -1184,15 +1184,21 @@ function Set-AppRegistrationRoles {
                         # Check if it's a permission error (Forbidden)
                         if ($_.Exception.Message -match "Forbidden|not authorized") {
                             Write-Log "ERROR: Insufficient permissions to assign $roleName role" -Level Error
-                            Write-Log "You need to be an Owner at the subscription level to assign this role" -Level Error
-                            
-                            if ($roleName -eq 'User Access Administrator') {
-                                Write-Log "User Access Administrator role assignment failed - this role may need to be assigned manually by a subscription Owner" -Level Warning
-                                $roleAssigned = $true  # Mark as handled to continue
-                            }
-                            else {
-                                throw  # Contributor role is essential
-                            }
+                            Write-Log "Required Permission: Owner role at subscription level" -Level Error
+                            Write-Host "`n❌ PERMISSION ERROR" -ForegroundColor Red
+                            Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Red
+                            Write-Host ""
+                            Write-Host "You do not have sufficient permissions to complete this setup." -ForegroundColor Yellow
+                            Write-Host ""
+                            Write-Host "Required Permissions:" -ForegroundColor Cyan
+                            Write-Host "  ✗ Owner role at subscription level (MISSING)" -ForegroundColor Red
+                            Write-Host "  ? Global Administrator role in Entra ID" -ForegroundColor Gray
+                            Write-Host ""
+                            Write-Host "Current Issue: Cannot assign '$roleName' role to the service principal." -ForegroundColor Yellow
+                            Write-Host ""
+                            Write-Host "Please contact a user with Owner permissions at the subscription level to run this script." -ForegroundColor Yellow
+                            Write-Host ""
+                            throw "Insufficient permissions: Owner role at subscription level required to assign $roleName"
                         }
                         elseif ($_.Exception.Message -match "does not exist|cannot be found|BadRequest") {
                             $retryCount++
@@ -1249,9 +1255,19 @@ function Set-AppRegistrationRoles {
                     # Check if it's a permission error (Forbidden/Authorization)
                     if ($_.Exception.Message -match "Forbidden|Authorization_RequestDenied|Insufficient privileges") {
                         Write-Log "ERROR: Insufficient permissions to assign Application Administrator role" -Level Error
-                        Write-Log "You need Global Administrator or Privileged Role Administrator permissions" -Level Error
-                        Write-Log "Application Administrator role assignment failed - this role may need to be assigned manually" -Level Warning
-                        $roleAssigned = $true  # Mark as handled to continue
+                        Write-Log "Required Permission: Global Administrator or Privileged Role Administrator role in Entra ID" -Level Error
+                        Write-Host "`n❌ PERMISSION ERROR" -ForegroundColor Red
+                        Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Red
+                        Write-Host ""
+                        Write-Host "You do not have sufficient permissions to complete this setup." -ForegroundColor Yellow
+                        Write-Host ""
+                        Write-Host "Required Permissions:" -ForegroundColor Cyan
+                        Write-Host "  ✓ Owner role at subscription level" -ForegroundColor Gray
+                        Write-Host "  ✗ Global Administrator role in Entra ID (MISSING)" -ForegroundColor Red
+                        Write-Host ""
+                        Write-Host "Please contact a user with Global Administrator permissions to run this script." -ForegroundColor Yellow
+                        Write-Host ""
+                        throw "Insufficient permissions: Global Administrator role required"
                     }
                     # Handle case where member already exists (race condition or previous partial run)
                     elseif ($_.Exception.Message -match "already exist") {
