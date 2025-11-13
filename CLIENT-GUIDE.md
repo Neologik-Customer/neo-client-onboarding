@@ -153,11 +153,18 @@ The script will display your next steps. You need to:
 ### 1. Review and Share Configuration
 ✉️ Send the **JSON configuration file** (`NeologikConfiguration_[date].json`) to Neologik at support@neologik.ai
 
-### 2. Upload Your TLS Certificate
+### 2. Decide on Your Fully Qualified Domain Name (FQDN)
+🌐 **Choose your hostname and coordinate with Neologik:**
+   - Decide on the fully qualified domain name for your deployment (e.g., `app.yourcompany.com`)
+   - Share this with Neologik at support@neologik.ai
+   - ⚠️ **Important:** Complete this step before creating your TLS certificate, as the certificate must match your chosen hostname
 
-� **First, create your certificate:**
+### 3. Create and Upload Your TLS Certificate
+
+📋 **First, create your certificate:**
    - Follow the detailed instructions in **[PFX-CERT-GUIDE.md](PFX-CERT-GUIDE.md)**
    - This guide explains how to create a self-signed certificate or convert an existing certificate to .pfx format
+   - **Important:** Use the hostname from Step 2 when creating the certificate
    - You'll need the .pfx file and its password for the next steps
 
 📁 **Then, upload the .pfx file** to the Azure Storage Account:
@@ -172,7 +179,7 @@ The script will display your next steps. You need to:
 4. Click on "certificate" container
 5. Click "Upload" and select your .pfx file
 
-### 3. Store Certificate Password
+### 4. Store Certificate Password
 🔐 Store your certificate PFX password in Key Vault:
    - **Key Vault**: Same as above
    - **Secret Name**: `neologik-deployment-certificate-pfx-secret`
