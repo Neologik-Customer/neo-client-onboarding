@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.2.2
+    v1.2.3
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.2.2'
+$script:Version = 'v1.2.3'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
