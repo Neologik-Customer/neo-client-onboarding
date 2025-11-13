@@ -232,6 +232,19 @@ The script automatically creates resources with names that include your organiza
 
 ---
 
+## After Neologik Deployment
+
+Once you've completed the steps above and Neologik has deployed the environment to your resource group, you'll need to complete the final configuration steps.
+
+📋 **See: [FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md)** for detailed instructions on:
+- Creating DNS A records for your hostname
+- Granting tenant access to the Bot and Admin Tool
+- Uploading and deploying the Teams app to your organization
+
+These final steps will make the application accessible to your users.
+
+---
+
 ## Need Help?
 
 📧 Email: support@neologik.ai  
