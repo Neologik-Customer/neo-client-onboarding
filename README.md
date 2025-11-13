@@ -1,6 +1,6 @@
 # Neologik Customer Onboarding Scripts
 
-**Version:** v1.2.2
+**Version:** v1.2.4
 
 Automated PowerShell scripts for onboarding customers to Neologik AI solution on Azure.
 
@@ -24,27 +24,24 @@ This repository contains a robust PowerShell script that automates the complete 
 - ✅ Comprehensive logging and error handling
 - ✅ Configuration export with script version tracking
 
-## What's New in v1.2.2
+## What's New in v1.2.4
 
-### Enhanced Reliability
-- ✅ **Retry Logic**: Automatic retry for role assignments when Azure AD replication is in progress
-- ✅ **Security Group Roles**: Added retry logic for newly created security group role assignments
-- ✅ **Service Principal Roles**: Added retry logic for subscription and Entra ID role assignments
-- ✅ **Managed Identity Roles**: Existing retry logic for managed identity role assignments
+### Enhanced User Experience
+- ✅ **Organization Name**: Added organization name input for better documentation
+- ✅ **Guest User Support**: Fixed guest user detection and group membership
+- ✅ **Current User ID**: Proper retrieval of current user ID from Microsoft Graph context
+- ✅ **Key Vault Permissions**: Reordered operations to assign permissions before storing secrets
 
-### Improved User Experience
-- ✅ **Re-authentication Prompt**: Option to continue with current login or re-authenticate
-- ✅ **Input Validation**: Comprehensive validation for all configuration parameters
-- ✅ **Version Tracking**: Script version saved to JSON output for audit trail
+### Improved Reliability
+- ✅ **Retry Logic**: Enhanced retry logic for Key Vault secret storage with permission propagation
+- ✅ **Current User Roles**: Assign Key Vault Secrets Officer role to current user first
+- ✅ **Permission Propagation**: Added wait times for role assignment propagation
+- ✅ **Multi-tenant Support**: Better handling of guest users in multi-tenant scenarios
 
-### Naming Consistency
-- ✅ **Organization Code**: All resources include organization code for easy identification
-- ✅ **Environment Type**: Resources include environment type (dev/prd) in names
-- ✅ **Consistent Format**: Standardized naming across all resource types
-
-### Bug Fixes
-- ✅ **Key Vault RBAC**: Fixed compatibility with different Az.KeyVault module versions
-- ✅ **Group Name Matching**: Dynamic group name matching for resources with suffixes
+### JSON Output Improvements
+- ✅ **Ordered Fields**: Structured JSON output with logical field ordering
+- ✅ **Organization Info**: Organization name and code at the top
+- ✅ **Better Organization**: Tenant, subscription, and resource information grouped logically
 
 ## Prerequisites
 

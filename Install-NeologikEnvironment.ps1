@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.2.3
+    v1.2.4
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.2.3'
+$script:Version = 'v1.2.4'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -381,12 +381,18 @@ function Connect-AzureEnvironment {
         }
 
         # Get the actual user ID from Microsoft Graph (works for both member and guest users)
+        # Always retrieve this regardless of whether we just connected or were already connected
         $mgContext = Get-MgContext
-        if ($mgContext.Account) {
-            $currentMgUser = Get-MgUser -UserId $mgContext.Account -ErrorAction SilentlyContinue
-            if ($currentMgUser) {
-                $script:ConfigData['CurrentUserId'] = $currentMgUser.Id
-                Write-Log "Current User ID: $($script:ConfigData['CurrentUserId'])" -Level Info
+        if ($mgContext -and $mgContext.Account) {
+            try {
+                $currentMgUser = Get-MgUser -UserId $mgContext.Account -ErrorAction Stop
+                if ($currentMgUser) {
+                    $script:ConfigData['CurrentUserId'] = $currentMgUser.Id
+                    Write-Log "Current User ID: $($script:ConfigData['CurrentUserId'])" -Level Info
+                }
+            }
+            catch {
+                Write-Log "Warning: Could not retrieve current user ID from Microsoft Graph: $_" -Level Warning
             }
         }
 
@@ -1752,12 +1758,30 @@ function Export-ConfigurationData {
     Write-Log "Exporting configuration data..." -Level Info
 
     try {
-        # Add script version and timestamp
-        $script:ConfigData['ScriptVersion'] = $script:Version
-        $script:ConfigData['GeneratedAt'] = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        # Create ordered output with specific field order
+        $orderedConfig = [ordered]@{
+            'ScriptVersion' = $script:Version
+            'GeneratedAt' = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+            'OrganizationName' = $script:OrganizationName
+            'OrganizationCode' = $script:OrganizationCode
+            'TenantName' = $script:ConfigData['TenantName']
+            'TenantId' = $script:ConfigData['TenantId']
+            'SubscriptionName' = $script:ConfigData['SubscriptionName']
+            'SubscriptionId' = $script:ConfigData['SubscriptionId']
+            'ResourceGroupName' = $script:ConfigData['ResourceGroupName']
+            'UserAccount' = $script:ConfigData['UserAccount']
+            'AzureRegion' = $script:ConfigData['AzureRegion']
+            'InvitedGuestUsers' = $script:ConfigData['InvitedGuestUsers']
+            'SecurityGroups' = $script:ConfigData['SecurityGroups']
+            'AppRegistration' = $script:ConfigData['AppRegistration']
+            'KeyVault' = $script:ConfigData['KeyVault']
+            'StorageAccount' = $script:ConfigData['StorageAccount']
+            'ManagedIdentities' = $script:ConfigData['ManagedIdentities']
+            'RoleAssignments' = $script:ConfigData['RoleAssignments']
+        }
 
         # Export to JSON
-        $script:ConfigData | ConvertTo-Json -Depth 10 | Out-File -FilePath $script:OutputFile -Encoding UTF8
+        $orderedConfig | ConvertTo-Json -Depth 10 | Out-File -FilePath $script:OutputFile -Encoding UTF8
         Write-Log "Configuration exported to: $script:OutputFile" -Level Success
 
         # Display summary
@@ -2029,6 +2053,22 @@ function Start-NeologikOnboarding {
         Write-Host "║                                                               ║" -ForegroundColor Magenta
         Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Magenta
 
+        # Get Organization Name
+        Write-Host ""
+        Write-Host "Organization Name (full company name):" -ForegroundColor Cyan
+        Write-Host "  Example: Contoso Ltd, Acme Corporation" -ForegroundColor Gray
+        Write-Host "  Enter organization name: " -NoNewline -ForegroundColor Gray
+        $orgNameInput = Read-Host
+
+        while ([string]::IsNullOrWhiteSpace($orgNameInput)) {
+            Write-Host "  Organization name is required. Please enter a name: " -NoNewline -ForegroundColor Yellow
+            $orgNameInput = Read-Host
+        }
+
+        $script:OrganizationName = $orgNameInput.Trim()
+        Write-Host "  ✓ Using: " -NoNewline -ForegroundColor Green
+        Write-Host $script:OrganizationName -ForegroundColor White
+
         # Get Organization Code with validation
         $orgCodeValid = $false
         while (-not $orgCodeValid) {
@@ -2225,6 +2265,7 @@ function Start-NeologikOnboarding {
         Write-Host "  Logged in User:       " -NoNewline; Write-Host $script:ConfigData['UserAccount'] -ForegroundColor Yellow
         Write-Host "  Tenant ID:            " -NoNewline; Write-Host $script:ConfigData['TenantId'] -ForegroundColor Yellow
         Write-Host "  Subscription Name:    " -NoNewline; Write-Host $script:ConfigData['SubscriptionName'] -ForegroundColor Yellow
+        Write-Host "  Organization Name:    " -NoNewline; Write-Host $script:OrganizationName -ForegroundColor Yellow
         Write-Host "  Organization Code:    " -NoNewline; Write-Host $script:OrganizationCode -ForegroundColor Yellow
         Write-Host "  Environment Type:     " -NoNewline; Write-Host $script:EnvironmentType -ForegroundColor Yellow
         Write-Host "  Environment Index:    " -NoNewline; Write-Host $script:EnvironmentIndex -ForegroundColor Yellow

@@ -56,26 +56,30 @@ The script will ask you several questions. For each one:
 
 Questions you'll be asked:
 
-1. **Organization Code**: Your 3-letter company code (e.g., "ABC")
+1. **Organization Name**: Your full company name (e.g., "Contoso Ltd", "Acme Corporation")
+   - This is required and cannot be empty
+   - Used for documentation and identification
+
+2. **Organization Code**: Your 3-letter company code (e.g., "ABC")
    - Must be **exactly 3 characters**
    - Only letters and numbers allowed
    - The script will keep asking until you enter a valid code
 
-2. **Environment Type**: `dev` for development or `prd` for production
+3. **Environment Type**: `dev` for development or `prd` for production
    - Must be either `dev` or `prd`
    - The script will keep asking until you enter a valid type
 
-3. **Azure Region**: Where to create resources (e.g., "uksouth", "eastus")
+4. **Azure Region**: Where to create resources (e.g., "uksouth", "eastus")
    - Must be a valid Azure region name
    - Common options: uksouth, ukwest, eastus, westus, northeurope, westeurope
    - The script will keep asking until you enter a valid region
 
-4. **Environment Index**: Number for this environment (01, 02, etc.)
+5. **Environment Index**: Number for this environment (01, 02, etc.)
    - Use default "01" for first setup
    - Must be a number between 01 and 99
    - The script will keep asking until you enter a valid number
 
-5. **Resource Group Name**: Where resources will be organized
+6. **Resource Group Name**: Where resources will be organized
    - Default follows Azure naming conventions
    - Can contain letters, numbers, underscores, hyphens, periods, and parentheses
    - Cannot end with a period
