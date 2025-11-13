@@ -358,10 +358,40 @@ function Connect-AzureEnvironment {
 
         # Store context information
         $script:ConfigData['TenantId'] = $azContext.Context.Tenant.Id
-        $script:ConfigData['TenantName'] = $azContext.Context.Tenant.Directory
+        
+        # Try to get tenant name from different sources
+        $tenantName = $null
+        if ($azContext.Context.Tenant.Directory) {
+            $tenantName = $azContext.Context.Tenant.Directory
+        }
+        elseif ($azContext.Context.Account.ExtendedProperties.HomeAccountId) {
+            # Extract domain from HomeAccountId (format: objectid.tenantid@domain)
+            $homeAccountId = $azContext.Context.Account.ExtendedProperties.HomeAccountId
+            if ($homeAccountId -match '@(.+)$') {
+                $tenantName = $matches[1]
+            }
+        }
+        
+        # If still null, try to get from Microsoft Graph
+        if (-not $tenantName) {
+            try {
+                $tenant = Get-MgOrganization -ErrorAction Stop | Select-Object -First 1
+                if ($tenant) {
+                    $tenantName = if ($tenant.DisplayName) { $tenant.DisplayName } else { $tenant.VerifiedDomains[0].Name }
+                }
+            }
+            catch {
+                Write-Log "Could not retrieve tenant name from Microsoft Graph" -Level Warning
+            }
+        }
+        
+        $script:ConfigData['TenantName'] = $tenantName
         $script:ConfigData['UserAccount'] = $azContext.Context.Account.Id
 
         Write-Log "Tenant ID: $($script:ConfigData['TenantId'])" -Level Info
+        if ($tenantName) {
+            Write-Log "Tenant Name: $tenantName" -Level Info
+        }
         Write-Log "User Account: $($script:ConfigData['UserAccount'])" -Level Info
 
         # Check if already connected to Microsoft Graph
@@ -381,19 +411,28 @@ function Connect-AzureEnvironment {
         }
 
         # Get the actual user ID from Microsoft Graph (works for both member and guest users)
-        # Always retrieve this regardless of whether we just connected or were already connected
-        $mgContext = Get-MgContext
-        if ($mgContext -and $mgContext.Account) {
+        # Use the UserAccount from Azure context since MgContext.Account may be empty
+        $userIdentifier = $script:ConfigData['UserAccount']
+        
+        if ($userIdentifier) {
             try {
-                $currentMgUser = Get-MgUser -UserId $mgContext.Account -ErrorAction Stop
+                Write-Log "Attempting to retrieve user ID for: $userIdentifier" -Level Info
+                $currentMgUser = Get-MgUser -UserId $userIdentifier -ErrorAction Stop
                 if ($currentMgUser) {
                     $script:ConfigData['CurrentUserId'] = $currentMgUser.Id
-                    Write-Log "Current User ID: $($script:ConfigData['CurrentUserId'])" -Level Info
+                    Write-Log "Current User ID retrieved successfully: $($script:ConfigData['CurrentUserId'])" -Level Success
+                }
+                else {
+                    Write-Log "Warning: Get-MgUser returned null for $userIdentifier" -Level Warning
                 }
             }
             catch {
-                Write-Log "Warning: Could not retrieve current user ID from Microsoft Graph: $_" -Level Warning
+                Write-Log "Could not retrieve user ID by email (this is normal for guest users): $($_.Exception.Message)" -Level Warning
+                Write-Log "The logged-in user will not be automatically added to security groups, but guest users are already added by email." -Level Info
             }
+        }
+        else {
+            Write-Log "WARNING: UserAccount not found in ConfigData" -Level Warning
         }
 
         return $azContext
@@ -1997,7 +2036,8 @@ function Start-NeologikOnboarding {
                 Write-Host "$($currentContext.Subscription.Name)" -ForegroundColor Cyan
             }
             Write-Host ""
-            Write-Host "Do you want to re-authenticate to Azure? (Y/N): " -NoNewline -ForegroundColor Yellow
+            Write-Host "Do you want to re-authenticate to Azure? (default: N)" -ForegroundColor Yellow
+            Write-Host "  Your choice (N/Y): " -NoNewline -ForegroundColor Yellow
             $reauth = Read-Host
             
             if ($reauth -eq 'Y' -or $reauth -eq 'y') {
