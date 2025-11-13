@@ -38,7 +38,18 @@ cd C:\Downloads
 ```
 (Change the path if you saved the file somewhere else)
 
-### 4. Run the Script
+### 4. Allow Script Execution
+
+Before running the script, you need to allow PowerShell to execute it. Type this command:
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+Press **Enter**
+
+This allows the script to run in the current PowerShell session only and is safe.
+
+### 5. Run the Script
 
 Type this command:
 ```powershell
@@ -47,7 +58,7 @@ Type this command:
 
 Press **Enter**
 
-### 5. Answer the Configuration Questions
+### 6. Answer the Configuration Questions
 
 The script will ask you several questions. For each one:
 - You'll see a **default value** in yellow
@@ -84,7 +95,7 @@ Questions you'll be asked:
    - Can contain letters, numbers, underscores, hyphens, periods, and parentheses
    - Cannot end with a period
 
-### 6. Confirm and Continue
+### 7. Confirm and Continue
 
 After answering the questions, you'll see a summary. Press **Enter** to continue.
 
