@@ -3,8 +3,10 @@
 ## What You Need Before Starting
 
 ✅ **Your Azure account** with these permissions:
-   - Subscription Owner
-   - Global Administrator
+   - **Owner** role at the subscription level (not just "Contributor")
+   - **Global Administrator** role in Azure AD (Entra ID)
+
+⚠️ **Important**: The "Owner" role is required to assign role-based access control (RBAC) permissions. "Subscription Owner" or "Contributor" roles alone are not sufficient.
 
 ✅ **Administrator access** on your Windows computer
 

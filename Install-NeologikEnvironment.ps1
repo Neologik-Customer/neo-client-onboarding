@@ -1181,7 +1181,20 @@ function Set-AppRegistrationRoles {
                         $roleAssigned = $true
                     }
                     catch {
-                        if ($_.Exception.Message -match "does not exist|cannot be found|BadRequest") {
+                        # Check if it's a permission error (Forbidden)
+                        if ($_.Exception.Message -match "Forbidden|not authorized") {
+                            Write-Log "ERROR: Insufficient permissions to assign $roleName role" -Level Error
+                            Write-Log "You need to be an Owner at the subscription level to assign this role" -Level Error
+                            
+                            if ($roleName -eq 'User Access Administrator') {
+                                Write-Log "User Access Administrator role assignment failed - this role may need to be assigned manually by a subscription Owner" -Level Warning
+                                $roleAssigned = $true  # Mark as handled to continue
+                            }
+                            else {
+                                throw  # Contributor role is essential
+                            }
+                        }
+                        elseif ($_.Exception.Message -match "does not exist|cannot be found|BadRequest") {
                             $retryCount++
                             if ($retryCount -lt $maxRetries) {
                                 Write-Log "Service Principal not yet replicated. Retrying in 10 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning

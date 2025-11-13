@@ -56,8 +56,9 @@ This repository contains a robust PowerShell script that automates the complete 
 - **Azure Tenant**: Active Azure AD (Entra ID) tenant
 - **Subscription**: Azure subscription with appropriate billing setup
 - **User Permissions**: 
-  - **Subscription Owner** role on the target subscription
+  - **Owner** role at the subscription level (required for RBAC assignments)
   - **Global Administrator** role in Azure AD (Entra ID)
+  - Note: "Contributor" or "Co-Administrator" roles are insufficient for role assignments
 
 ### Network Requirements
 
