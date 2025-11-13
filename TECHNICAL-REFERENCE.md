@@ -205,12 +205,14 @@ The script will keep prompting until valid input is provided, ensuring all resou
 
 All resources are named to include your organization code and environment type for easy identification:
 
+- **Resource Group**: `rg-neo-<org>-<env>-<region>-<index>` (e.g., rg-neo-abc-dev-uks-01)
+  - **paramSolutionName**: `neo-<org>-<env>-<region>-<index>` (e.g., neo-abc-dev-uks-01)
+  - **paramSolutionShortName** (no hyphens): `neo<org><env><region><index>` (e.g., neoabcdevuks01)
 - **Security Groups**: `Neologik [Type] Group - abc-dev`
 - **App Registration**: `Neologik GitHub Service Connection - abc-dev`
 - **Managed Identities**: `neologik-[type]-abc-dev`
 - **Key Vault**: `kvneodeploy<org><env><region><index>` (e.g., kvneodeployabcdevuks01)
 - **Storage Account**: `stneodeploy<org><env><region><index>` (e.g., stneodeployabcdevuks01)
-- **Resource Group**: `rg-neo-<org>-<env>-<region>-<index>` (e.g., rg-neo-abc-dev-uks-01)
 
 This naming convention makes it easy to identify which customer and environment each resource belongs to.
 

@@ -1844,6 +1844,8 @@ function Export-ConfigurationData {
             'SubscriptionName' = $script:ConfigData['SubscriptionName']
             'SubscriptionId' = $script:ConfigData['SubscriptionId']
             'ResourceGroupName' = $script:ConfigData['ResourceGroupName']
+            'SolutionName' = $script:ConfigData['SolutionName']
+            'SolutionShortName' = $script:ConfigData['SolutionShortName']
             'UserAccount' = $script:ConfigData['UserAccount']
             'AzureRegion' = $script:ConfigData['AzureRegion']
             'InvitedGuestUsers' = $script:ConfigData['InvitedGuestUsers']
@@ -2328,6 +2330,10 @@ function Start-NeologikOnboarding {
                 Write-Host "  ✓ Using: $rgInput" -ForegroundColor Green
             }
         }
+
+        # Calculate solution names based on configuration
+        $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode.ToLower())-$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
+        $script:ConfigData['SolutionShortName'] = "neo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
 
         # Display summary
         Write-Host "`n╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
