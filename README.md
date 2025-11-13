@@ -220,43 +220,6 @@ The script will display your next steps. You need to:
 
 ---
 
-## What Gets Created
-
-The script automatically creates resources with names that include your organization code and environment type for easy identification:
-
-✅ **Security Groups** (3 groups)
-   - Neologik User Group - abc-dev
-   - Neologik NCE User Group - abc-dev
-   - Neologik Admin User Group - abc-dev
-
-✅ **App Registration** for GitHub deployments
-   - Name: Neologik GitHub Service Connection - abc-dev
-   - Client secret stored in Key Vault automatically
-   - Subscription roles: Contributor, User Access Administrator
-   - Entra ID role: Application Administrator
-
-✅ **Key Vault** for storing secrets
-   - Name: kvneodeployabcdevuks01
-   - Uses Microsoft Entra ID RBAC authorization
-   - Service principal secret stored automatically
-   - Permissions: Key Vault Secrets Officer role assigned
-
-✅ **Storage Account** for certificates
-   - Name: stneodeployabcdevuks01
-   - Uses Microsoft Entra ID authentication (no access keys)
-   - Blob container named "certificate"
-   - Permissions: Storage Blob Data Contributor role assigned
-
-✅ **Managed Identities** (2 identities)
-   - **Script Runner Service Connection**: neologik-script-runner-service-connection-abc-dev
-     - Subscription role: Contributor
-     - Entra ID role: Application Administrator
-   - **SQL Managed Identity**: neologik-sql-managed-identity-abc-dev
-     - Subscription roles: None
-     - Entra ID role: Directory Readers
-
----
-
 ## After Neologik Deployment
 
 Once you've completed the steps above and Neologik has deployed the environment to your resource group, you'll need to complete the final configuration steps.
