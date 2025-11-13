@@ -79,7 +79,9 @@ Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) ten
 #### A. Grant Access to Bot Application
 
 1. **Open the Bot consent URL** provided by Neologik in your browser
-   - Example format: `https://login.microsoftonline.com/{tenant-id}/adminconsent?client_id={bot-app-id}`
+   - Format: `https://login.microsoftonline.com/{tenant-id}/adminconsent?client_id={bot-id}`
+   - `{tenant-id}` = Your Azure tenant ID (from the JSON configuration file)
+   - `{bot-id}` = Bot application ID provided by Neologik
 
 2. **Sign in** with your Global Administrator or Cloud Application Administrator account
 
@@ -95,7 +97,9 @@ Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) ten
 #### B. Grant Access to NCE Admin Tool Application
 
 1. **Open the Admin Tool consent URL** provided by Neologik in your browser
-   - Example format: `https://login.microsoftonline.com/{tenant-id}/adminconsent?client_id={admin-app-id}`
+   - Format: `https://login.microsoftonline.com/{tenant-id}/adminconsent?client_id={nce-admin-id}`
+   - `{tenant-id}` = Your Azure tenant ID (same as above)
+   - `{nce-admin-id}` = NCE Admin Tool application ID provided by Neologik
 
 2. **Sign in** with your Global Administrator or Cloud Application Administrator account
 
