@@ -380,6 +380,16 @@ function Connect-AzureEnvironment {
             Write-Log "Connected to Microsoft Graph" -Level Success
         }
 
+        # Get the actual user ID from Microsoft Graph (works for both member and guest users)
+        $mgContext = Get-MgContext
+        if ($mgContext.Account) {
+            $currentMgUser = Get-MgUser -UserId $mgContext.Account -ErrorAction SilentlyContinue
+            if ($currentMgUser) {
+                $script:ConfigData['CurrentUserId'] = $currentMgUser.Id
+                Write-Log "Current User ID: $($script:ConfigData['CurrentUserId'])" -Level Info
+            }
+        }
+
         return $azContext
     }
     catch {
@@ -812,15 +822,21 @@ function New-NeologikSecurityGroups {
             # Add the logged-in user to the group
             Write-Log "Adding logged-in user to group: $($groupDef.Name)..." -Level Info
             try {
-                $currentUser = Get-MgUser -UserId $script:ConfigData['UserAccount'] -ErrorAction Stop
-                $isMember = Get-MgGroupMember -GroupId $group.Id -Filter "id eq '$($currentUser.Id)'" -ErrorAction SilentlyContinue
+                # Use the stored user ID which works for both member and guest users
+                if ($script:ConfigData['CurrentUserId']) {
+                    $currentUserId = $script:ConfigData['CurrentUserId']
+                    $isMember = Get-MgGroupMember -GroupId $group.Id -Filter "id eq '$currentUserId'" -ErrorAction SilentlyContinue
 
-                if ($isMember) {
-                    Write-Log "Logged-in user $($script:ConfigData['UserAccount']) is already a member of $($groupDef.Name)" -Level Info
+                    if ($isMember) {
+                        Write-Log "Logged-in user is already a member of $($groupDef.Name)" -Level Info
+                    }
+                    else {
+                        New-MgGroupMember -GroupId $group.Id -DirectoryObjectId $currentUserId -ErrorAction Stop
+                        Write-Log "Added logged-in user to $($groupDef.Name)" -Level Success
+                    }
                 }
                 else {
-                    New-MgGroupMember -GroupId $group.Id -DirectoryObjectId $currentUser.Id -ErrorAction Stop
-                    Write-Log "Added logged-in user $($script:ConfigData['UserAccount']) to $($groupDef.Name)" -Level Success
+                    Write-Log "Warning: Could not determine current user ID, skipping group membership" -Level Warning
                 }
             }
             catch {
@@ -1290,21 +1306,33 @@ function New-NeologikKeyVault {
             $keyVault = Get-AzKeyVault -ResourceGroupName $ResourceGroupName -VaultName $KeyVaultName
         }
 
-        # Store the client secret
-        Write-Log "Storing service principal client secret in Key Vault..." -Level Info
-        $secretName = "neologik-deployment-service-principle-secret"
-        
-        $secureSecret = ConvertTo-SecureString -String $ClientSecret -AsPlainText -Force
-        $null = Set-AzKeyVaultSecret -VaultName $KeyVaultName `
-            -Name $secretName `
-            -SecretValue $secureSecret `
-            -ErrorAction Stop
-
-        Write-Log "Client secret stored successfully as '$secretName'" -Level Success
-
         # Get resource group scope for role assignments
         $resourceGroup = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction Stop
         $rgScope = $resourceGroup.ResourceId
+
+        # Assign Key Vault Secrets Officer role to current user FIRST (so we can store secrets)
+        Write-Log "Assigning Key Vault Secrets Officer role to current user..." -Level Info
+        if ($script:ConfigData['CurrentUserId']) {
+            $existingUserAssignment = Get-AzRoleAssignment -ObjectId $script:ConfigData['CurrentUserId'] `
+                -RoleDefinitionName 'Key Vault Secrets Officer' `
+                -Scope $rgScope `
+                -ErrorAction SilentlyContinue
+
+            if (-not $existingUserAssignment) {
+                New-AzRoleAssignment -ObjectId $script:ConfigData['CurrentUserId'] `
+                    -RoleDefinitionName 'Key Vault Secrets Officer' `
+                    -Scope $rgScope `
+                    -ErrorAction Stop | Out-Null
+                Write-Log "Key Vault Secrets Officer role assigned to current user" -Level Success
+                
+                # Wait for role propagation
+                Write-Log "Waiting 15 seconds for role assignment to propagate..." -Level Info
+                Start-Sleep -Seconds 15
+            }
+            else {
+                Write-Log "Current user already has Key Vault Secrets Officer role" -Level Info
+            }
+        }
 
         # Assign Key Vault Secrets Officer role to Neologik Admin User Group at Resource Group level
         $adminGroup = $SecurityGroups | Where-Object { $_.Name -like 'Neologik Admin User Group*' }
@@ -1327,6 +1355,42 @@ function New-NeologikKeyVault {
                     -ErrorAction Stop | Out-Null
 
                 Write-Log "Key Vault Secrets Officer role assigned to $($adminGroup.Name) at Resource Group level successfully" -Level Success
+            }
+        }
+
+        # Now store the client secret (with retry for permission propagation)
+        Write-Log "Storing service principal client secret in Key Vault..." -Level Info
+        $secretName = "neologik-deployment-service-principle-secret"
+        
+        $retryCount = 0
+        $maxRetries = 5
+        $secretStored = $false
+
+        while (-not $secretStored -and $retryCount -lt $maxRetries) {
+            try {
+                $secureSecret = ConvertTo-SecureString -String $ClientSecret -AsPlainText -Force
+                $null = Set-AzKeyVaultSecret -VaultName $KeyVaultName `
+                    -Name $secretName `
+                    -SecretValue $secureSecret `
+                    -ErrorAction Stop
+
+                Write-Log "Client secret stored successfully as '$secretName'" -Level Success
+                $secretStored = $true
+            }
+            catch {
+                if ($_.Exception.Message -match "Forbidden|not authorized") {
+                    $retryCount++
+                    if ($retryCount -lt $maxRetries) {
+                        Write-Log "Permission not yet propagated. Retrying in 10 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
+                        Start-Sleep -Seconds 10
+                    }
+                    else {
+                        throw
+                    }
+                }
+                else {
+                    throw
+                }
             }
         }
 
