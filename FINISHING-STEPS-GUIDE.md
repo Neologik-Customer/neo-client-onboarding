@@ -18,7 +18,7 @@ Before starting these steps, ensure:
   - Microsoft Teams app package file (.zip)
 - ✅ You have the necessary permissions:
   - DNS management access for your domain
-  - Global Administrator or Cloud Application Administrator role in Azure AD (Entra ID)
+  - Global Administrator or Privileged Role Administrator role in Azure AD (Entra ID)
   - Teams Administrator role in Microsoft 365 Admin Center
 
 ---
@@ -72,7 +72,11 @@ Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) ten
 - **Two URLs** provided by Neologik for:
   1. Bot application consent
   2. Admin Tool application consent
-- **Global Administrator** or **Cloud Application Administrator** permissions
+- **Required Entra ID Roles** (any one of the following):
+  - ✅ **Global Administrator** (recommended)
+  - ✅ **Privileged Role Administrator**
+
+> **Note**: Global Administrator has the broadest permissions and is recommended for initial setup.
 
 ### Instructions
 
@@ -83,7 +87,7 @@ Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) ten
    - `{tenant-id}` = Your Azure tenant ID (from the JSON configuration file)
    - `{bot-id}` = Bot application ID provided by Neologik
 
-2. **Sign in** with your Global Administrator or Cloud Application Administrator account
+2. **Sign in** with your Global Administrator or Privileged Role Administrator account
 
 3. **Review the requested permissions:**
    - Read user profiles
@@ -101,7 +105,7 @@ Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) ten
    - `{tenant-id}` = Your Azure tenant ID (same as above)
    - `{nce-admin-id}` = NCE Admin Tool application ID provided by Neologik
 
-2. **Sign in** with your Global Administrator or Cloud Application Administrator account
+2. **Sign in** with your Global Administrator or Privileged Role Administrator account
 
 3. **Review the requested permissions:**
    - Manage application settings
