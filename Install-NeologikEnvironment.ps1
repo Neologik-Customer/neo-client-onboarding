@@ -1329,6 +1329,10 @@ function Set-AppRegistrationRoles {
         return $true
     }
     catch {
+        # If it's a permission error, it's already been logged with formatted message
+        if ($_.Exception.Message -match "Insufficient permissions:") {
+            throw  # Re-throw without adding more text
+        }
         Write-Log "Failed to assign roles to App Registration: $_" -Level Error
         throw
     }
