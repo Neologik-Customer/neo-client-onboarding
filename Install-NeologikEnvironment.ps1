@@ -1221,16 +1221,46 @@ function Set-AppRegistrationRoles {
         # Assign Entra ID role (Application Administrator)
         Write-Log "Assigning Application Administrator role in Entra ID..." -Level Info
         
-        Import-Module Microsoft.Graph.Identity.DirectoryManagement -ErrorAction Stop
-        
-        $appAdminRole = Get-MgDirectoryRole -Filter "displayName eq 'Application Administrator'" -ErrorAction SilentlyContinue
-        
-        if (-not $appAdminRole) {
-            $roleTemplate = Get-MgDirectoryRoleTemplate -Filter "displayName eq 'Application Administrator'"
-            $appAdminRole = New-MgDirectoryRole -RoleTemplateId $roleTemplate.Id
-        }
+        try {
+            Import-Module Microsoft.Graph.Identity.DirectoryManagement -ErrorAction Stop
+            
+            $appAdminRole = Get-MgDirectoryRole -Filter "displayName eq 'Application Administrator'" -ErrorAction SilentlyContinue
+            
+            if (-not $appAdminRole) {
+                $roleTemplate = Get-MgDirectoryRoleTemplate -Filter "displayName eq 'Application Administrator'" -ErrorAction Stop
+                if (-not $roleTemplate) {
+                    throw "InsufficientPermissions"
+                }
+                $appAdminRole = New-MgDirectoryRole -RoleTemplateId $roleTemplate.Id -ErrorAction Stop
+            }
 
-        $existingRoleMember = Get-MgDirectoryRoleMember -DirectoryRoleId $appAdminRole.Id | Where-Object { $_.Id -eq $ServicePrincipalId }
+            if (-not $appAdminRole -or [string]::IsNullOrEmpty($appAdminRole.Id)) {
+                throw "InsufficientPermissions"
+            }
+
+            $existingRoleMember = Get-MgDirectoryRoleMember -DirectoryRoleId $appAdminRole.Id -ErrorAction SilentlyContinue | Where-Object { $_.Id -eq $ServicePrincipalId }
+        }
+        catch {
+            if ($_.Exception.Message -match "InsufficientPermissions|Insufficient privileges|Authorization_RequestDenied|Forbidden") {
+                Write-Log "ERROR: Insufficient permissions to assign Application Administrator role" -Level Error
+                Write-Log "Required Permission: Global Administrator or Privileged Role Administrator role in Entra ID" -Level Error
+                Write-Host "`n❌ PERMISSION ERROR" -ForegroundColor Red
+                Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Red
+                Write-Host ""
+                Write-Host "You do not have sufficient permissions to complete this setup." -ForegroundColor Yellow
+                Write-Host ""
+                Write-Host "Required Permissions:" -ForegroundColor Cyan
+                Write-Host "  ✓ Owner role at subscription level" -ForegroundColor Gray
+                Write-Host "  ✗ Global Administrator role in Entra ID (MISSING)" -ForegroundColor Red
+                Write-Host ""
+                Write-Host "Please contact a user with Global Administrator permissions to run this script." -ForegroundColor Yellow
+                Write-Host ""
+                throw "Insufficient permissions: Global Administrator role required"
+            }
+            else {
+                throw
+            }
+        }
 
         if ($existingRoleMember) {
             Write-Log "Application Administrator role already assigned" -Level Info
