@@ -2460,17 +2460,14 @@ function Start-NeologikOnboarding {
         Write-Log "Neologik onboarding completed successfully!" -Level Success
     }
     catch {
-        # Check if this is a permission error (already displayed formatted message)
+        Write-Log "Onboarding failed: $_" -Level Error
+        Write-Log "Stack Trace: $($_.ScriptStackTrace)" -Level Error
+        
+        # Check if this is a permission error to set appropriate exit code
         if ($_.Exception.Message -match "Insufficient permissions:|ERROR: Insufficient permissions") {
-            Write-Log "Onboarding stopped due to insufficient permissions" -Level Error
-            Write-Log "Stack Trace: $($_.ScriptStackTrace)" -Level Error
-            # Don't show generic error message - permission error was already displayed
             exit 2  # Exit code 2 = Permission error
         }
         else {
-            Write-Log "Onboarding failed: $_" -Level Error
-            Write-Log "Stack Trace: $($_.ScriptStackTrace)" -Level Error
-            
             Write-Host "`n❌ Onboarding failed. Please check the log file for details:" -ForegroundColor Red
             Write-Host "   $script:LogFile" -ForegroundColor Yellow
             Write-Host ""
