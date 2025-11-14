@@ -1241,7 +1241,7 @@ function Set-AppRegistrationRoles {
             $existingRoleMember = Get-MgDirectoryRoleMember -DirectoryRoleId $appAdminRole.Id -ErrorAction SilentlyContinue | Where-Object { $_.Id -eq $ServicePrincipalId }
         }
         catch {
-            if ($_.Exception.Message -match "InsufficientPermissions|Insufficient privileges|Authorization_RequestDenied|Forbidden") {
+            if ($_.Exception.Message -match "InsufficientPermissions|Insufficient privileges|Authorization_RequestDenied|Forbidden|Request_UnsupportedQuery|BadRequest") {
                 Write-Log "ERROR: Insufficient permissions to assign Application Administrator role" -Level Error
                 Write-Log "Required Permission: Global Administrator or Privileged Role Administrator role in Entra ID" -Level Error
                 Write-Host "`n❌ PERMISSION ERROR" -ForegroundColor Red
