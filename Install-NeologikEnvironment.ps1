@@ -1714,12 +1714,22 @@ function New-NeologikManagedIdentities {
             else {
                 Write-Log "Creating Managed Identity: $displayName..." -Level Info
                 
-                $mi = New-AzUserAssignedIdentity -ResourceGroupName $ResourceGroupName `
-                    -Name $miDef.Name `
-                    -Location $Location `
-                    -ErrorAction Stop
+                try {
+                    $mi = New-AzUserAssignedIdentity -ResourceGroupName $ResourceGroupName `
+                        -Name $miDef.Name `
+                        -Location $Location `
+                        -ErrorAction Stop
 
-                Write-Log "Managed Identity created successfully (Principal ID: $($mi.PrincipalId))" -Level Success
+                    Write-Log "Managed Identity created successfully (Principal ID: $($mi.PrincipalId))" -Level Success
+                }
+                catch {
+                    Write-Log "ERROR: Failed to create Managed Identity '$displayName'" -Level Error
+                    Write-Log "Error details: $($_.Exception.Message)" -Level Error
+                    if ($_.Exception.InnerException) {
+                        Write-Log "Inner exception: $($_.Exception.InnerException.Message)" -Level Error
+                    }
+                    throw
+                }
             }
 
             # Assign subscription roles
