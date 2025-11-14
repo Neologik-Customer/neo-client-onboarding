@@ -2461,7 +2461,7 @@ function Start-NeologikOnboarding {
     }
     catch {
         # Check if this is a permission error (already displayed formatted message)
-        if ($_.Exception.Message -match "Insufficient permissions:") {
+        if ($_.Exception.Message -match "Insufficient permissions:|ERROR: Insufficient permissions") {
             Write-Log "Onboarding stopped due to insufficient permissions" -Level Error
             Write-Log "Stack Trace: $($_.ScriptStackTrace)" -Level Error
             # Don't show generic error message - permission error was already displayed
