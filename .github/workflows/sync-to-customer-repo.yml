@@ -60,6 +60,13 @@ jobs:
         env:
           CUSTOMER_REPO_TOKEN: ${{ secrets.CUSTOMER_REPO_TOKEN }}
         run: |
+          # Debug: Check if token is available (without exposing it)
+          if [ -z "$CUSTOMER_REPO_TOKEN" ]; then
+            echo "ERROR: CUSTOMER_REPO_TOKEN secret is not set or is empty"
+            exit 1
+          fi
+          echo "Token is available (length: ${#CUSTOMER_REPO_TOKEN})"
+          
           git remote add customer https://x-access-token:${CUSTOMER_REPO_TOKEN}@github.com/Neologik-Customer/neo-client-onboarding.git
           git push customer main --force
           git push customer --tags
