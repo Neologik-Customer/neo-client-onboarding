@@ -31,6 +31,8 @@ This script creates resources and assigns permissions for Neologik deployment in
 
 ---
 
+## Changes Applied by Script
+
 ## 1. Guest User Invitations (Entra ID)
 
 **Action:** Invite 5 Neologik users as B2B guests (if not already invited)
