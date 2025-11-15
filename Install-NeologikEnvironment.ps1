@@ -361,10 +361,25 @@ function Connect-AzureEnvironment {
         
         # Try to get tenant name from different sources
         $tenantName = $null
-        if ($azContext.Context.Tenant.Directory) {
+        
+        # First, try Get-AzTenant which is most reliable
+        try {
+            $tenant = Get-AzTenant -TenantId $azContext.Context.Tenant.Id -ErrorAction Stop
+            if ($tenant -and $tenant.Name) {
+                $tenantName = $tenant.Name
+            }
+        }
+        catch {
+            Write-Log "Could not retrieve tenant name from Get-AzTenant" -Level Warning
+        }
+        
+        # Fallback: Try tenant context property
+        if (-not $tenantName -and $azContext.Context.Tenant.Directory) {
             $tenantName = $azContext.Context.Tenant.Directory
         }
-        elseif ($azContext.Context.Account.ExtendedProperties.HomeAccountId) {
+        
+        # Fallback: Extract from HomeAccountId
+        if (-not $tenantName -and $azContext.Context.Account.ExtendedProperties.HomeAccountId) {
             # Extract domain from HomeAccountId (format: objectid.tenantid@domain)
             $homeAccountId = $azContext.Context.Account.ExtendedProperties.HomeAccountId
             if ($homeAccountId -match '@(.+)$') {
@@ -372,12 +387,12 @@ function Connect-AzureEnvironment {
             }
         }
         
-        # If still null, try to get from Microsoft Graph
+        # Fallback: Try Microsoft Graph
         if (-not $tenantName) {
             try {
-                $tenant = Get-MgOrganization -ErrorAction Stop | Select-Object -First 1
-                if ($tenant) {
-                    $tenantName = if ($tenant.DisplayName) { $tenant.DisplayName } else { $tenant.VerifiedDomains[0].Name }
+                $mgOrg = Get-MgOrganization -ErrorAction Stop | Select-Object -First 1
+                if ($mgOrg) {
+                    $tenantName = if ($mgOrg.DisplayName) { $mgOrg.DisplayName } else { $mgOrg.VerifiedDomains[0].Name }
                 }
             }
             catch {
