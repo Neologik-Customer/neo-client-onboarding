@@ -425,24 +425,33 @@ function Connect-AzureEnvironment {
             Write-Log "Connected to Microsoft Graph" -Level Success
         }
 
-        # Get the actual user ID from Microsoft Graph (works for both member and guest users)
-        # Use the UserAccount from Azure context since MgContext.Account may be empty
+        # Get the actual user ID from Azure AD (works for both member and guest users)
+        # Use the UserAccount from Azure context
         $userIdentifier = $script:ConfigData['UserAccount']
         
         if ($userIdentifier) {
             try {
                 Write-Log "Attempting to retrieve user ID for: $userIdentifier" -Level Info
-                $currentMgUser = Get-MgUser -UserId $userIdentifier -ErrorAction Stop
-                if ($currentMgUser) {
-                    $script:ConfigData['CurrentUserId'] = $currentMgUser.Id
+                
+                # Try Azure AD first (more reliable, uses ARM authentication)
+                $currentAzUser = Get-AzADUser -UserPrincipalName $userIdentifier -ErrorAction SilentlyContinue
+                
+                if (-not $currentAzUser) {
+                    # Fallback: Try by mail address for guest users
+                    $currentAzUser = Get-AzADUser -Mail $userIdentifier -ErrorAction SilentlyContinue
+                }
+                
+                if ($currentAzUser) {
+                    $script:ConfigData['CurrentUserId'] = $currentAzUser.Id
                     Write-Log "Current User ID retrieved successfully: $($script:ConfigData['CurrentUserId'])" -Level Success
                 }
                 else {
-                    Write-Log "Warning: Get-MgUser returned null for $userIdentifier" -Level Warning
+                    Write-Log "Could not retrieve user ID (this is normal for some guest users)" -Level Warning
+                    Write-Log "The logged-in user will not be automatically added to security groups, but guest users are already added by email." -Level Info
                 }
             }
             catch {
-                Write-Log "Could not retrieve user ID by email (this is normal for guest users): $($_.Exception.Message)" -Level Warning
+                Write-Log "Could not retrieve user ID: $($_.Exception.Message)" -Level Warning
                 Write-Log "The logged-in user will not be automatically added to security groups, but guest users are already added by email." -Level Info
             }
         }
