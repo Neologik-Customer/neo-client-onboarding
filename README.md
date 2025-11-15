@@ -1,5 +1,7 @@
 # Neologik Setup Guide for Customers
 
+> **For IT/Security Review:** See [QUICK-REFERENCE.md](QUICK-REFERENCE.md) for a concise list of all Azure changes and permissions.
+
 ## 📁 Repository Contents
 
 Welcome! This repository contains everything you need to set up your Neologik environment on Azure.
