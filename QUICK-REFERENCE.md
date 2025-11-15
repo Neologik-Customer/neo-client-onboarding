@@ -33,7 +33,7 @@ This script creates resources and assigns permissions for Neologik deployment in
 
 ## Changes Applied by Script
 
-## 1. Guest User Invitations (Entra ID)
+### 1. Guest User Invitations (Entra ID)
 
 **Action:** Invite 5 Neologik users as B2B guests (if not already invited)
 
@@ -47,7 +47,7 @@ This script creates resources and assigns permissions for Neologik deployment in
 
 ---
 
-## 2. Security Groups (Entra ID)
+### 2. Security Groups (Entra ID)
 
 **Action:** Create 3 security groups
 
@@ -61,7 +61,7 @@ This script creates resources and assigns permissions for Neologik deployment in
 
 ---
 
-## 3. Resource Group
+### 3. Resource Group
 
 **Action:** Create resource group
 
@@ -73,7 +73,7 @@ This script creates resources and assigns permissions for Neologik deployment in
 
 ---
 
-## 4. Role Assignments - Security Groups
+### 4. Role Assignments - Security Groups
 
 **Action:** Assign roles to Neologik Admin User Group
 
@@ -83,7 +83,7 @@ This script creates resources and assigns permissions for Neologik deployment in
 
 ---
 
-## 5. App Registration & Service Principal (Entra ID)
+### 5. App Registration & Service Principal (Entra ID)
 
 **Action:** Create app registration for GitHub deployments
 
@@ -106,7 +106,7 @@ This script creates resources and assigns permissions for Neologik deployment in
 
 ---
 
-## 6. Role Assignments - Service Principal
+### 6. Role Assignments - Service Principal
 
 **Action:** Assign roles to service principal
 
@@ -118,7 +118,7 @@ This script creates resources and assigns permissions for Neologik deployment in
 
 ---
 
-## 7. Key Vault
+### 7. Key Vault
 
 **Action:** Create Key Vault with RBAC authorization
 
@@ -143,7 +143,7 @@ This script creates resources and assigns permissions for Neologik deployment in
 
 ---
 
-## 8. Storage Account
+### 8. Storage Account
 
 **Action:** Create storage account for certificate storage
 
@@ -164,7 +164,7 @@ This script creates resources and assigns permissions for Neologik deployment in
 
 ---
 
-## 9. Managed Identities (User-Assigned)
+### 9. Managed Identities (User-Assigned)
 
 **Action:** Create 2 managed identities
 
