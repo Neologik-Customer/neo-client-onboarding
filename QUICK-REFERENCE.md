@@ -3,6 +3,32 @@
 ## Overview
 This script creates resources and assigns permissions for Neologik deployment in a customer's Azure tenant.
 
+**Run:** `.\Install-NeologikEnvironment.ps1` in PowerShell 7 as Administrator
+
+---
+
+## Required Permissions to Run Script
+
+**User must have:**
+- ✅ **Owner** role at subscription level
+- ✅ **Global Administrator** role in Entra ID
+
+**Reason:** Script assigns Azure RBAC roles (requires Owner) and Entra ID directory roles (requires Global Administrator)
+
+---
+
+## Variables Used
+
+- `{org}` = Organization code (3 characters, lowercase)
+- `{env}` = Environment type (`dev` or `prd`)
+- `{region}` = Azure region abbreviation (e.g., `uks`, `eus`)
+- `{index}` = Environment index (e.g., `01`, `02`)
+
+**Example:** Organization "ABC", dev environment, UK South, index 01
+- Resource Group: `rg-neo-abc-dev-uks-01`
+- Key Vault: `kvneodeployabcdevuks01`
+- Storage Account: `stneodeployabcdevuks01`
+
 ---
 
 ## 1. Guest User Invitations (Entra ID)
@@ -187,27 +213,3 @@ This script creates resources and assigns permissions for Neologik deployment in
 | Service Principal (GitHub) | Application Administrator |
 | Managed Identity (Script Runner) | Application Administrator |
 | Managed Identity (SQL) | Directory Readers |
-
----
-
-## Required Permissions to Run Script
-
-**User must have:**
-- ✅ **Owner** role at subscription level
-- ✅ **Global Administrator** role in Entra ID
-
-**Reason:** Script assigns Azure RBAC roles (requires Owner) and Entra ID directory roles (requires Global Administrator)
-
----
-
-## Variables Used
-
-- `{org}` = Organization code (3 characters, lowercase)
-- `{env}` = Environment type (`dev` or `prd`)
-- `{region}` = Azure region abbreviation (e.g., `uks`, `eus`)
-- `{index}` = Environment index (e.g., `01`, `02`)
-
-**Example:** Organization "ABC", dev environment, UK South, index 01
-- Resource Group: `rg-neo-abc-dev-uks-01`
-- Key Vault: `kvneodeployabcdevuks01`
-- Storage Account: `stneodeployabcdevuks01`
