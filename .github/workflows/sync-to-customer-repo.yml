@@ -1,0 +1,24 @@
+name: Sync to Customer Repository
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on version tags like v1.0.0, v1.2.3, etc.
+  workflow_dispatch:  # Allows manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Get full history for proper sync
+          
+      - name: Push to customer repository
+        env:
+          CUSTOMER_REPO_TOKEN: ${{ secrets.CUSTOMER_REPO_TOKEN }}
+        run: |
+          git remote add customer https://x-access-token:${CUSTOMER_REPO_TOKEN}@github.com/Neologik-Customer/neo-client-onboarding.git
+          git push customer main --force
+          git push customer --tags
