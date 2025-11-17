@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.4.1
+    v1.5.2
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.4.1'
+$script:Version = 'v1.5.2'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -460,9 +460,16 @@ function Connect-AzureEnvironment {
         $mgContext = Get-MgContext -ErrorAction SilentlyContinue
         
         if ($mgContext -and $mgContext.TenantId -eq $script:ConfigData['TenantId']) {
-            Write-Log "Already connected to Microsoft Graph" -Level Info
+            Write-Log "Already connected to Microsoft Graph for tenant $($mgContext.TenantId)" -Level Info
+            Write-Host "`n✓ Microsoft Graph: Using existing connection (Account: $($mgContext.Account))`n" -ForegroundColor Green
         }
         else {
+            # Disconnect any existing Graph connection first
+            if ($mgContext) {
+                Write-Log "Disconnecting from existing Microsoft Graph session (different tenant)" -Level Info
+                Disconnect-MgGraph -ErrorAction SilentlyContinue
+            }
+            
             # Connect to Microsoft Graph using device code authentication
             Write-Log "Connecting to Microsoft Graph..." -Level Info
             Write-Host "`nℹ️  Using device code authentication for Microsoft Graph." -ForegroundColor Cyan
