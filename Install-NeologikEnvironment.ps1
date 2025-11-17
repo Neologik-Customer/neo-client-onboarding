@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.6.7
+    v1.6.8
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.6.7'
+$script:Version = 'v1.6.8'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -837,16 +837,19 @@ function Invoke-GuestUserInvitation {
         $invitedUsers = @()
 
         foreach ($email in $GuestEmails) {
-            Write-Log "Processing guest user: $email..." -Level Info
+            Write-Log "Processing user: $email..." -Level Info
 
-            # Check if user already exists
+            # Check if user already exists (either as member or guest)
             $existingUser = Get-MgUser -Filter "mail eq '$email' or userPrincipalName eq '$email'" -ErrorAction SilentlyContinue
 
             if ($existingUser) {
-                Write-Log "Guest user $email already exists (ID: $($existingUser.Id))" -Level Info
+                # Check if user is a member or guest
+                $userType = if ($existingUser.UserType) { $existingUser.UserType } else { "Member" }
+                Write-Log "User $email already exists as $userType (ID: $($existingUser.Id))" -Level Info
                 $invitedUsers += @{
                     Email = $email
                     UserId = $existingUser.Id
+                    UserType = $userType
                     Status = 'AlreadyExists'
                 }
             }
@@ -864,6 +867,7 @@ function Invoke-GuestUserInvitation {
                 $invitedUsers += @{
                     Email = $email
                     UserId = $invitation.InvitedUser.Id
+                    UserType = "Guest"
                     Status = 'Invited'
                 }
             }
