@@ -1,0 +1,63 @@
+NEOLOGIK CUSTOMER ONBOARDING SOFTWARE LICENSE
+
+Copyright (c) 2025 Neologik
+
+GRANT OF LICENSE
+
+Permission is hereby granted to customers of Neologik ("Customers") to use, 
+copy, and execute this software and associated documentation files (the 
+"Software") solely for the purpose of setting up and configuring Neologik 
+services within their own Azure environment.
+
+RESTRICTIONS
+
+1. The Software may only be used by active customers of Neologik who have 
+   entered into a service agreement with Neologik.
+
+2. Customers may not:
+   - Redistribute the Software to third parties
+   - Sublicense the Software
+   - Use the Software for any purpose other than setting up Neologik services
+   - Remove or modify any copyright notices or license terms
+
+3. The Software may not be used by competitors of Neologik or for competitive 
+   analysis purposes.
+
+4. Customers may modify the Software for their internal use only, but modified 
+   versions may not be redistributed.
+
+OWNERSHIP
+
+All rights, title, and interest in and to the Software remain with Neologik. 
+This license does not grant any ownership rights to the Software.
+
+SUPPORT
+
+Support for the Software is provided to Customers as part of their service 
+agreement with Neologik. Contact support@neologik.ai for assistance.
+
+TERMINATION
+
+This license automatically terminates if the Customer's service agreement with 
+Neologik is terminated or if the Customer breaches any terms of this license.
+
+WARRANTY DISCLAIMER
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL 
+NEOLOGIK BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN 
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION 
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+LIMITATION OF LIABILITY
+
+IN NO EVENT SHALL NEOLOGIK BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, 
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; 
+OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, 
+WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR 
+OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF 
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+For questions about this license, contact: legal@neologik.ai
