@@ -67,6 +67,9 @@ jobs:
           fi
           echo "Token is available (length: ${#CUSTOMER_REPO_TOKEN})"
           
-          git remote add customer https://x-access-token:${CUSTOMER_REPO_TOKEN}@github.com/Neologik-Customer/neo-client-onboarding.git
+          # Configure git to use the token
+          git config --global url."https://x-access-token:${CUSTOMER_REPO_TOKEN}@github.com/".insteadOf "https://github.com/"
+          
+          git remote add customer https://github.com/Neologik-Customer/neo-client-onboarding.git || git remote set-url customer https://github.com/Neologik-Customer/neo-client-onboarding.git
           git push customer main --force
           git push customer --tags
