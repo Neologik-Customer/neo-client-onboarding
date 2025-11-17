@@ -470,15 +470,27 @@ function Connect-AzureEnvironment {
                 Disconnect-MgGraph -ErrorAction SilentlyContinue
             }
             
-            # Connect to Microsoft Graph using device code authentication
+            # Connect to Microsoft Graph - try to reuse Azure authentication first, fallback to device code
             Write-Log "Connecting to Microsoft Graph..." -Level Info
-            Write-Host "`n" -ForegroundColor Cyan
             
-            Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
-                -Scopes "User.ReadWrite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
-                -UseDeviceAuthentication `
-                -ErrorAction Stop
-            Write-Log "Connected to Microsoft Graph" -Level Success
+            try {
+                # Try to connect without device code first (will use existing Azure token if possible)
+                Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
+                    -Scopes "User.ReadWrite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
+                    -ErrorAction Stop
+                Write-Log "Connected to Microsoft Graph using existing credentials" -Level Success
+            }
+            catch {
+                # Fallback to device code if automatic auth fails
+                Write-Log "Automatic authentication failed, using device code..." -Level Info
+                Write-Host "`nℹ️  Please authenticate with Microsoft Graph (may require additional consent)`n" -ForegroundColor Cyan
+                
+                Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
+                    -Scopes "User.ReadWrite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
+                    -UseDeviceAuthentication `
+                    -ErrorAction Stop
+                Write-Log "Connected to Microsoft Graph" -Level Success
+            }
         }
 
         # Get the actual user ID from Azure AD (works for both member and guest users)
