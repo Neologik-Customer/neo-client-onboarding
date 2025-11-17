@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.7.2
+    v1.7.3
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.7.2'
+$script:Version = 'v1.7.3'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -1346,10 +1346,12 @@ function Set-AppRegistrationRoles {
         try {
             Import-Module Microsoft.Graph.Identity.DirectoryManagement -ErrorAction Stop
             
-            $appAdminRole = Get-MgDirectoryRole -Filter "displayName eq 'Application Administrator'" -ErrorAction SilentlyContinue
+            # Get all directory roles (filtering not supported, must filter manually)
+            $appAdminRole = Get-MgDirectoryRole -All -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'Application Administrator' }
             
             if (-not $appAdminRole) {
-                $roleTemplate = Get-MgDirectoryRoleTemplate -Filter "displayName eq 'Application Administrator'" -ErrorAction Stop
+                # Role not activated yet, get template and activate it
+                $roleTemplate = Get-MgDirectoryRoleTemplate -All -ErrorAction Stop | Where-Object { $_.DisplayName -eq 'Application Administrator' }
                 if (-not $roleTemplate) {
                     throw "InsufficientPermissions"
                 }
