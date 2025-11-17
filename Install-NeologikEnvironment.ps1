@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.5.2
+    v1.5.6
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.5.2'
+$script:Version = 'v1.5.6'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -1334,20 +1334,25 @@ function Set-AppRegistrationRoles {
         }
         catch {
             if ($_.Exception.Message -match "InsufficientPermissions|Insufficient privileges|Authorization_RequestDenied|Forbidden|Request_UnsupportedQuery|BadRequest") {
-                Write-Log "ERROR: Insufficient permissions to assign Application Administrator role" -Level Error
-                Write-Log "Required Permission: Global Administrator or Privileged Role Administrator role in Entra ID" -Level Error
-                Write-Host "`n❌ PERMISSION ERROR" -ForegroundColor Red
-                Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Red
+                Write-Log "WARNING: Unable to assign Application Administrator role - insufficient permissions" -Level Warning
+                Write-Log "The service principal will function without this role, but may have limited permissions for some operations" -Level Warning
+                Write-Host "`n⚠️  APPLICATION ADMINISTRATOR ROLE NOT ASSIGNED" -ForegroundColor Yellow
+                Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Yellow
                 Write-Host ""
-                Write-Host "You do not have sufficient permissions to complete this setup." -ForegroundColor Yellow
+                Write-Host "The Application Administrator role could not be assigned to the service principal." -ForegroundColor Yellow
+                Write-Host "This requires Privileged Role Administrator permissions." -ForegroundColor Yellow
                 Write-Host ""
-                Write-Host "Required Permissions:" -ForegroundColor Cyan
-                Write-Host "  ✓ Owner role at subscription level" -ForegroundColor Gray
-                Write-Host "  ✗ Global Administrator role in Entra ID (MISSING)" -ForegroundColor Red
+                Write-Host "Impact:" -ForegroundColor Cyan
+                Write-Host "  • Service principal will still function for most operations" -ForegroundColor Gray
+                Write-Host "  • Some advanced Entra ID operations may be limited" -ForegroundColor Gray
                 Write-Host ""
-                Write-Host "Please contact a user with Global Administrator permissions to run this script." -ForegroundColor Yellow
+                Write-Host "To assign this role later, have a Privileged Role Administrator run:" -ForegroundColor Cyan
+                Write-Host "  New-MgDirectoryRoleMemberByRef -DirectoryRoleId <RoleId> -BodyParameter @{'@odata.id'='https://graph.microsoft.com/v1.0/directoryObjects/$ServicePrincipalId'}" -ForegroundColor Gray
                 Write-Host ""
-                throw "Insufficient permissions: Global Administrator role required"
+                Write-Host "Continuing with setup..." -ForegroundColor Green
+                Write-Host ""
+                # Don't throw - continue with the setup
+                $existingRoleMember = $null # Mark as not assigned
             }
             else {
                 throw
@@ -1376,20 +1381,11 @@ function Set-AppRegistrationRoles {
                 catch {
                     # Check if it's a permission error (Forbidden/Authorization)
                     if ($_.Exception.Message -match "Forbidden|Authorization_RequestDenied|Insufficient privileges") {
-                        Write-Log "ERROR: Insufficient permissions to assign Application Administrator role" -Level Error
-                        Write-Log "Required Permission: Global Administrator or Privileged Role Administrator role in Entra ID" -Level Error
-                        Write-Host "`n❌ PERMISSION ERROR" -ForegroundColor Red
-                        Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Red
-                        Write-Host ""
-                        Write-Host "You do not have sufficient permissions to complete this setup." -ForegroundColor Yellow
-                        Write-Host ""
-                        Write-Host "Required Permissions:" -ForegroundColor Cyan
-                        Write-Host "  ✓ Owner role at subscription level" -ForegroundColor Gray
-                        Write-Host "  ✗ Global Administrator role in Entra ID (MISSING)" -ForegroundColor Red
-                        Write-Host ""
-                        Write-Host "Please contact a user with Global Administrator permissions to run this script." -ForegroundColor Yellow
-                        Write-Host ""
-                        throw "Insufficient permissions: Global Administrator role required"
+                        Write-Log "WARNING: Unable to assign Application Administrator role - insufficient permissions" -Level Warning
+                        Write-Host "`n⚠️  APPLICATION ADMINISTRATOR ROLE NOT ASSIGNED" -ForegroundColor Yellow
+                        Write-Host "Continuing without this role assignment..." -ForegroundColor Yellow
+                        $roleAssigned = $true # Skip retry loop
+                        break
                     }
                     # Handle case where member already exists (race condition or previous partial run)
                     elseif ($_.Exception.Message -match "already exist") {
