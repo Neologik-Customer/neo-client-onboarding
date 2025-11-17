@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.5.9
+    v1.6.0
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.5.9'
+$script:Version = 'v1.6.0'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -490,7 +490,7 @@ function Connect-AzureEnvironment {
             try {
                 # Try to connect without device code first (will use existing Azure token if possible)
                 Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
-                    -Scopes "User.ReadWrite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
+                    -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
                     -ErrorAction Stop
                 Write-Log "Connected to Microsoft Graph using existing credentials" -Level Success
             }
@@ -500,7 +500,7 @@ function Connect-AzureEnvironment {
                 Write-Host "`nℹ️  Please authenticate with Microsoft Graph (may require additional consent)`n" -ForegroundColor Cyan
                 
                 Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
-                    -Scopes "User.ReadWrite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
+                    -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
                     -UseDeviceAuthentication `
                     -ErrorAction Stop
                 Write-Log "Connected to Microsoft Graph" -Level Success
