@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.6.0
+    v1.6.1
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.6.0'
+$script:Version = 'v1.6.1'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -1348,25 +1348,16 @@ function Set-AppRegistrationRoles {
         }
         catch {
             if ($_.Exception.Message -match "InsufficientPermissions|Insufficient privileges|Authorization_RequestDenied|Forbidden|Request_UnsupportedQuery|BadRequest") {
-                Write-Log "WARNING: Unable to assign Application Administrator role - insufficient permissions" -Level Warning
-                Write-Log "The service principal will function without this role, but may have limited permissions for some operations" -Level Warning
-                Write-Host "`n⚠️  APPLICATION ADMINISTRATOR ROLE NOT ASSIGNED" -ForegroundColor Yellow
-                Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Yellow
+                Write-Log "ERROR: Unable to assign Application Administrator role - Privileged Role Administrator permission required" -Level Error
+                Write-Host "`n❌ INSUFFICIENT PERMISSIONS" -ForegroundColor Red
+                Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Red
                 Write-Host ""
-                Write-Host "The Application Administrator role could not be assigned to the service principal." -ForegroundColor Yellow
-                Write-Host "This requires Privileged Role Administrator permissions." -ForegroundColor Yellow
+                Write-Host "Unable to assign Application Administrator role to the service principal." -ForegroundColor Yellow
+                Write-Host "The Privileged Role Administrator role is required for this operation." -ForegroundColor Yellow
                 Write-Host ""
-                Write-Host "Impact:" -ForegroundColor Cyan
-                Write-Host "  • Service principal will still function for most operations" -ForegroundColor Gray
-                Write-Host "  • Some advanced Entra ID operations may be limited" -ForegroundColor Gray
+                Write-Host "Please have a user with Privileged Role Administrator run this script." -ForegroundColor Yellow
                 Write-Host ""
-                Write-Host "To assign this role later, have a Privileged Role Administrator run:" -ForegroundColor Cyan
-                Write-Host "  New-MgDirectoryRoleMemberByRef -DirectoryRoleId <RoleId> -BodyParameter @{'@odata.id'='https://graph.microsoft.com/v1.0/directoryObjects/$ServicePrincipalId'}" -ForegroundColor Gray
-                Write-Host ""
-                Write-Host "Continuing with setup..." -ForegroundColor Green
-                Write-Host ""
-                # Don't throw - continue with the setup
-                $existingRoleMember = $null # Mark as not assigned
+                throw "Insufficient permissions: Privileged Role Administrator role required"
             }
             else {
                 throw
@@ -1395,11 +1386,16 @@ function Set-AppRegistrationRoles {
                 catch {
                     # Check if it's a permission error (Forbidden/Authorization)
                     if ($_.Exception.Message -match "Forbidden|Authorization_RequestDenied|Insufficient privileges") {
-                        Write-Log "WARNING: Unable to assign Application Administrator role - insufficient permissions" -Level Warning
-                        Write-Host "`n⚠️  APPLICATION ADMINISTRATOR ROLE NOT ASSIGNED" -ForegroundColor Yellow
-                        Write-Host "Continuing without this role assignment..." -ForegroundColor Yellow
-                        $roleAssigned = $true # Skip retry loop
-                        break
+                        Write-Log "ERROR: Unable to assign Application Administrator role - Privileged Role Administrator permission required" -Level Error
+                        Write-Host "`n❌ INSUFFICIENT PERMISSIONS" -ForegroundColor Red
+                        Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Red
+                        Write-Host ""
+                        Write-Host "Unable to assign Application Administrator role to the service principal." -ForegroundColor Yellow
+                        Write-Host "The Privileged Role Administrator role is required for this operation." -ForegroundColor Yellow
+                        Write-Host ""
+                        Write-Host "Please have a user with Privileged Role Administrator run this script." -ForegroundColor Yellow
+                        Write-Host ""
+                        throw "Insufficient permissions: Privileged Role Administrator role required"
                     }
                     # Handle case where member already exists (race condition or previous partial run)
                     elseif ($_.Exception.Message -match "already exist") {
