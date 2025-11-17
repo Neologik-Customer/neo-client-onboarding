@@ -174,28 +174,35 @@ function Show-TermsAndConditions {
 
 By proceeding with this installation, you acknowledge and agree to:
 
-1. PERMISSIONS GRANTED
+1. NEOLOGIK TERMS OF USE AND PRIVACY POLICY
+   - Terms of Use: https://www.neologik.ai/terms-of-use
+   - Privacy Policy: https://www.neologik.ai/privacy-policy
+   - You must read and accept both documents to proceed
+
+2. PERMISSIONS GRANTED
    - This script will create resources in your Azure subscription
    - Guest users from Neologik will be invited to your tenant
    - Security groups and role assignments will be configured
    - See QUICK-REFERENCE.md for complete list of changes
 
-2. REQUIRED PERMISSIONS
+3. REQUIRED PERMISSIONS
    - You must have Owner role at subscription level
    - You must have Global Administrator role in Entra ID
    - Script will fail if these permissions are not present
 
-3. DATA AND PRIVACY
+4. DATA AND PRIVACY
    - Configuration data will be stored locally in JSON format
    - Secrets will be stored in Azure Key Vault
    - Neologik guest users will have access as configured
+   - Data handling as per Privacy Policy above
 
-4. SUPPORT AND LIABILITY
+5. SUPPORT AND LIABILITY
    - Neologik provides support for this installation
    - Review QUICK-REFERENCE.md before proceeding
    - Contact support@neologik.ai for assistance
+   - Liability terms as per Terms of Use above
 
-5. CHANGES TO YOUR ENVIRONMENT
+6. CHANGES TO YOUR ENVIRONMENT
    - Resources will be created in your Azure subscription
    - Costs may be incurred for Azure resources
    - You are responsible for resource management
@@ -206,7 +213,7 @@ By proceeding with this installation, you acknowledge and agree to:
 
     Write-Host $terms -ForegroundColor Yellow
     
-    Write-Host "Do you accept these terms and conditions? " -NoNewline -ForegroundColor Cyan
+    Write-Host "Do you accept the Neologik Terms of Use and Privacy Policy? " -NoNewline -ForegroundColor Cyan
     Write-Host "(Type 'I ACCEPT' to continue, or 'N' to exit): " -NoNewline -ForegroundColor Cyan
     $acceptance = Read-Host
     
