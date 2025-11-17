@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.6.4
+    v1.6.5
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.6.4'
+$script:Version = 'v1.6.5'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -953,6 +953,12 @@ function New-NeologikSecurityGroups {
             Write-Log "Adding guest users to group: $($groupDef.Name)..." -Level Info
             
             foreach ($guestUser in $GuestUsers) {
+                # Skip if user ID is missing or invalid
+                if ([string]::IsNullOrWhiteSpace($guestUser.UserId)) {
+                    Write-Log "WARNING: Skipping guest user $($guestUser.Email) - no valid User ID" -Level Warning
+                    continue
+                }
+                
                 try {
                     # Check if user is already a member
                     $isMember = Get-MgGroupMember -GroupId $group.Id -Filter "id eq '$($guestUser.UserId)'" -ErrorAction Stop
@@ -966,8 +972,15 @@ function New-NeologikSecurityGroups {
                     }
                 }
                 catch {
-                    Write-Log "ERROR: Could not add $($guestUser.Email) to $($groupDef.Name): $_" -Level Error
-                    throw
+                    # If user doesn't exist (404), log warning and continue
+                    if ($_.Exception.Message -match "404|NotFound|does not exist") {
+                        Write-Log "WARNING: Guest user $($guestUser.Email) does not exist in tenant (may not have accepted invitation yet)" -Level Warning
+                    }
+                    else {
+                        # Other errors are fatal
+                        Write-Log "ERROR: Could not add $($guestUser.Email) to $($groupDef.Name): $_" -Level Error
+                        throw
+                    }
                 }
             }
 
