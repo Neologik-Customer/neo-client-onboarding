@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.6.2
+    v1.6.3
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.6.2'
+$script:Version = 'v1.6.3'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -1327,38 +1327,56 @@ function Set-AppRegistrationRoles {
         # Assign Entra ID role (Application Administrator)
         Write-Log "Assigning Application Administrator role in Entra ID..." -Level Info
         
-        # First check if role is already assigned (separate try-catch to handle permission issues gracefully)
+        # First check if role is already assigned
         $existingRoleMember = $null
         $appAdminRole = $null
         
         try {
             Import-Module Microsoft.Graph.Identity.DirectoryManagement -ErrorAction Stop
             
-            $appAdminRole = Get-MgDirectoryRole -Filter "displayName eq 'Application Administrator'" -ErrorAction SilentlyContinue
+            $appAdminRole = Get-MgDirectoryRole -Filter "displayName eq 'Application Administrator'" -ErrorAction Stop
             
             if (-not $appAdminRole) {
-                $roleTemplate = Get-MgDirectoryRoleTemplate -Filter "displayName eq 'Application Administrator'" -ErrorAction SilentlyContinue
-                if ($roleTemplate) {
-                    $appAdminRole = New-MgDirectoryRole -RoleTemplateId $roleTemplate.Id -ErrorAction SilentlyContinue
+                $roleTemplate = Get-MgDirectoryRoleTemplate -Filter "displayName eq 'Application Administrator'" -ErrorAction Stop
+                if (-not $roleTemplate) {
+                    throw "Could not find Application Administrator role template"
                 }
+                $appAdminRole = New-MgDirectoryRole -RoleTemplateId $roleTemplate.Id -ErrorAction Stop
             }
 
-            if ($appAdminRole -and -not [string]::IsNullOrEmpty($appAdminRole.Id)) {
-                # Try to check if already assigned - if this fails due to permissions, we'll catch it
-                $existingRoleMember = Get-MgDirectoryRoleMember -DirectoryRoleId $appAdminRole.Id -ErrorAction SilentlyContinue | Where-Object { $_.Id -eq $ServicePrincipalId }
-                
-                if ($existingRoleMember) {
-                    Write-Log "Application Administrator role already assigned to service principal" -Level Success
-                }
+            if (-not $appAdminRole -or [string]::IsNullOrEmpty($appAdminRole.Id)) {
+                throw "Could not access Application Administrator role"
+            }
+
+            # Check if already assigned
+            $existingRoleMember = Get-MgDirectoryRoleMember -DirectoryRoleId $appAdminRole.Id -ErrorAction Stop | Where-Object { $_.Id -eq $ServicePrincipalId }
+            
+            if ($existingRoleMember) {
+                Write-Log "Application Administrator role already assigned to service principal" -Level Success
             }
         }
         catch {
-            # If we can't even check, log it but don't fail yet
-            Write-Log "Could not verify existing role assignment: $($_.Exception.Message)" -Level Warning
+            # Any error here means we can't verify or assign the role
+            if ($_.Exception.Message -match "Forbidden|Authorization_RequestDenied|Insufficient privileges|InsufficientPermissions|BadRequest") {
+                Write-Log "ERROR: Unable to verify or assign Application Administrator role - Privileged Role Administrator permission required" -Level Error
+                Write-Host "`n❌ INSUFFICIENT PERMISSIONS" -ForegroundColor Red
+                Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Red
+                Write-Host ""
+                Write-Host "Cannot verify or assign the Application Administrator role." -ForegroundColor Yellow
+                Write-Host "The Privileged Role Administrator role is required for this operation." -ForegroundColor Yellow
+                Write-Host ""
+                Write-Host "Please have a user with Privileged Role Administrator run this script." -ForegroundColor Yellow
+                Write-Host ""
+                throw "Insufficient permissions: Privileged Role Administrator role required"
+            }
+            else {
+                Write-Log "ERROR: Failed to check/assign Application Administrator role: $($_.Exception.Message)" -Level Error
+                throw
+            }
         }
         
-        # Only try to assign if we confirmed it's not already assigned AND we have the role object
-        if (-not $existingRoleMember -and $appAdminRole -and -not [string]::IsNullOrEmpty($appAdminRole.Id)) {
+        # Only assign if not already assigned
+        if (-not $existingRoleMember) {
             # Add retry logic for newly created service principals
             $retryCount = 0
             $maxRetries = 10
@@ -1408,11 +1426,6 @@ function Set-AppRegistrationRoles {
                     }
                 }
             }
-        }
-        elseif (-not $appAdminRole -or [string]::IsNullOrEmpty($appAdminRole.Id)) {
-            # Could not get the role object - likely permission issue
-            Write-Log "WARNING: Could not access Application Administrator role - skipping assignment" -Level Warning
-            Write-Host "`n⚠️  Application Administrator role assignment skipped (insufficient permissions)" -ForegroundColor Yellow
         }
 
         # Update ConfigData with group membership
