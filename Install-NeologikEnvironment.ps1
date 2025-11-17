@@ -158,6 +158,70 @@ function Write-ScriptHeader {
     Write-Log "Starting Neologik customer onboarding process (Version: $script:Version)" -Level Info
 }
 
+function Show-TermsAndConditions {
+    <#
+    .SYNOPSIS
+        Displays terms and conditions and gets user acceptance.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $terms = @"
+
+═══════════════════════════════════════════════════════════════
+                    TERMS AND CONDITIONS
+═══════════════════════════════════════════════════════════════
+
+By proceeding with this installation, you acknowledge and agree to:
+
+1. PERMISSIONS GRANTED
+   - This script will create resources in your Azure subscription
+   - Guest users from Neologik will be invited to your tenant
+   - Security groups and role assignments will be configured
+   - See QUICK-REFERENCE.md for complete list of changes
+
+2. REQUIRED PERMISSIONS
+   - You must have Owner role at subscription level
+   - You must have Global Administrator role in Entra ID
+   - Script will fail if these permissions are not present
+
+3. DATA AND PRIVACY
+   - Configuration data will be stored locally in JSON format
+   - Secrets will be stored in Azure Key Vault
+   - Neologik guest users will have access as configured
+
+4. SUPPORT AND LIABILITY
+   - Neologik provides support for this installation
+   - Review QUICK-REFERENCE.md before proceeding
+   - Contact support@neologik.ai for assistance
+
+5. CHANGES TO YOUR ENVIRONMENT
+   - Resources will be created in your Azure subscription
+   - Costs may be incurred for Azure resources
+   - You are responsible for resource management
+
+═══════════════════════════════════════════════════════════════
+
+"@
+
+    Write-Host $terms -ForegroundColor Yellow
+    
+    Write-Host "Do you accept these terms and conditions? " -NoNewline -ForegroundColor Cyan
+    Write-Host "(Type 'I ACCEPT' to continue, or 'N' to exit): " -NoNewline -ForegroundColor Cyan
+    $acceptance = Read-Host
+    
+    if ($acceptance -eq 'I ACCEPT') {
+        Write-Log "User accepted terms and conditions" -Level Info
+        Write-Host "`n✓ Terms accepted. Proceeding with installation...`n" -ForegroundColor Green
+        return $true
+    }
+    else {
+        Write-Log "User declined terms and conditions" -Level Warning
+        Write-Host "`n✗ Terms not accepted. Installation cancelled.`n" -ForegroundColor Red
+        return $false
+    }
+}
+
 #endregion
 
 #region PowerShell Version Management
@@ -2084,6 +2148,13 @@ function Start-NeologikOnboarding {
 
     try {
         Write-ScriptHeader
+
+        # Step 0: Show Terms and Conditions and get acceptance
+        $termsAccepted = Show-TermsAndConditions
+        if (-not $termsAccepted) {
+            Write-Log "Installation cancelled by user - terms not accepted" -Level Warning
+            exit 0
+        }
 
         # Step 1: Check PowerShell version first
         if (-not $SkipPowerShellUpdate) {
