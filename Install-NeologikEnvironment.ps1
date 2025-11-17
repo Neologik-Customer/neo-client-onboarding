@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.6.8
+    v1.6.9
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.6.8'
+$script:Version = 'v1.6.9'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -837,19 +837,16 @@ function Invoke-GuestUserInvitation {
         $invitedUsers = @()
 
         foreach ($email in $GuestEmails) {
-            Write-Log "Processing user: $email..." -Level Info
+            Write-Log "Processing guest user: $email..." -Level Info
 
-            # Check if user already exists (either as member or guest)
+            # Check if user already exists
             $existingUser = Get-MgUser -Filter "mail eq '$email' or userPrincipalName eq '$email'" -ErrorAction SilentlyContinue
 
             if ($existingUser) {
-                # Check if user is a member or guest
-                $userType = if ($existingUser.UserType) { $existingUser.UserType } else { "Member" }
-                Write-Log "User $email already exists as $userType (ID: $($existingUser.Id))" -Level Info
+                Write-Log "Guest user $email already exists (ID: $($existingUser.Id))" -Level Info
                 $invitedUsers += @{
                     Email = $email
                     UserId = $existingUser.Id
-                    UserType = $userType
                     Status = 'AlreadyExists'
                 }
             }
@@ -867,7 +864,6 @@ function Invoke-GuestUserInvitation {
                 $invitedUsers += @{
                     Email = $email
                     UserId = $invitation.InvitedUser.Id
-                    UserType = "Guest"
                     Status = 'Invited'
                 }
             }
@@ -951,25 +947,15 @@ function New-NeologikSecurityGroups {
                     -ErrorAction Stop
 
                 Write-Log "Group created successfully (ID: $($group.Id))" -Level Success
-                
-                # Wait for group to replicate across Azure AD before adding members
-                Write-Log "Waiting 10 seconds for group replication..." -Level Info
-                Start-Sleep -Seconds 10
             }
 
             # Add guest users to the group
             Write-Log "Adding guest users to group: $($groupDef.Name)..." -Level Info
             
             foreach ($guestUser in $GuestUsers) {
-                # Skip if user ID is missing or invalid
-                if ([string]::IsNullOrWhiteSpace($guestUser.UserId)) {
-                    Write-Log "Skipping guest user $($guestUser.Email) - no valid User ID" -Level Warning
-                    continue
-                }
-                
                 try {
                     # Check if user is already a member
-                    $isMember = Get-MgGroupMember -GroupId $group.Id -Filter "id eq '$($guestUser.UserId)'" -ErrorAction Stop
+                    $isMember = Get-MgGroupMember -GroupId $group.Id -Filter "id eq '$($guestUser.UserId)'" -ErrorAction SilentlyContinue
 
                     if ($isMember) {
                         Write-Log "User $($guestUser.Email) is already a member of $($groupDef.Name)" -Level Info
@@ -980,15 +966,7 @@ function New-NeologikSecurityGroups {
                     }
                 }
                 catch {
-                    # If user doesn't exist (404), log warning and continue
-                    if ($_.Exception.Message -match "404|NotFound|does not exist") {
-                        Write-Log "Guest user $($guestUser.Email) does not exist in tenant (may not have accepted invitation yet)" -Level Warning
-                    }
-                    else {
-                        # Other errors are fatal
-                        Write-Log "Could not add $($guestUser.Email) to $($groupDef.Name): $_" -Level Error
-                        throw
-                    }
+                    Write-Log "Warning: Could not add $($guestUser.Email) to $($groupDef.Name): $_" -Level Warning
                 }
             }
 
@@ -998,7 +976,7 @@ function New-NeologikSecurityGroups {
                 # Use the stored user ID which works for both member and guest users
                 if ($script:ConfigData['CurrentUserId']) {
                     $currentUserId = $script:ConfigData['CurrentUserId']
-                    $isMember = Get-MgGroupMember -GroupId $group.Id -Filter "id eq '$currentUserId'" -ErrorAction Stop
+                    $isMember = Get-MgGroupMember -GroupId $group.Id -Filter "id eq '$currentUserId'" -ErrorAction SilentlyContinue
 
                     if ($isMember) {
                         Write-Log "Logged-in user is already a member of $($groupDef.Name)" -Level Info
@@ -1013,15 +991,7 @@ function New-NeologikSecurityGroups {
                 }
             }
             catch {
-                # If group or user doesn't exist yet (404 - replication delay), log warning and continue
-                if ($_.Exception.Message -match "404|NotFound|does not exist") {
-                    Write-Log "Could not add logged-in user (group may not be replicated yet)" -Level Warning
-                }
-                else {
-                    # Other errors are fatal
-                    Write-Log "Could not add logged-in user to $($groupDef.Name): $_" -Level Error
-                    throw
-                }
+                Write-Log "Warning: Could not add logged-in user to $($groupDef.Name): $_" -Level Warning
             }
 
             $createdGroups += @{
