@@ -472,13 +472,11 @@ function Connect-AzureEnvironment {
             
             # Connect to Microsoft Graph using device code authentication
             Write-Log "Connecting to Microsoft Graph..." -Level Info
-            Write-Host "`nℹ️  Using device code authentication for Microsoft Graph." -ForegroundColor Cyan
-            Write-Host "A code will be displayed. Visit the URL and enter the code to authenticate.`n" -ForegroundColor Cyan
+            Write-Host "`n" -ForegroundColor Cyan
             
             Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
                 -Scopes "User.ReadWrite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
                 -UseDeviceAuthentication `
-                -NoWelcome `
                 -ErrorAction Stop
             Write-Log "Connected to Microsoft Graph" -Level Success
         }
