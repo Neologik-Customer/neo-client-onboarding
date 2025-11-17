@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.2.4
+    v1.4.1
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.2.4'
+$script:Version = 'v1.4.1'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -149,7 +149,7 @@ function Write-ScriptHeader {
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
 ║          NEOLOGIK CUSTOMER ONBOARDING SCRIPT                  ║
-║          $script:Version                                        ║
+║          $script:Version                                               ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
 
@@ -172,40 +172,13 @@ function Show-TermsAndConditions {
                     TERMS AND CONDITIONS
 ═══════════════════════════════════════════════════════════════
 
-By proceeding with this installation, you acknowledge and agree to:
+By proceeding with this installation, you acknowledge and agree to
 
-1. NEOLOGIK TERMS OF USE AND PRIVACY POLICY
+    NEOLOGIK TERMS OF USE AND PRIVACY POLICY
+
    - Terms of Use: https://www.neologik.ai/terms-of-use
    - Privacy Policy: https://www.neologik.ai/privacy-policy
    - You must read and accept both documents to proceed
-
-2. PERMISSIONS GRANTED
-   - This script will create resources in your Azure subscription
-   - Guest users from Neologik will be invited to your tenant
-   - Security groups and role assignments will be configured
-   - See QUICK-REFERENCE.md for complete list of changes
-
-3. REQUIRED PERMISSIONS
-   - You must have Owner role at subscription level
-   - You must have Global Administrator role in Entra ID
-   - Script will fail if these permissions are not present
-
-4. DATA AND PRIVACY
-   - Configuration data will be stored locally in JSON format
-   - Secrets will be stored in Azure Key Vault
-   - Neologik guest users will have access as configured
-   - Data handling as per Privacy Policy above
-
-5. SUPPORT AND LIABILITY
-   - Neologik provides support for this installation
-   - Review QUICK-REFERENCE.md before proceeding
-   - Contact support@neologik.ai for assistance
-   - Liability terms as per Terms of Use above
-
-6. CHANGES TO YOUR ENVIRONMENT
-   - Resources will be created in your Azure subscription
-   - Costs may be incurred for Azure resources
-   - You are responsible for resource management
 
 ═══════════════════════════════════════════════════════════════
 
