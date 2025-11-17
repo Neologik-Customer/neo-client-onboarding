@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.5.7
+    v1.5.8
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.5.7'
+$script:Version = 'v1.5.8'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -401,66 +401,6 @@ function Connect-AzureEnvironment {
                 $azContext = Connect-AzAccount -UseDeviceAuthentication -ErrorAction Stop
             }
             Write-Log "Connected to Azure as $($azContext.Context.Account.Id)" -Level Success
-            
-            # Show tenant and subscription selection
-            Write-Host "`n" -ForegroundColor Cyan
-            Write-Host "╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-            Write-Host "║                                                               ║" -ForegroundColor Cyan
-            Write-Host "║              TENANT AND SUBSCRIPTION SELECTION                ║" -ForegroundColor Cyan
-            Write-Host "║                                                               ║" -ForegroundColor Cyan
-            Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
-            Write-Host ""
-            
-            # Get all subscriptions accessible to the user
-            $allSubscriptions = Get-AzSubscription -ErrorAction SilentlyContinue | Sort-Object Name
-            
-            if ($allSubscriptions.Count -gt 1) {
-                Write-Host "You have access to multiple subscriptions:" -ForegroundColor Yellow
-                Write-Host ""
-                
-                # Display subscriptions with tenant info
-                $index = 1
-                $subscriptionMap = @{}
-                foreach ($sub in $allSubscriptions) {
-                    $tenant = Get-AzTenant -TenantId $sub.TenantId -ErrorAction SilentlyContinue
-                    $tenantDisplayName = if ($tenant.Name) { $tenant.Name } else { $sub.TenantId }
-                    
-                    Write-Host "[$index] " -NoNewline -ForegroundColor Cyan
-                    Write-Host "$($sub.Name)" -ForegroundColor White
-                    Write-Host "    Subscription ID: $($sub.Id)" -ForegroundColor Gray
-                    Write-Host "    Tenant: $tenantDisplayName" -ForegroundColor Gray
-                    Write-Host ""
-                    
-                    $subscriptionMap[$index] = $sub
-                    $index++
-                }
-                
-                # Prompt for selection
-                do {
-                    Write-Host "Select a subscription (1-$($allSubscriptions.Count)): " -NoNewline -ForegroundColor Cyan
-                    $selection = Read-Host
-                    $selectedIndex = $null
-                    if ([int]::TryParse($selection, [ref]$selectedIndex) -and $selectedIndex -ge 1 -and $selectedIndex -le $allSubscriptions.Count) {
-                        $selectedSubscription = $subscriptionMap[$selectedIndex]
-                        Set-AzContext -SubscriptionId $selectedSubscription.Id -TenantId $selectedSubscription.TenantId | Out-Null
-                        Write-Host "`n✓ Selected: $($selectedSubscription.Name)" -ForegroundColor Green
-                        Write-Host ""
-                        break
-                    }
-                    else {
-                        Write-Host "Invalid selection. Please enter a number between 1 and $($allSubscriptions.Count)." -ForegroundColor Red
-                    }
-                } while ($true)
-                
-                # Update context with selected subscription
-                $azContext = [PSCustomObject]@{
-                    Context = Get-AzContext
-                }
-            }
-            else {
-                Write-Host "Using subscription: $($allSubscriptions[0].Name)" -ForegroundColor Green
-                Write-Host ""
-            }
         }
 
         # Store context information
