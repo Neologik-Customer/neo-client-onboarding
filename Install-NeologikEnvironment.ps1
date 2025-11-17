@@ -389,33 +389,18 @@ function Connect-AzureEnvironment {
             }
         }
         else {
-            # Connect to Azure
+            # Connect to Azure using device code authentication
             Write-Log "Authenticating to Azure..." -Level Info
+            Write-Host "`nℹ️  Using device code authentication for Azure login." -ForegroundColor Cyan
+            Write-Host "A code will be displayed. Visit the URL and enter the code to authenticate.`n" -ForegroundColor Cyan
             
-            # Try standard authentication first
-            try {
-                if ($TenantId) {
-                    $azContext = Connect-AzAccount -TenantId $TenantId -ErrorAction Stop
-                }
-                else {
-                    $azContext = Connect-AzAccount -ErrorAction Stop
-                }
-                Write-Log "Connected to Azure as $($azContext.Context.Account.Id)" -Level Success
+            if ($TenantId) {
+                $azContext = Connect-AzAccount -TenantId $TenantId -UseDeviceAuthentication -ErrorAction Stop
             }
-            catch {
-                # If standard auth fails (common when running as different user), try device code
-                Write-Log "Standard authentication failed. Attempting device code authentication..." -Level Warning
-                Write-Host "`n⚠️  Browser authentication not available in this context." -ForegroundColor Yellow
-                Write-Host "Using device code authentication instead...`n" -ForegroundColor Yellow
-                
-                if ($TenantId) {
-                    $azContext = Connect-AzAccount -TenantId $TenantId -UseDeviceAuthentication -ErrorAction Stop
-                }
-                else {
-                    $azContext = Connect-AzAccount -UseDeviceAuthentication -ErrorAction Stop
-                }
-                Write-Log "Connected to Azure as $($azContext.Context.Account.Id)" -Level Success
+            else {
+                $azContext = Connect-AzAccount -UseDeviceAuthentication -ErrorAction Stop
             }
+            Write-Log "Connected to Azure as $($azContext.Context.Account.Id)" -Level Success
         }
 
         # Store context information
@@ -478,29 +463,17 @@ function Connect-AzureEnvironment {
             Write-Log "Already connected to Microsoft Graph" -Level Info
         }
         else {
-            # Connect to Microsoft Graph
+            # Connect to Microsoft Graph using device code authentication
             Write-Log "Connecting to Microsoft Graph..." -Level Info
+            Write-Host "`nℹ️  Using device code authentication for Microsoft Graph." -ForegroundColor Cyan
+            Write-Host "A code will be displayed. Visit the URL and enter the code to authenticate.`n" -ForegroundColor Cyan
             
-            try {
-                Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
-                    -Scopes "User.ReadWrite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
-                    -NoWelcome `
-                    -ErrorAction Stop
-                Write-Log "Connected to Microsoft Graph" -Level Success
-            }
-            catch {
-                # If standard auth fails, try device code
-                Write-Log "Standard Microsoft Graph authentication failed. Attempting device code authentication..." -Level Warning
-                Write-Host "`n⚠️  Browser authentication not available for Microsoft Graph." -ForegroundColor Yellow
-                Write-Host "Using device code authentication instead...`n" -ForegroundColor Yellow
-                
-                Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
-                    -Scopes "User.ReadWrite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
-                    -UseDeviceCode `
-                    -NoWelcome `
-                    -ErrorAction Stop
-                Write-Log "Connected to Microsoft Graph" -Level Success
-            }
+            Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
+                -Scopes "User.ReadWrite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
+                -UseDeviceCode `
+                -NoWelcome `
+                -ErrorAction Stop
+            Write-Log "Connected to Microsoft Graph" -Level Success
         }
 
         # Get the actual user ID from Azure AD (works for both member and guest users)
