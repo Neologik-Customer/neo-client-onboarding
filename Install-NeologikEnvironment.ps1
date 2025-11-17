@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.7.1
+    v1.7.2
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.7.1'
+$script:Version = 'v1.7.2'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -1363,9 +1363,12 @@ function Set-AppRegistrationRoles {
             $existingRoleMember = Get-MgDirectoryRoleMember -DirectoryRoleId $appAdminRole.Id -ErrorAction SilentlyContinue | Where-Object { $_.Id -eq $ServicePrincipalId }
         }
         catch {
-            if ($_.Exception.Message -match "InsufficientPermissions|Insufficient privileges|Authorization_RequestDenied|Forbidden|Request_UnsupportedQuery|BadRequest") {
+            # Log the actual error for debugging
+            Write-Log "ERROR: Failed to check Application Administrator role: $($_.Exception.Message)" -Level Error
+            
+            if ($_.Exception.Message -match "InsufficientPermissions|Insufficient privileges|Authorization_RequestDenied|Forbidden") {
                 Write-Log "ERROR: Insufficient permissions to assign Application Administrator role" -Level Error
-                Write-Log "Required Permission: Global Administrator or Privileged Role Administrator role in Entra ID" -Level Error
+                Write-Log "Required Permission: Privileged Role Administrator role in Entra ID" -Level Error
                 Write-Host "`n❌ PERMISSION ERROR" -ForegroundColor Red
                 Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Red
                 Write-Host ""
@@ -1373,13 +1376,14 @@ function Set-AppRegistrationRoles {
                 Write-Host ""
                 Write-Host "Required Permissions:" -ForegroundColor Cyan
                 Write-Host "  ✔ Owner role at subscription level" -ForegroundColor Gray
-                Write-Host "  ✗ Global Administrator role in Entra ID (MISSING)" -ForegroundColor Red
+                Write-Host "  ✗ Privileged Role Administrator role in Entra ID (MISSING)" -ForegroundColor Red
                 Write-Host ""
-                Write-Host "Please contact a user with Global Administrator permissions to run this script." -ForegroundColor Yellow
+                Write-Host "Please contact a user with Privileged Role Administrator permissions to run this script." -ForegroundColor Yellow
                 Write-Host ""
-                throw "Insufficient permissions: Global Administrator role required"
+                throw "Insufficient permissions: Privileged Role Administrator role required"
             }
             else {
+                # Re-throw the original error so we can see what's really happening
                 throw
             }
         }
