@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.5.8
+    v1.5.9
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.5.8'
+$script:Version = 'v1.5.9'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -373,22 +373,12 @@ function Connect-AzureEnvironment {
         # Check if already connected to Azure
         $currentContext = Get-AzContext -ErrorAction SilentlyContinue
         
-        if ($currentContext -and $currentContext.Account) {
-            Write-Log "Already connected to Azure as $($currentContext.Account.Id)" -Level Info
+        # Force re-authentication if requested or if not connected
+        if ($script:ForceReAuth -or -not $currentContext -or -not $currentContext.Account) {
+            if ($script:ForceReAuth) {
+                Write-Log "Force re-authentication requested" -Level Info
+            }
             
-            # If TenantId is specified and different, reconnect
-            if ($TenantId -and $currentContext.Tenant.Id -ne $TenantId) {
-                Write-Log "Switching to specified tenant: $TenantId" -Level Info
-                $azContext = Connect-AzAccount -TenantId $TenantId -ErrorAction Stop
-            }
-            else {
-                $azContext = [PSCustomObject]@{
-                    Context = $currentContext
-                }
-                Write-Log "Using existing Azure connection" -Level Success
-            }
-        }
-        else {
             # Connect to Azure using device code authentication
             Write-Log "Authenticating to Azure..." -Level Info
             Write-Host "`nℹ️  Using device code authentication for Azure login." -ForegroundColor Cyan
@@ -401,6 +391,21 @@ function Connect-AzureEnvironment {
                 $azContext = Connect-AzAccount -UseDeviceAuthentication -ErrorAction Stop
             }
             Write-Log "Connected to Azure as $($azContext.Context.Account.Id)" -Level Success
+        }
+        elseif ($currentContext -and $currentContext.Account) {
+            Write-Log "Already connected to Azure as $($currentContext.Account.Id)" -Level Info
+            
+            # If TenantId is specified and different, reconnect
+            if ($TenantId -and $currentContext.Tenant.Id -ne $TenantId) {
+                Write-Log "Switching to specified tenant: $TenantId" -Level Info
+                $azContext = Connect-AzAccount -TenantId $TenantId -UseDeviceAuthentication -ErrorAction Stop
+            }
+            else {
+                $azContext = [PSCustomObject]@{
+                    Context = $currentContext
+                }
+                Write-Log "Using existing Azure connection" -Level Success
+            }
         }
 
         # Store context information
@@ -459,7 +464,16 @@ function Connect-AzureEnvironment {
         # Check if already connected to Microsoft Graph
         $mgContext = Get-MgContext -ErrorAction SilentlyContinue
         
-        if ($mgContext -and $mgContext.TenantId -eq $script:ConfigData['TenantId']) {
+        # Force re-authentication if requested
+        if ($script:ForceReAuth) {
+            if ($mgContext) {
+                Write-Log "Force re-authentication: Disconnecting from Microsoft Graph" -Level Info
+                Disconnect-MgGraph -ErrorAction SilentlyContinue
+                $mgContext = $null
+            }
+        }
+        
+        if ($mgContext -and $mgContext.TenantId -eq $script:ConfigData['TenantId'] -and -not $script:ForceReAuth) {
             Write-Log "Already connected to Microsoft Graph for tenant $($mgContext.TenantId)" -Level Info
             Write-Host "`n✓ Microsoft Graph: Using existing connection (Account: $($mgContext.Account))`n" -ForegroundColor Green
         }
@@ -2218,12 +2232,16 @@ function Start-NeologikOnboarding {
             
             if ($reauth -eq 'Y' -or $reauth -eq 'y') {
                 Write-Host "You will be prompted to login to Azure..." -ForegroundColor Green
-                # Disconnect current session
+                # Disconnect current session completely
                 Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
+                Clear-AzContext -Scope CurrentUser -Force -ErrorAction SilentlyContinue
                 Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+                # Set flag to force re-authentication
+                $script:ForceReAuth = $true
             }
             else {
                 Write-Host "Continuing with current connection..." -ForegroundColor Green
+                $script:ForceReAuth = $false
             }
             Write-Host ""
         }
