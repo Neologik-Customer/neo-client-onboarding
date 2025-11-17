@@ -470,7 +470,7 @@ function Connect-AzureEnvironment {
             
             Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
                 -Scopes "User.ReadWrite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
-                -UseDeviceCode `
+                -UseDeviceAuthentication `
                 -NoWelcome `
                 -ErrorAction Stop
             Write-Log "Connected to Microsoft Graph" -Level Success
