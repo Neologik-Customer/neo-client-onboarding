@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.6.5
+    v1.6.6
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.6.5'
+$script:Version = 'v1.6.6'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -947,6 +947,10 @@ function New-NeologikSecurityGroups {
                     -ErrorAction Stop
 
                 Write-Log "Group created successfully (ID: $($group.Id))" -Level Success
+                
+                # Wait for group to replicate across Azure AD before adding members
+                Write-Log "Waiting 5 seconds for group replication..." -Level Info
+                Start-Sleep -Seconds 5
             }
 
             # Add guest users to the group
@@ -1005,8 +1009,15 @@ function New-NeologikSecurityGroups {
                 }
             }
             catch {
-                Write-Log "ERROR: Could not add logged-in user to $($groupDef.Name): $_" -Level Error
-                throw
+                # If group or user doesn't exist yet (404 - replication delay), log warning and continue
+                if ($_.Exception.Message -match "404|NotFound|does not exist") {
+                    Write-Log "WARNING: Could not add logged-in user (group may not be replicated yet)" -Level Warning
+                }
+                else {
+                    # Other errors are fatal
+                    Write-Log "ERROR: Could not add logged-in user to $($groupDef.Name): $_" -Level Error
+                    throw
+                }
             }
 
             $createdGroups += @{
