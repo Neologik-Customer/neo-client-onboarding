@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.6.9
+    v1.7.0
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.6.9'
+$script:Version = 'v1.7.0'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -1249,7 +1249,7 @@ function Set-AppRegistrationRoles {
             Write-Log "Adding App Registration to $($adminGroup.Name)..." -Level Info
             
             try {
-                $isMember = Get-MgGroupMember -GroupId $adminGroup.Id -Filter "id eq '$ServicePrincipalId'" -ErrorAction Stop
+                $isMember = Get-MgGroupMember -GroupId $adminGroup.Id -Filter "id eq '$ServicePrincipalId'" -ErrorAction SilentlyContinue
 
                 if ($isMember) {
                     Write-Log "Service Principal is already a member of the group" -Level Info
