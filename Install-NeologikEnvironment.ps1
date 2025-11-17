@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.6.3
+    v1.6.4
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.6.3'
+$script:Version = 'v1.6.4'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -955,7 +955,7 @@ function New-NeologikSecurityGroups {
             foreach ($guestUser in $GuestUsers) {
                 try {
                     # Check if user is already a member
-                    $isMember = Get-MgGroupMember -GroupId $group.Id -Filter "id eq '$($guestUser.UserId)'" -ErrorAction SilentlyContinue
+                    $isMember = Get-MgGroupMember -GroupId $group.Id -Filter "id eq '$($guestUser.UserId)'" -ErrorAction Stop
 
                     if ($isMember) {
                         Write-Log "User $($guestUser.Email) is already a member of $($groupDef.Name)" -Level Info
@@ -966,7 +966,8 @@ function New-NeologikSecurityGroups {
                     }
                 }
                 catch {
-                    Write-Log "Warning: Could not add $($guestUser.Email) to $($groupDef.Name): $_" -Level Warning
+                    Write-Log "ERROR: Could not add $($guestUser.Email) to $($groupDef.Name): $_" -Level Error
+                    throw
                 }
             }
 
@@ -976,7 +977,7 @@ function New-NeologikSecurityGroups {
                 # Use the stored user ID which works for both member and guest users
                 if ($script:ConfigData['CurrentUserId']) {
                     $currentUserId = $script:ConfigData['CurrentUserId']
-                    $isMember = Get-MgGroupMember -GroupId $group.Id -Filter "id eq '$currentUserId'" -ErrorAction SilentlyContinue
+                    $isMember = Get-MgGroupMember -GroupId $group.Id -Filter "id eq '$currentUserId'" -ErrorAction Stop
 
                     if ($isMember) {
                         Write-Log "Logged-in user is already a member of $($groupDef.Name)" -Level Info
@@ -991,7 +992,8 @@ function New-NeologikSecurityGroups {
                 }
             }
             catch {
-                Write-Log "Warning: Could not add logged-in user to $($groupDef.Name): $_" -Level Warning
+                Write-Log "ERROR: Could not add logged-in user to $($groupDef.Name): $_" -Level Error
+                throw
             }
 
             $createdGroups += @{
@@ -1041,10 +1043,18 @@ function Set-NeologikRoleAssignments {
         Write-Log "Assigning Contributor role to $($adminGroup.Name)..." -Level Info
 
         # Check if role assignment already exists
-        $existingAssignment = Get-AzRoleAssignment -ObjectId $adminGroup.Id `
-            -RoleDefinitionName 'Contributor' `
-            -Scope "/subscriptions/$SubscriptionId" `
-            -ErrorAction SilentlyContinue
+        try {
+            $existingAssignment = Get-AzRoleAssignment -ObjectId $adminGroup.Id `
+                -RoleDefinitionName 'Contributor' `
+                -Scope "/subscriptions/$SubscriptionId" `
+                -ErrorAction Stop
+        }
+        catch {
+            Write-Log "ERROR: Unable to verify Contributor role assignment - insufficient permissions" -Level Error
+            Write-Host "`n❌ INSUFFICIENT PERMISSIONS" -ForegroundColor Red
+            Write-Host "Cannot verify role assignments. Owner role at subscription level is required." -ForegroundColor Yellow
+            throw "Insufficient permissions: Cannot verify role assignments"
+        }
 
         if ($existingAssignment) {
             Write-Log "Contributor role already assigned to $($adminGroup.Name)" -Level Info
@@ -1241,7 +1251,7 @@ function Set-AppRegistrationRoles {
             Write-Log "Adding App Registration to $($adminGroup.Name)..." -Level Info
             
             try {
-                $isMember = Get-MgGroupMember -GroupId $adminGroup.Id -Filter "id eq '$ServicePrincipalId'" -ErrorAction SilentlyContinue
+                $isMember = Get-MgGroupMember -GroupId $adminGroup.Id -Filter "id eq '$ServicePrincipalId'" -ErrorAction Stop
 
                 if ($isMember) {
                     Write-Log "Service Principal is already a member of the group" -Level Info
@@ -1262,10 +1272,18 @@ function Set-AppRegistrationRoles {
         foreach ($roleName in $roles) {
             Write-Log "Assigning $roleName role..." -Level Info
 
-            $existingAssignment = Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
-                -RoleDefinitionName $roleName `
-                -Scope "/subscriptions/$SubscriptionId" `
-                -ErrorAction SilentlyContinue
+            try {
+                $existingAssignment = Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
+                    -RoleDefinitionName $roleName `
+                    -Scope "/subscriptions/$SubscriptionId" `
+                    -ErrorAction Stop
+            }
+            catch {
+                Write-Log "ERROR: Unable to verify $roleName role assignment - insufficient permissions" -Level Error
+                Write-Host "`n❌ INSUFFICIENT PERMISSIONS" -ForegroundColor Red
+                Write-Host "Cannot verify role assignments. Owner role at subscription level is required." -ForegroundColor Yellow
+                throw "Insufficient permissions: Cannot verify role assignments"
+            }
 
             if ($existingAssignment) {
                 Write-Log "$roleName role already assigned" -Level Info
