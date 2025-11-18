@@ -1,6 +1,6 @@
 # Neologik Customer Onboarding Scripts
 
-**Version:** v1.2.4
+**Version:** v1.7.5
 
 Automated PowerShell scripts for onboarding customers to Neologik AI solution on Azure.
 
@@ -24,24 +24,29 @@ This repository contains a robust PowerShell script that automates the complete 
 - ✅ Comprehensive logging and error handling
 - ✅ Configuration export with script version tracking
 
-## What's New in v1.2.4
+## What's New in v1.7.5
 
-### Enhanced User Experience
-- ✅ **Organization Name**: Added organization name input for better documentation
-- ✅ **Guest User Support**: Fixed guest user detection and group membership
-- ✅ **Current User ID**: Proper retrieval of current user ID from Microsoft Graph context
-- ✅ **Key Vault Permissions**: Reordered operations to assign permissions before storing secrets
+### Critical Bug Fixes
+- ✅ **Azure AD Replication Handling**: Fixed 404 errors for newly created resources by using graceful failure pattern with `SilentlyContinue`
+- ✅ **Application Administrator Role**: Fixed `Request_UnsupportedQuery` error by removing unsupported filter queries and using manual filtering
+- ✅ **Service Principal Groups**: Fixed group membership checks to handle Azure AD replication delays gracefully
+- ✅ **Guest User Membership**: Restored working pattern for adding guest users to groups without throwing errors on replication delays
 
-### Improved Reliability
-- ✅ **Retry Logic**: Enhanced retry logic for Key Vault secret storage with permission propagation
-- ✅ **Current User Roles**: Assign Key Vault Secrets Officer role to current user first
-- ✅ **Permission Propagation**: Added wait times for role assignment propagation
-- ✅ **Multi-tenant Support**: Better handling of guest users in multi-tenant scenarios
+### Enhanced Resource Provider Management
+- ✅ **Microsoft.Compute Provider**: Added dedicated registration step before storage account creation
+- ✅ **Separate Section**: Created dedicated resource provider registration section for better organization
+- ✅ **Better Logging**: Enhanced logging for all resource provider operations
 
-### JSON Output Improvements
-- ✅ **Ordered Fields**: Structured JSON output with logical field ordering
-- ✅ **Organization Info**: Organization name and code at the top
-- ✅ **Better Organization**: Tenant, subscription, and resource information grouped logically
+### Error Handling Improvements
+- ✅ **Actual Error Messages**: Show real error messages instead of generic "Insufficient permissions" messages
+- ✅ **Better Diagnostics**: Enhanced error logging for Application Administrator role assignment failures
+- ✅ **Warning Prefixes**: Fixed double "WARNING:" prefix in log messages
+- ✅ **Non-Fatal Warnings**: Group membership operations now log warnings instead of failing when resources haven't replicated yet
+
+### API Compatibility
+- ✅ **Graph API Filters**: Replaced unsupported `-Filter` parameters with `-All` and manual filtering using `Where-Object`
+- ✅ **Directory Roles**: Fixed role queries to work with Microsoft Graph API limitations
+- ✅ **Role Templates**: Updated role template queries to avoid unsupported operations
 
 ## Prerequisites
 
@@ -57,7 +62,8 @@ This repository contains a robust PowerShell script that automates the complete 
 - **Subscription**: Azure subscription with appropriate billing setup
 - **User Permissions**: 
   - **Owner** role at the subscription level (required for RBAC assignments)
-  - **Global Administrator** role in Azure AD (Entra ID)
+  - **Privileged Role Administrator** role in Azure AD (Entra ID) - required for assigning Application Administrator role to service principals
+  - **Global Administrator** role also works but Privileged Role Administrator is the minimum required
   - Note: "Contributor" or "Co-Administrator" roles are insufficient for role assignments
 
 ### Network Requirements
@@ -276,7 +282,17 @@ Creates:
   - Certificate PFX password (manual step)
 - **Permissions**: Key Vault Secrets Officer role assigned to Neologik Admin User Group at resource group level
 
-### 7. Storage Account
+### 7. Resource Provider Registration
+
+Registers required Azure resource providers:
+- **Microsoft.Compute**: Registered before storage account creation
+- **Microsoft.Storage**: Registered before storage account creation
+- **Microsoft.KeyVault**: Registered before Key Vault creation
+- **Microsoft.ManagedIdentity**: Registered before managed identity creation
+- **Microsoft.Resources**: Registered before resource group creation
+- **Retry Logic**: Waits for registration to complete with 20 retry attempts
+
+### 8. Storage Account
 
 Creates:
 - **Storage Account**: `stneodeploy<org><env><region><index>`
@@ -284,7 +300,7 @@ Creates:
 - **Blob Container**: `certificate` (for TLS certificate storage)
 - **Permissions**: Storage Blob Data Contributor role assigned to Neologik Admin User Group at resource group level
 
-### 8. Managed Identities
+### 9. Managed Identities
 
 Creates two User Assigned Managed Identities with retry logic for replication delays:
 
@@ -299,17 +315,18 @@ Creates two User Assigned Managed Identities with retry logic for replication de
    - Directory Readers role (Entra ID)
    - Includes organization code and environment type
 
-### 9. Role Assignments
+### 10. Role Assignments
 
-- Adds Neologik guest users to all security groups
-- Adds current logged-in user to all security groups
+- Adds Neologik guest users to all security groups (with graceful handling of replication delays)
+- Adds current logged-in user to all security groups (with graceful handling of replication delays)
 - Assigns Contributor role to Neologik Admin User Group (Subscription level)
 - Assigns Key Vault Secrets Officer to Neologik Admin User Group (Resource Group level)
 - Assigns Storage Blob Data Contributor to Neologik Admin User Group (Resource Group level)
 - All managed identities receive appropriate subscription and Entra ID roles with retry logic
-- Retry logic handles Azure AD/Entra ID replication delays for new principals
+- Uses `SilentlyContinue` for membership checks to handle Azure AD replication delays gracefully
+- Logs warnings instead of failing when resources haven't replicated yet
 
-### 10. Output Generation
+### 11. Output Generation
 
 Creates two files:
 - **Configuration JSON**: `NeologikConfiguration_<timestamp>.json` (includes script version, excludes secret values)
