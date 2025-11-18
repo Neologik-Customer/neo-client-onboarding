@@ -13,7 +13,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.7.3
+    v1.7.5
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -81,7 +81,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.7.3'
+$script:Version = 'v1.7.5'
 
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
@@ -1654,6 +1654,31 @@ function New-NeologikKeyVault {
 
 #endregion
 
+#region Resource Provider Registration
+
+function Register-ComputeResourceProvider {
+    <#
+    .SYNOPSIS
+        Registers Microsoft.Compute resource provider for the subscription.
+    #>
+    [CmdletBinding()]
+    param()
+
+    Write-Log "Registering Microsoft.Compute resource provider..." -Level Info
+    
+    try {
+        Register-RequiredResourceProvider -ProviderNamespace 'Microsoft.Compute'
+        Write-Log "Microsoft.Compute resource provider registered successfully" -Level Success
+        return $true
+    }
+    catch {
+        Write-Log "Failed to register Microsoft.Compute resource provider: $_" -Level Error
+        throw
+    }
+}
+
+#endregion
+
 #region Storage Account
 
 function New-NeologikStorageAccount {
@@ -2572,7 +2597,10 @@ function Start-NeologikOnboarding {
             -SecurityGroups $securityGroups `
             -SubscriptionId $script:ConfigData['SubscriptionId']
 
-        # Step 13: Create Storage Account and blob container for certificates
+        # Step 13: Register Microsoft.Compute Resource Provider
+        Register-ComputeResourceProvider
+
+        # Step 14: Create Storage Account and blob container for certificates
         $storageAccountName = "stneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
         
         # Storage account names must be 3-24 characters, lowercase alphanumeric only
@@ -2586,14 +2614,14 @@ function Start-NeologikOnboarding {
             -StorageAccountName $storageAccountName `
             -SecurityGroups $securityGroups
 
-        # Step 14: Create Managed Identities
+        # Step 15: Create Managed Identities
         $null = New-NeologikManagedIdentities -ResourceGroupName $script:ResourceGroupName `
             -Location $script:AzureRegion `
             -SubscriptionId $script:ConfigData['SubscriptionId'] `
             -OrganizationCode $script:OrganizationCode `
             -EnvironmentType $script:EnvironmentType
 
-        # Step 15: Export configuration
+        # Step 16: Export configuration
         Export-ConfigurationData
 
         Write-Log "Neologik onboarding completed successfully!" -Level Success
