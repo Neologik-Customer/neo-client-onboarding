@@ -2374,7 +2374,7 @@ function Start-NeologikOnboarding {
             $hostnameInput = Read-Host
         }
 
-        $script:Hostname = $hostnameInput.Trim()
+        $script:Hostname = $hostnameInput.Trim().ToLower()
         $script:ConfigData['Hostname'] = $script:Hostname
         Write-Host "  ✓ Using: " -NoNewline -ForegroundColor Green
         Write-Host $script:Hostname -ForegroundColor White
@@ -2391,7 +2391,7 @@ function Start-NeologikOnboarding {
             $domainInput = Read-Host
         }
 
-        $script:DomainName = $domainInput.Trim()
+        $script:DomainName = $domainInput.Trim().ToLower()
         $script:ConfigData['DomainName'] = $script:DomainName
         Write-Host "  ✓ Using: " -NoNewline -ForegroundColor Green
         Write-Host $script:DomainName -ForegroundColor White
@@ -2403,14 +2403,15 @@ function Start-NeologikOnboarding {
             Write-Host "Organization Code (exactly 3 characters):" -ForegroundColor Cyan
             Write-Host "  Default: " -NoNewline -ForegroundColor Gray
             Write-Host $OrganizationCode -ForegroundColor Yellow
+            Write-Host "  Requirements: lowercase, exactly 3 characters, letters and numbers only" -ForegroundColor Gray
             Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
             $orgInput = Read-Host
 
             if ([string]::IsNullOrWhiteSpace($orgInput)) {
-                $script:OrganizationCode = $OrganizationCode
+                $script:OrganizationCode = $OrganizationCode.ToLower()
             }
             else {
-                $script:OrganizationCode = $orgInput
+                $script:OrganizationCode = $orgInput.Trim().ToLower()
             }
 
             # Validate length
@@ -2419,9 +2420,9 @@ function Start-NeologikOnboarding {
                 continue
             }
 
-            # Validate alphanumeric
-            if ($script:OrganizationCode -notmatch '^[a-zA-Z0-9]{3}$') {
-                Write-Host "  ✗ Organization code must contain only letters and numbers. Please try again." -ForegroundColor Red
+            # Validate lowercase alphanumeric only
+            if ($script:OrganizationCode -notmatch '^[a-z0-9]{3}$') {
+                Write-Host "  ✗ Organization code must contain only lowercase letters and numbers. Please try again." -ForegroundColor Red
                 continue
             }
 
@@ -2441,14 +2442,14 @@ function Start-NeologikOnboarding {
             $envInput = Read-Host
 
             if ([string]::IsNullOrWhiteSpace($envInput)) {
-                $script:EnvironmentType = $EnvironmentType
+                $script:EnvironmentType = $EnvironmentType.ToLower()
                 $envTypeValid = $true
-                Write-Host "  ✓ Using default: $EnvironmentType" -ForegroundColor Green
+                Write-Host "  ✓ Using default: $($script:EnvironmentType)" -ForegroundColor Green
             }
-            elseif ($envInput -eq 'dev' -or $envInput -eq 'prd') {
-                $script:EnvironmentType = $envInput
+            elseif ($envInput.ToLower() -eq 'dev' -or $envInput.ToLower() -eq 'prd') {
+                $script:EnvironmentType = $envInput.ToLower()
                 $envTypeValid = $true
-                Write-Host "  ✓ Using: $envInput" -ForegroundColor Green
+                Write-Host "  ✓ Using: $($script:EnvironmentType)" -ForegroundColor Green
             }
             else {
                 Write-Host "  ✗ Invalid environment type. Must be 'dev' or 'prd'. Please try again." -ForegroundColor Red
@@ -2471,9 +2472,9 @@ function Start-NeologikOnboarding {
             $regionInput = Read-Host
 
             if ([string]::IsNullOrWhiteSpace($regionInput)) {
-                $script:AzureRegion = $AzureRegion
+                $script:AzureRegion = $AzureRegion.ToLower()
                 $regionValid = $true
-                Write-Host "  ✓ Using default: $AzureRegion" -ForegroundColor Green
+                Write-Host "  ✓ Using default: $($script:AzureRegion)" -ForegroundColor Green
             }
             elseif ($validRegions -contains $regionInput.ToLower()) {
                 $script:AzureRegion = $regionInput.ToLower()

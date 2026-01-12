@@ -20,14 +20,16 @@ This script creates resources and assigns permissions for Neologik deployment in
 ## Variables Used
 
 - `{org}` = Organization code (3 characters, lowercase)
-- `{env}` = Environment type (`dev` or `prd`)
-- `{region}` = Azure region abbreviation (e.g., `uks`, `eus`)
+- `{env}` = Environment type (`dev` or `prd`, lowercase)
+- `{region}` = Azure region abbreviation (e.g., `uks`, `eus`, lowercase)
 - `{index}` = Environment index (e.g., `01`, `02`)
+- `{agent-name}` = Bot agent name (lowercase, max 7 characters)
 
-**Example:** Organization "ABC", dev environment, UK South, index 01
+**Example:** Organization "ABC", dev environment, UK South, index 01, bot agent name "support"
 - Resource Group: `rg-neo-abc-dev-uks-01`
 - Key Vault: `kvneodeployabcdevuks01`
 - Storage Account: `stneodeployabcdevuks01`
+- User Group: `Neologik User Group support - abc-dev`
 
 ---
 
@@ -35,27 +37,32 @@ This script creates resources and assigns permissions for Neologik deployment in
 
 ### 1. Guest User Invitations (Entra ID)
 
-**Action:** Invite 5 Neologik users as B2B guests (if not already invited)
+**Action:** Invite Neologik users as B2B guests (if not already invited)
 
-| Email | Role |
-|-------|------|
-| bryan.lloyd@neologik.ai | Guest |
-| rupert.fawcett@neologik.ai | Guest |
-| Jashanpreet.Magar@neologik.ai | Guest |
-| leon.simpson@neologik.ai | Guest |
-| gael.abruzzese@neologik.ai | Guest |
+**Source:** Email addresses loaded from `NeologikGuestUsers.txt` file
+
+**Note:** Guest users will only be invited if they don't already exist in the tenant
 
 ---
 
 ### 2. Security Groups (Entra ID)
 
-**Action:** Create 3 security groups
+**Action:** Create security groups (3+ groups depending on bot count)
 
+**Bot User Groups** (one per bot):
 | Group Name | Members |
-|------------|---------|
-| `Neologik User Group - {org}-{env}` | Current user + 5 Neologik guests |
-| `Neologik NCE User Group - {org}-{env}` | Current user + 5 Neologik guests |
-| `Neologik Admin User Group - {org}-{env}` | Current user + 5 Neologik guests |
+|------------|----------|
+| `Neologik User Group {agent-name} - {org}-{env}` | Current user + Neologik guests |
+
+**Note:** If you configure 2 bots with agent names "bot" and "support", you'll get:
+- `Neologik User Group bot - {org}-{env}`
+- `Neologik User Group support - {org}-{env}`
+
+**Standard Groups** (always created):
+| Group Name | Members |
+|------------|----------|
+| `Neologik NCE User Group - {org}-{env}` | Current user + Neologik guests |
+| `Neologik Admin User Group - {org}-{env}` | Current user + Neologik guests |
 
 **Scope:** Entra ID tenant level
 
