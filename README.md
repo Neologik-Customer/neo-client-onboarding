@@ -33,6 +33,11 @@ cd neo-client-onboarding-scripts
    - **Owner** role at the subscription level (not just "Contributor")
    - **Global Administrator** role in Azure AD (Entra ID)
 
+✅ **NeologikGuestUsers.txt file** (included in repository):
+   - Contains email addresses of Neologik team members to invite as guests
+   - Must be in the same folder as the script
+   - You can review the file before running the script
+
 ⚠️ **CRITICAL - Both Permissions Required:**
 - The **Owner** role is required to assign role-based access control (RBAC) permissions. "Subscription Owner" or "Contributor" roles alone are insufficient.
 - The **Global Administrator** role is required to assign Entra ID directory roles.
@@ -118,29 +123,54 @@ Questions you'll be asked:
    - This is required and cannot be empty
    - Used for documentation and identification
 
-2. **Organization Code**: Your 3-letter company code (e.g., "ABC")
+2. **Hostname**: Server/computer name (e.g., "server01", "web-server")
+   - This is required and cannot be empty
+   - Automatically converted to lowercase
+   - Used for identification purposes
+
+3. **Domain Name**: Your domain (e.g., "contoso.com", "example.local")
+   - This is required and cannot be empty
+   - Automatically converted to lowercase
+   - Used for identification purposes
+
+4. **Organization Code**: Your 3-letter company code (e.g., "ABC")
    - Must be **exactly 3 characters**
    - Only letters and numbers allowed
+   - Automatically converted to lowercase
    - The script will keep asking until you enter a valid code
 
-3. **Environment Type**: `dev` for development or `prd` for production
+5. **Environment Type**: `dev` for development or `prd` for production
    - Must be either `dev` or `prd`
+   - Automatically converted to lowercase
    - The script will keep asking until you enter a valid type
 
-4. **Azure Region**: Where to create resources (e.g., "uksouth", "eastus")
+6. **Azure Region**: Where to create resources (e.g., "uksouth", "eastus")
    - Must be a valid Azure region name
    - Common options: uksouth, ukwest, eastus, westus, northeurope, westeurope
+   - Automatically converted to lowercase
    - The script will keep asking until you enter a valid region
 
-5. **Environment Index**: Number for this environment (01, 02, etc.)
+7. **Environment Index**: Number for this environment (01, 02, etc.)
    - Use default "01" for first setup
    - Must be a number between 01 and 99
    - The script will keep asking until you enter a valid number
 
-6. **Resource Group Name**: Where resources will be organized
+8. **Resource Group Name**: Where resources will be organized
    - Default follows Azure naming conventions
    - Can contain letters, numbers, underscores, hyphens, periods, and parentheses
    - Cannot end with a period
+
+9. **Bot Count**: How many bots will there be? (1-10)
+   - Default is 1
+   - Used to create separate user groups for each bot
+
+10. **Bot Configuration**: For each bot, you'll be asked:
+    - **Agent Name**: Descriptive name for the bot (e.g., "bot", "support")
+      - Lowercase only, max 7 characters, letters and dashes
+      - Used in security group names
+    - **Short Name**: Short identifier for the bot (e.g., "bot", "sup")
+      - Lowercase only, max 7 characters, letters and dashes
+      - Used internally for identification
 
 ### 7. Confirm and Continue
 

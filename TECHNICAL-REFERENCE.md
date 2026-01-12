@@ -26,6 +26,13 @@ This repository contains a robust PowerShell script that automates the complete 
 
 ## What's New in v1.7.5
 
+### New Features
+- ✅ **External Guest User File**: Guest user emails now loaded from `NeologikGuestUsers.txt` for easier management
+- ✅ **Hostname and Domain Capture**: Added prompts for organization hostname and domain name
+- ✅ **Multiple Bot Support**: Configure 1-10 bots with dedicated user groups for each
+- ✅ **Bot Agent Names**: Each bot can have a unique agent name (used in group names) and short name
+- ✅ **Lowercase Conversion**: Organization code, hostname, domain name, environment type, and region automatically converted to lowercase
+
 ### Critical Bug Fixes
 - ✅ **Azure AD Replication Handling**: Fixed 404 errors for newly created resources by using graceful failure pattern with `SilentlyContinue`
 - ✅ **Application Administrator Role**: Fixed `Request_UnsupportedQuery` error by removing unsupported filter queries and using manual filtering
@@ -55,6 +62,7 @@ This repository contains a robust PowerShell script that automates the complete 
 - **Operating System**: Windows 11 (or Windows 10 with latest updates)
 - **PowerShell**: 7.4 or higher (script will offer to install/update if needed)
 - **Administrator Access**: Required for module installation and system updates
+- **NeologikGuestUsers.txt**: Guest user email list file (included in repository, must be in same folder as script)
 
 ### Azure Requirements
 
@@ -199,11 +207,17 @@ Organization Code (3 characters max):
 
 The script includes comprehensive validation for all inputs:
 
-- **Organization Code**: Must be exactly 3 alphanumeric characters
-- **Environment Type**: Must be either 'dev' or 'prd'
-- **Azure Region**: Must be a valid Azure region name (e.g., uksouth, eastus, westus)
+- **Organization Name**: Required, cannot be empty
+- **Hostname**: Required, cannot be empty, automatically converted to lowercase
+- **Domain Name**: Required, cannot be empty, automatically converted to lowercase
+- **Organization Code**: Must be exactly 3 alphanumeric characters, automatically converted to lowercase
+- **Environment Type**: Must be either 'dev' or 'prd', automatically converted to lowercase
+- **Azure Region**: Must be a valid Azure region name (e.g., uksouth, eastus, westus), automatically converted to lowercase
 - **Environment Index**: Must be a number between 01 and 99
 - **Resource Group Name**: Must follow Azure naming conventions (1-90 characters, alphanumerics, underscores, hyphens, periods, parentheses, cannot end with period)
+- **Bot Count**: Must be between 1 and 10
+- **Agent Name**: Lowercase only, max 7 characters, letters and dashes, must start with letter, no duplicates
+- **Short Name**: Lowercase only, max 7 characters, letters and dashes, must start with letter, no duplicates
 
 The script will keep prompting until valid input is provided, ensuring all resources are created with proper names.
 
@@ -214,7 +228,9 @@ All resources are named to include your organization code and environment type f
 - **Resource Group**: `rg-neo-<org>-<env>-<region>-<index>` (e.g., rg-neo-abc-dev-uks-01)
   - **paramSolutionName**: `neo-<org>-<env>-<region>-<index>` (e.g., neo-abc-dev-uks-01)
   - **paramSolutionShortName** (no hyphens): `neo<org><env><region><index>` (e.g., neoabcdevuks01)
-- **Security Groups**: `Neologik [Type] Group - abc-dev`
+- **Bot User Groups**: `Neologik User Group <agent-name> - abc-dev` (one per bot)
+- **NCE User Group**: `Neologik NCE User Group - abc-dev`
+- **Admin User Group**: `Neologik Admin User Group - abc-dev`
 - **App Registration**: `Neologik GitHub Service Connection - abc-dev`
 - **Managed Identities**: `neologik-[type]-abc-dev`
 - **Key Vault**: `kvneodeploy<org><env><region><index>` (e.g., kvneodeployabcdevuks01)
@@ -242,12 +258,15 @@ This naming convention makes it easy to identify which customer and environment 
 
 ### 3. Guest User Management
 
-Invites the following Neologik team members as guests:
-- bryan.lloyd@neologik.ai
-- rupert.fawcett@neologik.ai
-- Jashanpreet.Magar@neologik.ai
-- leon.simpson@neologik.ai
-- gael.abruzzese@neologik.ai
+Invites Neologik team members as guests based on email addresses in `NeologikGuestUsers.txt` file.
+
+**File Format:**
+- One email address per line
+- Blank lines are ignored
+- Lines starting with `#` are treated as comments
+- File must be in the same directory as the script
+
+**Guest users are only invited if they don't already exist in the tenant.**
 
 ### 4. Resource Creation
 
@@ -255,9 +274,12 @@ Creates or validates:
 - **Subscription**: Uses your current Azure subscription
 - **Resource Group**: `rg-neo-<org>-<env>-<region>-<index>`
 - **Security Groups** (with current user and Neologik guests):
-  - Neologik User Group - abc-dev
-  - Neologik NCE User Group - abc-dev
-  - Neologik Admin User Group - abc-dev
+  - **Bot User Groups** (one per configured bot):
+    - Neologik User Group <agent-name> - abc-dev (e.g., "Neologik User Group bot - abc-dev")
+    - Each bot gets its own dedicated user group based on the agent name provided
+  - **Standard Groups**:
+    - Neologik NCE User Group - abc-dev
+    - Neologik Admin User Group - abc-dev
 
 ### 5. App Registration
 
@@ -346,8 +368,24 @@ The configuration file contains all necessary information to share with Neologik
   "SubscriptionName": "...",
   "ResourceGroupName": "...",
   "AzureRegion": "...",
-  "ScriptVersion": "v1.2.1",
+  "ScriptVersion": "v1.7.5",
   "UserAccount": "user@domain.com",
+  "OrganizationName": "Contoso Ltd",
+  "Hostname": "server01",
+  "DomainName": "contoso.com",
+  "OrganizationCode": "abc",
+  "EnvironmentType": "dev",
+  "BotCount": 2,
+  "Bots": [
+    {
+      "AgentName": "bot",
+      "ShortName": "bot"
+    },
+    {
+      "AgentName": "support",
+      "ShortName": "sup"
+    }
+  ],
   "SecurityGroups": [...],
   "AppRegistration": {
     "Name": "Neologik GitHub Service Connection - abc-dev",
@@ -384,6 +422,8 @@ The configuration file contains all necessary information to share with Neologik
       "EntraRole": "Directory Readers",
       "GroupMemberships": []
     }
+  ]
+}
   ],
   "RoleAssignments": [
     {
