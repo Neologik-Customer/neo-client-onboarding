@@ -87,14 +87,14 @@ $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
 $script:ConfigData = @{}
 
-# Neologik guest user emails
-$script:NeologikGuestUsers = @(
-    'bryan.lloyd@neologik.ai',
-    'rupert.fawcett@neologik.ai',
-    'Jashanpreet.Magar@neologik.ai',
-    'leon.simpson@neologik.ai',
-    'gael.abruzzese@neologik.ai'
-)
+# Load Neologik guest user emails from file
+$script:GuestUsersFile = Join-Path $PSScriptRoot "NeologikGuestUsers.txt"
+if (Test-Path $script:GuestUsersFile) {
+    $script:NeologikGuestUsers = @(Get-Content $script:GuestUsersFile | Where-Object { $_.Trim() -ne '' -and $_ -notmatch '^\s*#' })
+} else {
+    Write-Warning "Guest users file not found at: $script:GuestUsersFile. No guest users will be invited."
+    $script:NeologikGuestUsers = @()
+}
 
 # Required PowerShell modules
 $script:RequiredModules = @(
