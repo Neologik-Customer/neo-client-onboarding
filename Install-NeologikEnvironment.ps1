@@ -2353,6 +2353,40 @@ function Start-NeologikOnboarding {
         Write-Host "  ✓ Using: " -NoNewline -ForegroundColor Green
         Write-Host $script:OrganizationName -ForegroundColor White
 
+        # Get Hostname
+        Write-Host ""
+        Write-Host "Hostname (server/computer name):" -ForegroundColor Cyan
+        Write-Host "  Example: server01, web-server, app-host" -ForegroundColor Gray
+        Write-Host "  Enter hostname: " -NoNewline -ForegroundColor Gray
+        $hostnameInput = Read-Host
+
+        while ([string]::IsNullOrWhiteSpace($hostnameInput)) {
+            Write-Host "  Hostname is required. Please enter a hostname: " -NoNewline -ForegroundColor Yellow
+            $hostnameInput = Read-Host
+        }
+
+        $script:Hostname = $hostnameInput.Trim()
+        $script:ConfigData['Hostname'] = $script:Hostname
+        Write-Host "  ✓ Using: " -NoNewline -ForegroundColor Green
+        Write-Host $script:Hostname -ForegroundColor White
+
+        # Get Domain Name
+        Write-Host ""
+        Write-Host "Domain Name:" -ForegroundColor Cyan
+        Write-Host "  Example: contoso.com, example.local" -ForegroundColor Gray
+        Write-Host "  Enter domain name: " -NoNewline -ForegroundColor Gray
+        $domainInput = Read-Host
+
+        while ([string]::IsNullOrWhiteSpace($domainInput)) {
+            Write-Host "  Domain name is required. Please enter a domain name: " -NoNewline -ForegroundColor Yellow
+            $domainInput = Read-Host
+        }
+
+        $script:DomainName = $domainInput.Trim()
+        $script:ConfigData['DomainName'] = $script:DomainName
+        Write-Host "  ✓ Using: " -NoNewline -ForegroundColor Green
+        Write-Host $script:DomainName -ForegroundColor White
+
         # Get Organization Code with validation
         $orgCodeValid = $false
         while (-not $orgCodeValid) {
@@ -2554,6 +2588,8 @@ function Start-NeologikOnboarding {
         Write-Host "  Tenant ID:            " -NoNewline; Write-Host $script:ConfigData['TenantId'] -ForegroundColor Yellow
         Write-Host "  Subscription Name:    " -NoNewline; Write-Host $script:ConfigData['SubscriptionName'] -ForegroundColor Yellow
         Write-Host "  Organization Name:    " -NoNewline; Write-Host $script:OrganizationName -ForegroundColor Yellow
+        Write-Host "  Hostname:             " -NoNewline; Write-Host $script:Hostname -ForegroundColor Yellow
+        Write-Host "  Domain Name:          " -NoNewline; Write-Host $script:DomainName -ForegroundColor Yellow
         Write-Host "  Organization Code:    " -NoNewline; Write-Host $script:OrganizationCode -ForegroundColor Yellow
         Write-Host "  Environment Type:     " -NoNewline; Write-Host $script:EnvironmentType -ForegroundColor Yellow
         Write-Host "  Environment Index:    " -NoNewline; Write-Host $script:EnvironmentIndex -ForegroundColor Yellow
