@@ -896,7 +896,10 @@ function New-NeologikSecurityGroups {
         [string]$OrganizationCode = "",
 
         [Parameter(Mandatory = $false)]
-        [string]$EnvironmentType = ""
+        [string]$EnvironmentType = "",
+
+        [Parameter(Mandatory = $false)]
+        [array]$BotNames = @("bot")
     )
 
     Write-Log "Creating Neologik security groups..." -Level Info
@@ -909,20 +912,26 @@ function New-NeologikSecurityGroups {
         $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "-$($EnvironmentType.ToLower())" }
         $groupSuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { " - $orgLower$envLower" }
 
-        $groups = @(
-            @{
-                Name = "Neologik User Group$groupSuffix"
-                Description = 'Normal Neologik users for Teams app access'
-            },
-            @{
-                Name = "Neologik NCE User Group$groupSuffix"
-                Description = 'Users who need access to NCE web tool'
-            },
-            @{
-                Name = "Neologik Admin User Group$groupSuffix"
-                Description = 'Users who will administer and support the resources'
+        # Build groups array starting with bot-specific user groups
+        $groups = @()
+        
+        # Create a user group for each bot
+        foreach ($botName in $BotNames) {
+            $groups += @{
+                Name = "Neologik User Group $botName$groupSuffix"
+                Description = "Neologik users for Teams app access - $botName bot"
             }
-        )
+        }
+        
+        # Add NCE and Admin groups (unchanged)
+        $groups += @{
+            Name = "Neologik NCE User Group$groupSuffix"
+            Description = 'Users who need access to NCE web tool'
+        }
+        $groups += @{
+            Name = "Neologik Admin User Group$groupSuffix"
+            Description = 'Users who will administer and support the resources'
+        }
 
         $createdGroups = @()
 
@@ -2573,6 +2582,150 @@ function Start-NeologikOnboarding {
             }
         }
 
+        # Get Number of Bots with validation
+        $botCountValid = $false
+        while (-not $botCountValid) {
+            Write-Host ""
+            Write-Host "How many bots will there be?" -ForegroundColor Cyan
+            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+            Write-Host "1" -ForegroundColor Yellow
+            Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
+            $botCountInput = Read-Host
+
+            if ([string]::IsNullOrWhiteSpace($botCountInput)) {
+                $script:BotCount = 1
+                $botCountValid = $true
+                Write-Host "  ✓ Using default: 1" -ForegroundColor Green
+            }
+            else {
+                # Validate it's a number
+                if ($botCountInput -match '^\d+$') {
+                    $botNumber = [int]$botCountInput
+                    
+                    # Validate range (1-10)
+                    if ($botNumber -ge 1 -and $botNumber -le 10) {
+                        $script:BotCount = $botNumber
+                        $botCountValid = $true
+                        Write-Host "  ✓ Using: $($script:BotCount)" -ForegroundColor Green
+                    }
+                    else {
+                        Write-Host "  ✗ Bot count must be between 1 and 10. Please try again." -ForegroundColor Red
+                    }
+                }
+                else {
+                    Write-Host "  ✗ Bot count must be a number. Please try again." -ForegroundColor Red
+                }
+            }
+        }
+
+        # Get Bot Names (Agent Name and Short Name for each bot)
+        $script:BotConfigurations = @()
+        for ($i = 1; $i -le $script:BotCount; $i++) {
+            $defaultAgentName = if ($i -eq 1) { "bot" } else { "bot$i" }
+            $agentNameValid = $false
+            $agentName = ""
+            
+            # Get Agent Name
+            while (-not $agentNameValid) {
+                Write-Host ""
+                Write-Host "Agent Name for Bot $i`:" -ForegroundColor Cyan
+                Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+                Write-Host $defaultAgentName -ForegroundColor Yellow
+                Write-Host "  Requirements: lowercase, max 7 characters, letters and dashes only" -ForegroundColor Gray
+                Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
+                $agentNameInput = Read-Host
+
+                $agentName = if ([string]::IsNullOrWhiteSpace($agentNameInput)) {
+                    $defaultAgentName
+                } else {
+                    $agentNameInput.Trim()
+                }
+
+                # Validate lowercase
+                if ($agentName -cne $agentName.ToLower()) {
+                    Write-Host "  ✗ Agent name must be lowercase. Please try again." -ForegroundColor Red
+                    continue
+                }
+
+                # Validate length
+                if ($agentName.Length -lt 1 -or $agentName.Length -gt 7) {
+                    Write-Host "  ✗ Agent name must be between 1 and 7 characters. Please try again." -ForegroundColor Red
+                    continue
+                }
+
+                # Validate characters (lowercase letters and dashes only)
+                if ($agentName -notmatch '^[a-z][a-z\-]*$') {
+                    Write-Host "  ✗ Agent name must contain only lowercase letters and dashes, and must start with a letter. Please try again." -ForegroundColor Red
+                    continue
+                }
+
+                # Check for duplicates
+                if ($script:BotConfigurations | Where-Object { $_.AgentName -eq $agentName }) {
+                    Write-Host "  ✗ Agent name '$agentName' is already used. Please choose a different name." -ForegroundColor Red
+                    continue
+                }
+
+                $agentNameValid = $true
+                Write-Host "  ✓ Using: $agentName" -ForegroundColor Green
+            }
+
+            # Get Bot Short Name
+            $defaultBotShortName = if ($i -eq 1) { "bot" } else { "bot$i" }
+            $botShortNameValid = $false
+            
+            while (-not $botShortNameValid) {
+                Write-Host ""
+                Write-Host "Bot $i Short Name:" -ForegroundColor Cyan
+                Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+                Write-Host $defaultBotShortName -ForegroundColor Yellow
+                Write-Host "  Requirements: lowercase, max 7 characters, letters and dashes only" -ForegroundColor Gray
+                Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
+                $botShortNameInput = Read-Host
+
+                $botShortName = if ([string]::IsNullOrWhiteSpace($botShortNameInput)) {
+                    $defaultBotShortName
+                } else {
+                    $botShortNameInput.Trim()
+                }
+
+                # Validate lowercase
+                if ($botShortName -cne $botShortName.ToLower()) {
+                    Write-Host "  ✗ Bot short name must be lowercase. Please try again." -ForegroundColor Red
+                    continue
+                }
+
+                # Validate length
+                if ($botShortName.Length -lt 1 -or $botShortName.Length -gt 7) {
+                    Write-Host "  ✗ Bot short name must be between 1 and 7 characters. Please try again." -ForegroundColor Red
+                    continue
+                }
+
+                # Validate characters (lowercase letters and dashes only)
+                if ($botShortName -notmatch '^[a-z][a-z\-]*$') {
+                    Write-Host "  ✗ Bot short name must contain only lowercase letters and dashes, and must start with a letter. Please try again." -ForegroundColor Red
+                    continue
+                }
+
+                # Check for duplicates
+                if ($script:BotConfigurations | Where-Object { $_.ShortName -eq $botShortName }) {
+                    Write-Host "  ✗ Bot short name '$botShortName' is already used. Please choose a different name." -ForegroundColor Red
+                    continue
+                }
+
+                $botShortNameValid = $true
+                Write-Host "  ✓ Using: $botShortName" -ForegroundColor Green
+            }
+
+            # Store both names for this bot
+            $script:BotConfigurations += @{
+                AgentName = $agentName
+                ShortName = $botShortName
+            }
+        }
+
+        $script:ConfigData['BotCount'] = $script:BotCount
+        $script:ConfigData['Bots'] = $script:BotConfigurations
+
         # Calculate solution names based on configuration
         $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode.ToLower())-$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
         $script:ConfigData['SolutionShortName'] = "neo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
@@ -2595,6 +2748,10 @@ function Start-NeologikOnboarding {
         Write-Host "  Environment Index:    " -NoNewline; Write-Host $script:EnvironmentIndex -ForegroundColor Yellow
         Write-Host "  Azure Region:         " -NoNewline; Write-Host $script:AzureRegion -ForegroundColor Yellow
         Write-Host "  Resource Group Name:  " -NoNewline; Write-Host $script:ResourceGroupName -ForegroundColor Yellow
+        Write-Host "  Bot Count:            " -NoNewline; Write-Host $script:BotCount -ForegroundColor Yellow
+        foreach ($bot in $script:BotConfigurations) {
+            Write-Host "  Bot:                  " -NoNewline; Write-Host "$($bot.AgentName) (short: $($bot.ShortName))" -ForegroundColor Yellow
+        }
         Write-Host ""
         Write-Host "Press Enter to continue with these settings, or Ctrl+C to cancel..." -ForegroundColor Yellow
         Read-Host
@@ -2606,7 +2763,9 @@ function Start-NeologikOnboarding {
         $guestUsers = Invoke-GuestUserInvitation -GuestEmails $script:NeologikGuestUsers
 
         # Step 9: Create security groups (includes logged-in user + guest users)
-        $securityGroups = New-NeologikSecurityGroups -GuestUsers $guestUsers -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType
+        # Extract agent names for group creation
+        $agentNames = $script:BotConfigurations | ForEach-Object { $_.AgentName }
+        $securityGroups = New-NeologikSecurityGroups -GuestUsers $guestUsers -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType -BotNames $agentNames
 
         # Step 10: Assign roles to security groups
         Set-NeologikRoleAssignments -SecurityGroups $securityGroups -SubscriptionId $script:ConfigData['SubscriptionId']
