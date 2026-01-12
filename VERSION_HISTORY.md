@@ -9,9 +9,9 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
-## Version 1.8.0 (Unreleased - In Development)
-**Branch**: feature/release  
-**Status**: In development
+## Version 1.8.0
+**Built**: January 12, 2026  
+**Git Tag**: v1.8.0
 
 ### Major Changes
 - **External Guest User Management** - Guest user emails moved to external configuration file
