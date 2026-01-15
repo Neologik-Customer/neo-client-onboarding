@@ -2869,7 +2869,7 @@ function Start-NeologikOnboarding {
                 Write-Host "Agent Name for Bot $i`:" -ForegroundColor Cyan
                 Write-Host "  Default: " -NoNewline -ForegroundColor Gray
                 Write-Host $defaultAgentName -ForegroundColor Yellow
-                Write-Host "  Requirements: lowercase, max 7 characters, letters and dashes only" -ForegroundColor Gray
+                Write-Host "  Requirements: letters, numbers, spaces, dashes, and underscores allowed" -ForegroundColor Gray
                 Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
                 $agentNameInput = Read-Host
 
@@ -2879,21 +2879,15 @@ function Start-NeologikOnboarding {
                     $agentNameInput.Trim()
                 }
 
-                # Validate lowercase
-                if ($agentName -cne $agentName.ToLower()) {
-                    Write-Host "  ✗ Agent name must be lowercase. Please try again." -ForegroundColor Red
+                # Validate not empty
+                if ([string]::IsNullOrWhiteSpace($agentName)) {
+                    Write-Host "  ✗ Agent name cannot be empty. Please try again." -ForegroundColor Red
                     continue
                 }
 
-                # Validate length
-                if ($agentName.Length -lt 1 -or $agentName.Length -gt 7) {
-                    Write-Host "  ✗ Agent name must be between 1 and 7 characters. Please try again." -ForegroundColor Red
-                    continue
-                }
-
-                # Validate characters (lowercase letters and dashes only)
-                if ($agentName -notmatch '^[a-z][a-z\-]*$') {
-                    Write-Host "  ✗ Agent name must contain only lowercase letters and dashes, and must start with a letter. Please try again." -ForegroundColor Red
+                # Validate characters (letters, numbers, spaces, dashes, and underscores)
+                if ($agentName -notmatch '^[A-Za-z0-9 \-_]+$') {
+                    Write-Host "  ✗ Agent name must contain only letters, numbers, spaces, dashes, and underscores. Please try again." -ForegroundColor Red
                     continue
                 }
 
