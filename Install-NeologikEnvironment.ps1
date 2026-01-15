@@ -2479,6 +2479,8 @@ function Start-NeologikOnboarding {
             'brazilsouth' = 'brs'
             'brazilsoutheast' = 'brse'
             'brazilus' = 'bru'
+            'mexicocentral' = 'mxc'
+            'chilecentral' = 'clc'
             
             # Europe
             'northeurope' = 'neu'
@@ -2498,6 +2500,8 @@ function Start-NeologikOnboarding {
             'italynorth' = 'itn'
             'polandcentral' = 'plc'
             'spaincentral' = 'spc'
+            'austriaeast' = 'ate'
+            'belgiumcentral' = 'bec'
             
             # Asia Pacific
             'eastasia' = 'eas'
@@ -2515,6 +2519,9 @@ function Start-NeologikOnboarding {
             'westindia' = 'inw'
             'jioindiawest' = 'jiw'
             'jioindiacentral' = 'jic'
+            'indonesiacentral' = 'idc'
+            'malaysiawest' = 'myw'
+            'newzealandnorth' = 'nzn'
             
             # Middle East & Africa
             'southafricanorth' = 'san'
@@ -2538,6 +2545,40 @@ function Start-NeologikOnboarding {
             'usgovtexas' = 'ugt'
             'usdodeast' = 'ude'
             'usdodcentral' = 'udc'
+            
+            # EUAP (Early Update Access Program) regions
+            'centraluseuap' = 'cuse'
+            'eastus2euap' = 'eus2e'
+            
+            # Geographic groups (not for deployment, but returned by Azure API)
+            'asia' = 'asia'
+            'asiapacific' = 'apac'
+            'australia' = 'au'
+            'brazil' = 'br'
+            'canada' = 'ca'
+            'europe' = 'eu'
+            'france' = 'fr'
+            'germany' = 'de'
+            'global' = 'global'
+            'india' = 'in'
+            'indonesia' = 'id'
+            'israel' = 'il'
+            'italy' = 'it'
+            'japan' = 'jp'
+            'korea' = 'kr'
+            'malaysia' = 'my'
+            'mexico' = 'mx'
+            'newzealand' = 'nz'
+            'norway' = 'no'
+            'poland' = 'pl'
+            'qatar' = 'qa'
+            'singapore' = 'sg'
+            'southafrica' = 'za'
+            'spain' = 'es'
+            'sweden' = 'se'
+            'switzerland' = 'ch'
+            'taiwan' = 'tw'
+            'unitedstates' = 'us'
         }
         
         try {
