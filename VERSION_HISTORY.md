@@ -2,10 +2,110 @@
 
 This document tracks the version history of the Neologik customer onboarding scripts deployed from the main branch, including significant changes, dependencies, and infrastructure requirements.
 
-**Version Format**: `MAJOR.MINOR.PATCH` (currently: `1.7.x`)
+**Version Format**: `MAJOR.MINOR.PATCH` (currently: `1.9.x`)
 - Major version: 1
-- Minor version: 7
+- Minor version: 9
 - Patch number: Incremented with each release
+
+---
+
+## Version 1.9.0
+**Built**: January 15, 2026  
+**Git Tag**: v1.9.0
+
+### Major Changes
+- **Real-time Azure Region Validation** - Dynamic region validation using Azure API with Microsoft CAF standards
+- **Comprehensive Region Coverage** - Support for 90+ Azure regions with official abbreviations
+- **Flexible Agent Name Validation** - Relaxed naming requirements for better user experience
+- **Intelligent Fallback Validation** - Graceful handling when Azure API is unavailable
+
+### Features Added
+- **Azure Region Management**:
+  - Real-time region validation using `Get-AzLocation` API
+  - Microsoft Cloud Adoption Framework (CAF) standard abbreviations for all regions
+  - Interactive 'list' command to display all available regions with codes
+  - Validation against subscription-specific available regions
+  - Fallback to CAF standards when API is unavailable with immediate validation
+  - Display region names and abbreviation codes during selection
+  
+- **Region Code Coverage** (90+ regions):
+  - Americas: All US, Canada, Brazil, Mexico, Chile regions
+  - Europe: All EU regions including Austria, Belgium, Switzerland, Nordic countries
+  - Asia Pacific: All APAC regions including Australia, Japan, Korea, India, Southeast Asia, Indonesia, Malaysia, New Zealand
+  - Middle East & Africa: UAE, Qatar, Israel, South Africa
+  - Government: US Gov and DoD regions
+  - EUAP: Early Update Access Program regions
+  - Geographic groups: Continental and country-level groupings
+  - Abbreviations based on ISO 3166-1 alpha-2 country codes and Microsoft standards
+  
+- **Enhanced User Experience**:
+  - Shows common regions by default (uksouth, ukwest, eastus, westus, northeurope, westeurope, switzerlandnorth)
+  - Displays region display names and codes: "switzerlandnorth - Switzerland North (Code: szn)"
+  - Type 'list' to see all available regions in formatted table
+  - Region codes shown in lowercase for consistency
+  - Immediate feedback on invalid region selection with helpful examples
+  
+- **Agent Name Flexibility**:
+  - Allow upper and lowercase letters (A-Z, a-z)
+  - Allow numbers (0-9)
+  - Allow spaces for multi-word names (e.g., "Customer Service Bot")
+  - Allow dashes (-) and underscores (_)
+  - Removed lowercase-only restriction
+  - Removed 7-character maximum length limit
+  - Removed must-start-with-letter requirement
+  - Updated validation regex to `^[A-Za-z0-9 \-_]+$`
+
+### Technical Improvements
+- **Dynamic Region Code Mapping**:
+  - Builds region code mapping on script execution using Azure API
+  - Applies Microsoft CAF standards where available
+  - Generates smart fallback abbreviations for new regions
+  - Tracks CAF coverage vs total regions (e.g., "90 using Microsoft CAF standards")
+  
+- **Validation Logic**:
+  - Primary: Validate against subscription-available regions from `Get-AzLocation`
+  - Fallback: Validate against Microsoft CAF standard region list
+  - Smart abbreviation generation for regions not yet in CAF standards
+  - Prevents wasted configuration time by validating before full setup
+  - Loops back on invalid input in both normal and fallback modes
+  
+- **Error Handling**:
+  - Graceful degradation when Azure API is unavailable
+  - Clear warning messages for fallback validation mode
+  - Helpful error messages with region examples
+  - Prevents script failure from proceeding with invalid regions
+
+### Infrastructure Changes
+- **Configuration Output**:
+  - Region codes now use official Microsoft CAF abbreviations
+  - Resource group names use lowercase region codes (e.g., "rg-neo-abc-dev-szn-01")
+  - Solution names include accurate region abbreviations
+  
+- **Resource Naming**:
+  - All Azure resources use Microsoft-standard region codes
+  - Consistent lowercase formatting across all resource names
+  - Examples:
+    - `switzerlandnorth` → `szn` (Microsoft CAF standard)
+    - `uksouth` → `uks` (Microsoft CAF standard)
+    - `eastus2` → `eus2` (Microsoft CAF standard)
+
+### Dependencies
+- **Azure PowerShell Module**: `Get-AzLocation` cmdlet for dynamic region retrieval
+- **Network Connectivity**: Required for real-time region validation (falls back to CAF standards if unavailable)
+- **No breaking changes** to existing resources or configurations
+- **Backward compatible** with existing deployments
+
+### Files Changed
+- Modified: [Install-NeologikEnvironment.ps1](Install-NeologikEnvironment.ps1) - Added real-time region validation, comprehensive region coverage, flexible agent name validation
+- Modified: [VERSION_HISTORY.md](VERSION_HISTORY.md) - This update
+
+### Breaking Changes
+- None (backward compatible)
+
+### Bug Fixes
+- Fixed scenario where invalid regions were accepted when Azure API was unavailable
+- Now validates against CAF standards even in fallback mode
+- Prevents wasted user time by rejecting invalid regions immediately
 
 ---
 
