@@ -2456,33 +2456,231 @@ function Start-NeologikOnboarding {
             }
         }
 
-        # Get Azure Region with validation
+        # Get Azure Region with real-time validation
+        # Query Azure for available locations
+        Write-Host ""
+        Write-Host "Retrieving available Azure regions..." -ForegroundColor Gray
+        
+        # Microsoft Cloud Adoption Framework (CAF) recommended region abbreviations
+        # Reference: https://learn.microsoft.com/azure/cloud-adoption-framework/ready/azure-best-practices/resource-abbreviations
+        $script:MicrosoftCAFRegionCodes = @{
+            # Americas
+            'eastus' = 'eus'
+            'eastus2' = 'eus2'
+            'westus' = 'wus'
+            'westus2' = 'wus2'
+            'westus3' = 'wus3'
+            'centralus' = 'cus'
+            'northcentralus' = 'ncus'
+            'southcentralus' = 'scus'
+            'westcentralus' = 'wcus'
+            'canadacentral' = 'cac'
+            'canadaeast' = 'cae'
+            'brazilsouth' = 'brs'
+            'brazilsoutheast' = 'brse'
+            'brazilus' = 'bru'
+            
+            # Europe
+            'northeurope' = 'neu'
+            'westeurope' = 'weu'
+            'uksouth' = 'uks'
+            'ukwest' = 'ukw'
+            'francecentral' = 'frc'
+            'francesouth' = 'frs'
+            'germanywestcentral' = 'gwc'
+            'germanynorth' = 'gno'
+            'norwayeast' = 'noe'
+            'norwaywest' = 'now'
+            'swedencentral' = 'sdc'
+            'swedensouth' = 'sds'
+            'switzerlandnorth' = 'szn'
+            'switzerlandwest' = 'szw'
+            'italynorth' = 'itn'
+            'polandcentral' = 'plc'
+            'spaincentral' = 'spc'
+            
+            # Asia Pacific
+            'eastasia' = 'eas'
+            'southeastasia' = 'seas'
+            'australiaeast' = 'aue'
+            'australiasoutheast' = 'ause'
+            'australiacentral' = 'auc'
+            'australiacentral2' = 'auc2'
+            'japaneast' = 'jpe'
+            'japanwest' = 'jpw'
+            'koreacentral' = 'krc'
+            'koreasouth' = 'krs'
+            'centralindia' = 'inc'
+            'southindia' = 'ins'
+            'westindia' = 'inw'
+            'jioindiawest' = 'jiw'
+            'jioindiacentral' = 'jic'
+            
+            # Middle East & Africa
+            'southafricanorth' = 'san'
+            'southafricawest' = 'saw'
+            'uaenorth' = 'uan'
+            'uaecentral' = 'uac'
+            'qatarcentral' = 'qac'
+            'israelcentral' = 'ilc'
+            
+            # China (requires special subscription)
+            'chinanorth' = 'cnn'
+            'chinanorth2' = 'cnn2'
+            'chinanorth3' = 'cnn3'
+            'chinaeast' = 'cne'
+            'chinaeast2' = 'cne2'
+            'chinaeast3' = 'cne3'
+            
+            # Government (requires special subscription)
+            'usgovvirginia' = 'ugv'
+            'usgovarizona' = 'uga'
+            'usgovtexas' = 'ugt'
+            'usdodeast' = 'ude'
+            'usdodcentral' = 'udc'
+        }
+        
+        try {
+            $azureLocations = Get-AzLocation | Sort-Object Location
+            
+            # Build region codes mapping using Microsoft CAF standards
+            $script:AzureRegionCodes = @{}
+            $script:AzureRegionDisplayNames = @{}
+            
+            foreach ($location in $azureLocations) {
+                $locationName = $location.Location.ToLower()
+                $displayName = $location.DisplayName
+                
+                # Use Microsoft CAF standard abbreviation if available
+                if ($script:MicrosoftCAFRegionCodes.ContainsKey($locationName)) {
+                    $code = $script:MicrosoftCAFRegionCodes[$locationName]
+                } else {
+                    # Fallback for new regions not yet in CAF standards
+                    Write-Log "Region '$locationName' not in CAF standards, creating abbreviation" -Level Info
+                    if ($locationName -match '([a-z]+)([0-9]+)') {
+                        $base = $Matches[1]
+                        $num = $Matches[2]
+                        $code = ($base.Substring(0, [Math]::Min(3, $base.Length)) + $num).ToLower()
+                    } else {
+                        $code = $locationName.Substring(0, [Math]::Min(3, $locationName.Length)).ToLower()
+                    }
+                }
+                
+                $script:AzureRegionCodes[$locationName] = $code
+                $script:AzureRegionDisplayNames[$locationName] = $displayName
+            }
+            
+            $locationCount = $azureLocations.Count
+            $cafCount = ($azureLocations | Where-Object { $script:MicrosoftCAFRegionCodes.ContainsKey($_.Location.ToLower()) }).Count
+            Write-Host "✓ Retrieved $locationCount Azure regions ($cafCount using Microsoft CAF standards)" -ForegroundColor Green
+        }
+        catch {
+            Write-Log "Warning: Could not retrieve Azure locations dynamically. Using fallback validation." -Level Warning
+            Write-Host "  ⚠ Could not retrieve regions from Azure. Will validate region when creating resource group." -ForegroundColor Yellow
+            $azureLocations = $null
+            # Use CAF standards as fallback
+            $script:AzureRegionCodes = $script:MicrosoftCAFRegionCodes
+        }
+        
         $regionValid = $false
-        $validRegions = @('uksouth', 'ukwest', 'eastus', 'westus', 'eastus2', 'westus2', 'northeurope', 'westeurope', 
-                          'centralus', 'southcentralus', 'westcentralus', 'northcentralus', 'eastasia', 'southeastasia',
-                          'japaneast', 'japanwest', 'australiaeast', 'australiasoutheast', 'canadacentral', 'canadaeast')
         
         while (-not $regionValid) {
             Write-Host ""
             Write-Host "Azure Region:" -ForegroundColor Cyan
             Write-Host "  Default: " -NoNewline -ForegroundColor Gray
             Write-Host $AzureRegion -ForegroundColor Yellow
-            Write-Host "  Common regions: uksouth, ukwest, eastus, westus, northeurope, westeurope" -ForegroundColor Gray
+            
+            if ($azureLocations) {
+                # Show some common regions
+                $commonRegions = $azureLocations | Where-Object { 
+                    $_.Location -in @('uksouth', 'ukwest', 'eastus', 'westus', 'northeurope', 'westeurope', 'switzerlandnorth')
+                } | Select-Object -First 7
+                
+                if ($commonRegions) {
+                    Write-Host "  Common regions: " -NoNewline -ForegroundColor Gray
+                    Write-Host ($commonRegions.Location -join ', ') -ForegroundColor Gray
+                }
+                Write-Host "  Type 'list' to see all available regions" -ForegroundColor Gray
+            } else {
+                Write-Host "  Examples: uksouth, ukwest, eastus, westus, northeurope, westeurope" -ForegroundColor Gray
+            }
+            
             Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
             $regionInput = Read-Host
 
+            # Handle special command to list all regions
+            if ($regionInput.ToLower() -eq 'list' -and $azureLocations) {
+                Write-Host ""
+                Write-Host "Available Azure Regions:" -ForegroundColor Cyan
+                Write-Host "------------------------" -ForegroundColor Cyan
+                foreach ($loc in $azureLocations) {
+                    $code = if ($script:AzureRegionCodes.ContainsKey($loc.Location.ToLower())) { 
+                        $script:AzureRegionCodes[$loc.Location.ToLower()] 
+                    } else { 
+                        'N/A' 
+                    }
+                    Write-Host ("  {0,-25} {1,-35} ({2})" -f $loc.Location, $loc.DisplayName, $code) -ForegroundColor Gray
+                }
+                Write-Host ""
+                continue
+            }
+
             if ([string]::IsNullOrWhiteSpace($regionInput)) {
                 $script:AzureRegion = $AzureRegion.ToLower()
-                $regionValid = $true
-                Write-Host "  ✓ Using default: $($script:AzureRegion)" -ForegroundColor Green
-            }
-            elseif ($validRegions -contains $regionInput.ToLower()) {
-                $script:AzureRegion = $regionInput.ToLower()
-                $regionValid = $true
-                Write-Host "  ✓ Using: $($script:AzureRegion)" -ForegroundColor Green
+                # Validate default region
+                if ($azureLocations) {
+                    $validLocation = $azureLocations | Where-Object { $_.Location.ToLower() -eq $script:AzureRegion }
+                    if ($validLocation) {
+                        $regionValid = $true
+                        $code = $script:AzureRegionCodes[$script:AzureRegion]
+                        $displayName = $script:AzureRegionDisplayNames[$script:AzureRegion]
+                        Write-Host "  ✓ Using default: $($script:AzureRegion) - $displayName (Code: $code)" -ForegroundColor Green
+                    } else {
+                        Write-Host "  ✗ Default region '$($script:AzureRegion)' is not available in this subscription." -ForegroundColor Red
+                        continue
+                    }
+                } else {
+                    # Fallback validation: Check default against Microsoft CAF region list
+                    if ($script:MicrosoftCAFRegionCodes.ContainsKey($script:AzureRegion)) {
+                        $regionValid = $true
+                        $code = $script:MicrosoftCAFRegionCodes[$script:AzureRegion]
+                        Write-Host "  ✓ Using default: $($script:AzureRegion) (Code: $code)" -ForegroundColor Green
+                        Write-Host "  ⚠ Note: Region validated against CAF standards only. Will verify with Azure on resource creation." -ForegroundColor Yellow
+                    } else {
+                        Write-Host "  ✗ Default region '$($script:AzureRegion)' is not found in Microsoft CAF standards." -ForegroundColor Red
+                        Write-Host "  Please enter a valid Azure region." -ForegroundColor Gray
+                        continue
+                    }
+                }
             }
             else {
-                Write-Host "  ✗ Invalid Azure region. Please use a valid Azure region name (e.g., uksouth, eastus). Please try again." -ForegroundColor Red
+                $normalizedInput = $regionInput.ToLower()
+                if ($azureLocations) {
+                    $validLocation = $azureLocations | Where-Object { $_.Location.ToLower() -eq $normalizedInput }
+                    if ($validLocation) {
+                        $script:AzureRegion = $normalizedInput
+                        $regionValid = $true
+                        $code = $script:AzureRegionCodes[$script:AzureRegion]
+                        $displayName = $script:AzureRegionDisplayNames[$script:AzureRegion]
+                        Write-Host "  ✓ Using: $($script:AzureRegion) - $displayName (Code: $code)" -ForegroundColor Green
+                    } else {
+                        Write-Host "  ✗ Invalid Azure region '$regionInput'. Not available in this subscription." -ForegroundColor Red
+                        Write-Host "  Type 'list' to see all available regions" -ForegroundColor Gray
+                    }
+                } else {
+                    # Fallback validation: Check against Microsoft CAF region list
+                    if ($script:MicrosoftCAFRegionCodes.ContainsKey($normalizedInput)) {
+                        $script:AzureRegion = $normalizedInput
+                        $regionValid = $true
+                        $code = $script:MicrosoftCAFRegionCodes[$normalizedInput]
+                        Write-Host "  ✓ Using: $($script:AzureRegion) (Code: $code)" -ForegroundColor Green
+                        Write-Host "  ⚠ Note: Region validated against CAF standards only. Will verify with Azure on resource creation." -ForegroundColor Yellow
+                    } else {
+                        Write-Host "  ✗ Invalid Azure region '$regionInput'. Not found in Microsoft CAF standards." -ForegroundColor Red
+                        Write-Host "  Common regions: uksouth, ukwest, eastus, westus, northeurope, westeurope, switzerlandnorth" -ForegroundColor Gray
+                        Write-Host "  Please enter a valid Azure region name." -ForegroundColor Gray
+                    }
+                }
             }
         }
 
@@ -2524,21 +2722,19 @@ function Start-NeologikOnboarding {
         }
 
         # Calculate resource group name based on inputs
-        # Map region names to abbreviations
-        $regionAbbreviations = @{
-            'uksouth' = 'uks'
-            'ukwest' = 'ukw'
-            'eastus' = 'eus'
-            'westus' = 'wus'
-            'northeurope' = 'neu'
-            'westeurope' = 'weu'
-        }
-        
-        $regionAbbrev = if ($regionAbbreviations.ContainsKey($script:AzureRegion.ToLower())) {
-            $regionAbbreviations[$script:AzureRegion.ToLower()]
+        # Use Azure region codes from real-time lookup
+        $regionAbbrev = if ($script:AzureRegionCodes -and $script:AzureRegionCodes.ContainsKey($script:AzureRegion.ToLower())) {
+            $script:AzureRegionCodes[$script:AzureRegion.ToLower()].ToLower()
         } else {
-            # If no mapping exists, use first 3 characters
-            $script:AzureRegion.ToLower().Substring(0, [Math]::Min(3, $script:AzureRegion.Length))
+            # Fallback: create smart abbreviation
+            Write-Log "Creating abbreviation for region '$($script:AzureRegion)'" -Level Info
+            if ($script:AzureRegion -match '([a-z]+)([0-9]+)') {
+                $base = $Matches[1]
+                $num = $Matches[2]
+                ($base.Substring(0, [Math]::Min(3, $base.Length)) + $num).ToLower()
+            } else {
+                $script:AzureRegion.ToLower().Substring(0, [Math]::Min(3, $script:AzureRegion.Length))
+            }
         }
         
         $defaultResourceGroupName = "rg-neo-$($script:OrganizationCode.ToLower())-$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
