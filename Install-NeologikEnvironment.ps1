@@ -1753,16 +1753,44 @@ function New-NeologikStorageAccount {
 
         # Create blob container for certificates
         Write-Log "Creating blob container 'certificate'..." -Level Info
-        $containerName = "certificate"
+        $certContainerName = "certificate"
         
-        $existingContainer = Get-AzStorageContainer -Name $containerName -Context $ctx -ErrorAction SilentlyContinue
+        $existingCertContainer = Get-AzStorageContainer -Name $certContainerName -Context $ctx -ErrorAction SilentlyContinue
 
-        if ($existingContainer) {
-            Write-Log "Blob container '$containerName' already exists" -Level Info
+        if ($existingCertContainer) {
+            Write-Log "Blob container '$certContainerName' already exists" -Level Info
         }
         else {
-            New-AzStorageContainer -Name $containerName -Context $ctx -Permission Off -ErrorAction Stop | Out-Null
-            Write-Log "Blob container '$containerName' created successfully" -Level Success
+            New-AzStorageContainer -Name $certContainerName -Context $ctx -Permission Off -ErrorAction Stop | Out-Null
+            Write-Log "Blob container '$certContainerName' created successfully" -Level Success
+        }
+
+        # Create blob container for JSON configuration files
+        Write-Log "Creating blob container 'json'..." -Level Info
+        $jsonContainerName = "json"
+        
+        $existingJsonContainer = Get-AzStorageContainer -Name $jsonContainerName -Context $ctx -ErrorAction SilentlyContinue
+
+        if ($existingJsonContainer) {
+            Write-Log "Blob container '$jsonContainerName' already exists" -Level Info
+        }
+        else {
+            New-AzStorageContainer -Name $jsonContainerName -Context $ctx -Permission Off -ErrorAction Stop | Out-Null
+            Write-Log "Blob container '$jsonContainerName' created successfully" -Level Success
+        }
+
+        # Create blob container for log files
+        Write-Log "Creating blob container 'logs'..." -Level Info
+        $logsContainerName = "logs"
+        
+        $existingLogsContainer = Get-AzStorageContainer -Name $logsContainerName -Context $ctx -ErrorAction SilentlyContinue
+
+        if ($existingLogsContainer) {
+            Write-Log "Blob container '$logsContainerName' already exists" -Level Info
+        }
+        else {
+            New-AzStorageContainer -Name $logsContainerName -Context $ctx -Permission Off -ErrorAction Stop | Out-Null
+            Write-Log "Blob container '$logsContainerName' created successfully" -Level Success
         }
 
         # Get resource group scope for role assignments
@@ -1797,7 +1825,9 @@ function New-NeologikStorageAccount {
             Name = $storageAccount.StorageAccountName
             ResourceId = $storageAccount.Id
             BlobEndpoint = $storageAccount.PrimaryEndpoints.Blob
-            ContainerName = $containerName
+            CertificateContainerName = $certContainerName
+            JsonContainerName = $jsonContainerName
+            LogsContainerName = $logsContainerName
         }
 
         return $storageAccount
@@ -2067,6 +2097,62 @@ function Export-ConfigurationData {
         $orderedConfig | ConvertTo-Json -Depth 10 | Out-File -FilePath $script:OutputFile -Encoding UTF8
         Write-Log "Configuration exported to: $script:OutputFile" -Level Success
 
+        # Copy JSON file to Storage Account blob container
+        try {
+            if ($script:ConfigData['StorageAccount']) {
+                Write-Log "Copying configuration file to Storage Account..." -Level Info
+                
+                $storageAccountName = $script:ConfigData['StorageAccount'].Name
+                $jsonContainerName = $script:ConfigData['StorageAccount'].JsonContainerName
+                $blobName = Split-Path -Leaf $script:OutputFile
+                
+                # Get storage context using Entra ID authentication
+                $ctx = New-AzStorageContext -StorageAccountName $storageAccountName -UseConnectedAccount
+                
+                # Upload the JSON file to the json blob container
+                Set-AzStorageBlobContent -File $script:OutputFile `
+                    -Container $jsonContainerName `
+                    -Blob $blobName `
+                    -Context $ctx `
+                    -Force `
+                    -ErrorAction Stop | Out-Null
+                
+                Write-Log "Configuration file uploaded to Storage Account: $storageAccountName/$jsonContainerName/$blobName" -Level Success
+            }
+        }
+        catch {
+            Write-Log "Warning: Failed to copy configuration file to Storage Account: $_" -Level Warning
+            Write-Log "The configuration file is still available locally at: $script:OutputFile" -Level Info
+        }
+
+        # Copy log file to Storage Account blob container
+        try {
+            if ($script:ConfigData['StorageAccount']) {
+                Write-Log "Copying log file to Storage Account..." -Level Info
+                
+                $storageAccountName = $script:ConfigData['StorageAccount'].Name
+                $logsContainerName = $script:ConfigData['StorageAccount'].LogsContainerName
+                $logBlobName = Split-Path -Leaf $script:LogFile
+                
+                # Get storage context using Entra ID authentication
+                $ctx = New-AzStorageContext -StorageAccountName $storageAccountName -UseConnectedAccount
+                
+                # Upload the log file to the logs blob container
+                Set-AzStorageBlobContent -File $script:LogFile `
+                    -Container $logsContainerName `
+                    -Blob $logBlobName `
+                    -Context $ctx `
+                    -Force `
+                    -ErrorAction Stop | Out-Null
+                
+                Write-Log "Log file uploaded to Storage Account: $storageAccountName/$logsContainerName/$logBlobName" -Level Success
+            }
+        }
+        catch {
+            Write-Log "Warning: Failed to copy log file to Storage Account: $_" -Level Warning
+            Write-Log "The log file is still available locally at: $script:LogFile" -Level Info
+        }
+
         # Display summary
         Write-Host "`n" -NoNewline
         Write-Host "╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Green
@@ -2128,7 +2214,9 @@ function Export-ConfigurationData {
             Write-Host "Storage Account:" -ForegroundColor Yellow
             Write-Host "  Name: $($script:ConfigData['StorageAccount'].Name)"
             Write-Host "  Blob Endpoint: $($script:ConfigData['StorageAccount'].BlobEndpoint)"
-            Write-Host "  Container Name: $($script:ConfigData['StorageAccount'].ContainerName)"
+            Write-Host "  Certificate Container: $($script:ConfigData['StorageAccount'].CertificateContainerName)"
+            Write-Host "  JSON Container: $($script:ConfigData['StorageAccount'].JsonContainerName)"
+            Write-Host "  Logs Container: $($script:ConfigData['StorageAccount'].LogsContainerName)"
             Write-Host ""
         }
 
@@ -2141,17 +2229,23 @@ function Export-ConfigurationData {
         Write-Host ""
 
         Write-Host "Output Files:" -ForegroundColor Yellow
-        Write-Host "  Configuration: $script:OutputFile" -ForegroundColor Cyan
-        Write-Host "  Log File: $script:LogFile" -ForegroundColor Cyan
+        Write-Host "  Configuration (Local): $script:OutputFile" -ForegroundColor Cyan
+        if ($script:ConfigData['StorageAccount']) {
+            Write-Host "  Configuration (Blob):  $($script:ConfigData['StorageAccount'].Name)/$($script:ConfigData['StorageAccount'].JsonContainerName)/$(Split-Path -Leaf $script:OutputFile)" -ForegroundColor Cyan
+        }
+        Write-Host "  Log File (Local):      $script:LogFile" -ForegroundColor Cyan
+        if ($script:ConfigData['StorageAccount']) {
+            Write-Host "  Log File (Blob):       $($script:ConfigData['StorageAccount'].Name)/$($script:ConfigData['StorageAccount'].LogsContainerName)/$(Split-Path -Leaf $script:LogFile)" -ForegroundColor Cyan
+        }
         Write-Host ""
 
         Write-Host "⚠️  Next Steps:" -ForegroundColor Yellow
-        Write-Host "  1. Review the configuration file and share it with Neologik"
+        Write-Host "  1. Review the configuration file (available locally and in Storage Account)"
         Write-Host "  2. Service principal client secret is securely stored in Key Vault: $($script:ConfigData['KeyVault'].Name)"
         Write-Host "     Secret name: $($script:ConfigData['KeyVault'].SecretName)"
         Write-Host "  3. Upload your TLS certificate (.pfx file) to Storage Account blob container:"
         Write-Host "     Storage Account: $($script:ConfigData['StorageAccount'].Name)"
-        Write-Host "     Container: $($script:ConfigData['StorageAccount'].ContainerName)"
+        Write-Host "     Container: $($script:ConfigData['StorageAccount'].CertificateContainerName)"
         Write-Host "  4. Store the certificate PFX password in Key Vault as a secret:"
         Write-Host "     Secret name: 'neologik-deployment-certificate-pfx-secret'"
         Write-Host ""
