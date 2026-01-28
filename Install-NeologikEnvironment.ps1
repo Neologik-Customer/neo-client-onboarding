@@ -497,12 +497,23 @@ function Connect-AzureEnvironment {
             catch {
                 # Fallback to device code if automatic auth fails
                 Write-Log "Automatic authentication failed, using device code..." -Level Info
-                Write-Host "`nℹ️  Please authenticate with Microsoft Graph (may require additional consent)`n" -ForegroundColor Cyan
+                Write-Host ""
+                Write-Host "╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
+                Write-Host "║                                                               ║" -ForegroundColor Yellow
+                Write-Host "║               MICROSOFT GRAPH AUTHENTICATION                  ║" -ForegroundColor Yellow
+                Write-Host "║                                                               ║" -ForegroundColor Yellow
+                Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
+                Write-Host ""
+                Write-Host "A device code will be displayed below." -ForegroundColor Cyan
+                Write-Host "Please follow the instructions to authenticate with Microsoft Graph." -ForegroundColor Cyan
+                Write-Host ""
                 
                 Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
                     -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
                     -UseDeviceAuthentication `
                     -ErrorAction Stop
+                    
+                Write-Host ""
                 Write-Log "Connected to Microsoft Graph" -Level Success
             }
         }
