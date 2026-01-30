@@ -1886,7 +1886,7 @@ function New-NeologikManagedIdentities {
 
         # Build names with organization code and environment type (lowercase)
         $orgLower = $OrganizationCode.ToLower()
-        $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "-$($EnvironmentType.ToLower())" }
+        $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "$($EnvironmentType.ToLower())" }
         $nameSuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { "-$orgLower$envLower" }
         $displaySuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { " - $orgLower$envLower" }
 
@@ -2883,7 +2883,7 @@ function Start-NeologikOnboarding {
             }
         }
         
-        $defaultResourceGroupName = "rg-neo-$($script:OrganizationCode.ToLower())-$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
+        $defaultResourceGroupName = "rg-neo-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
 
         # Get Resource Group Name with validation
         $rgNameValid = $false
@@ -3064,7 +3064,7 @@ function Start-NeologikOnboarding {
         $script:ConfigData['Bots'] = $script:BotConfigurations
 
         # Calculate solution names based on configuration
-        $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode.ToLower())-$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
+        $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
         $script:ConfigData['SolutionShortName'] = "neo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
 
         # Display summary
