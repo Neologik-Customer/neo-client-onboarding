@@ -11,7 +11,7 @@ Before running the script, prepare the following information. You will be prompt
 ### 1. Organization Information
 
 - [ ] **Organization Name** (full company name)
-  - Example: "Contoso Ltd", "Acme Corporation", "South Eastern Carpentry Ltd"
+  - Example: "Contoso Ltd", "Acme Corporation"
   - Used for documentation and identification
   - **Required** - cannot be empty
 
