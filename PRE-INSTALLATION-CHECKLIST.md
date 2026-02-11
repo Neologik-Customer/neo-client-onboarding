@@ -1,45 +1,6 @@
-# Pre-Installation Checklist
+# Pre-Onboarding Checklist
 
 **Before running** `Install-NeologikEnvironment.ps1`, ensure you have gathered all the required information listed below.
-
----
-
-## ⚠️ Critical Requirements
-
-### Azure Permissions (MANDATORY)
-
-You **must** have **both** of the following permissions. The script will fail if you don't have them:
-
-- [ ] **Owner** role at the subscription level
-  - Not just "Contributor" - you need "Owner" to assign RBAC permissions
-  - Required for role assignments and access control
-  
-- [ ] **Global Administrator** role in Azure AD (Entra ID)
-  - Required to assign Entra ID directory roles
-  - Required for creating security groups and managing guest users
-
-⚠️ **The script cannot proceed without both permissions.**
-
-### System Requirements
-
-- [ ] **PowerShell 7** (version 7.4 or higher)
-  - Not Windows PowerShell 5.1
-  - Download from: https://aka.ms/powershell
-  - The script can install this for you if needed
-
-- [ ] **Administrator privileges** on your Windows computer
-  - Required to run the script
-
-- [ ] **Internet connection**
-  - Required for Azure authentication and resource creation
-
-### Required Files
-
-- [ ] **NeologikGuestUsers.txt** file
-  - Must be in the same folder as the script
-  - Contains email addresses of Neologik team members to invite as guests
-  - Included in the repository
-  - Review and verify the guest user emails before running
 
 ---
 
