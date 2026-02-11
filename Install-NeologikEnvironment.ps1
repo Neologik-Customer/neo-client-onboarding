@@ -1808,6 +1808,30 @@ function New-NeologikStorageAccount {
         $resourceGroup = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction Stop
         $rgScope = $resourceGroup.ResourceId
 
+        # Assign Storage Blob Data Contributor role to current user FIRST (so we can upload logs and config)
+        Write-Log "Assigning Storage Blob Data Contributor role to current user..." -Level Info
+        if ($script:ConfigData['CurrentUserId']) {
+            $existingUserAssignment = Get-AzRoleAssignment -ObjectId $script:ConfigData['CurrentUserId'] `
+                -RoleDefinitionName 'Storage Blob Data Contributor' `
+                -Scope $rgScope `
+                -ErrorAction SilentlyContinue
+
+            if (-not $existingUserAssignment) {
+                New-AzRoleAssignment -ObjectId $script:ConfigData['CurrentUserId'] `
+                    -RoleDefinitionName 'Storage Blob Data Contributor' `
+                    -Scope $rgScope `
+                    -ErrorAction Stop | Out-Null
+                Write-Log "Storage Blob Data Contributor role assigned to current user" -Level Success
+                
+                # Wait for role propagation
+                Write-Log "Waiting 15 seconds for role assignment to propagate..." -Level Info
+                Start-Sleep -Seconds 15
+            }
+            else {
+                Write-Log "Current user already has Storage Blob Data Contributor role" -Level Info
+            }
+        }
+
         # Assign Storage Blob Data Contributor role to Neologik Admin User Group at Resource Group level
         $adminGroup = $SecurityGroups | Where-Object { $_.Name -like 'Neologik Admin User Group*' }
         
