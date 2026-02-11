@@ -108,7 +108,7 @@ Before running the script, prepare the following information. You will be prompt
   - Format: GUID (e.g., "d4003661-f87e-4237-9a9b-8b9c31ba2467")
 
 - [ ] **Resource Group Name** (optional)
-  - Default follows Azure naming conventions: `rg-neo-{orgcode}-{env}-{region}-{index}`
+  - Default follows Azure naming conventions: `rg-neo-{orgcode}{env}-{region}-{index}`
   - Can contain: letters, numbers, underscores, hyphens, periods, parentheses
   - Cannot end with a period
 
