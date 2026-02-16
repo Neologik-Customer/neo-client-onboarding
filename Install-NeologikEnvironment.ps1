@@ -2578,13 +2578,13 @@ function Start-NeologikOnboarding {
 
         # Get Hostname
         Write-Host ""
-        Write-Host "Hostname (server/computer name):" -ForegroundColor Cyan
-        Write-Host "  Example: server01, web-server, app-host" -ForegroundColor Gray
-        Write-Host "  Enter hostname: " -NoNewline -ForegroundColor Gray
+        Write-Host "Bot DNS Hostname:" -ForegroundColor Cyan
+        Write-Host "  Example: neologik, neologik-dev" -ForegroundColor Gray
+        Write-Host "  Enter DNS hostname: " -NoNewline -ForegroundColor Gray
         $hostnameInput = Read-Host
 
         while ([string]::IsNullOrWhiteSpace($hostnameInput)) {
-            Write-Host "  Hostname is required. Please enter a hostname: " -NoNewline -ForegroundColor Yellow
+            Write-Host "  DNS hostname is required. Please enter a DNS hostname: " -NoNewline -ForegroundColor Yellow
             $hostnameInput = Read-Host
         }
 
@@ -2595,13 +2595,13 @@ function Start-NeologikOnboarding {
 
         # Get Domain Name
         Write-Host ""
-        Write-Host "Domain Name:" -ForegroundColor Cyan
-        Write-Host "  Example: contoso.com, example.local" -ForegroundColor Gray
-        Write-Host "  Enter domain name: " -NoNewline -ForegroundColor Gray
+        Write-Host "Bot DNS Domain Name:" -ForegroundColor Cyan
+        Write-Host "  Example: contoso.com, example.co.uk" -ForegroundColor Gray
+        Write-Host "  Enter DNS domain name: " -NoNewline -ForegroundColor Gray
         $domainInput = Read-Host
 
         while ([string]::IsNullOrWhiteSpace($domainInput)) {
-            Write-Host "  Domain name is required. Please enter a domain name: " -NoNewline -ForegroundColor Yellow
+            Write-Host "  DNS domain name is required. Please enter a DNS domain name: " -NoNewline -ForegroundColor Yellow
             $domainInput = Read-Host
         }
 
@@ -3020,7 +3020,7 @@ function Start-NeologikOnboarding {
             # Get Agent Name
             while (-not $agentNameValid) {
                 Write-Host ""
-                Write-Host "Agent Name for Bot $i`:" -ForegroundColor Cyan
+                Write-Host "Full Agent Name for Bot $i`:" -ForegroundColor Cyan
                 Write-Host "  Default: " -NoNewline -ForegroundColor Gray
                 Write-Host $defaultAgentName -ForegroundColor Yellow
                 Write-Host "  Requirements: letters, numbers, spaces, dashes, and underscores allowed" -ForegroundColor Gray
@@ -3064,7 +3064,7 @@ function Start-NeologikOnboarding {
                 Write-Host "Bot $i Short Name:" -ForegroundColor Cyan
                 Write-Host "  Default: " -NoNewline -ForegroundColor Gray
                 Write-Host $defaultBotShortName -ForegroundColor Yellow
-                Write-Host "  Requirements: lowercase, max 7 characters, letters and dashes only" -ForegroundColor Gray
+                Write-Host "  Requirements: lowercase, max 4 characters, letters and dashes only" -ForegroundColor Gray
                 Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
                 $botShortNameInput = Read-Host
 
@@ -3081,8 +3081,8 @@ function Start-NeologikOnboarding {
                 }
 
                 # Validate length
-                if ($botShortName.Length -lt 1 -or $botShortName.Length -gt 7) {
-                    Write-Host "  ✗ Bot short name must be between 1 and 7 characters. Please try again." -ForegroundColor Red
+                if ($botShortName.Length -lt 1 -or $botShortName.Length -gt 4) {
+                    Write-Host "  ✗ Bot short name must be between 1 and 4 characters. Please try again." -ForegroundColor Red
                     continue
                 }
 
@@ -3127,8 +3127,8 @@ function Start-NeologikOnboarding {
         Write-Host "  Tenant ID:            " -NoNewline; Write-Host $script:ConfigData['TenantId'] -ForegroundColor Yellow
         Write-Host "  Subscription Name:    " -NoNewline; Write-Host $script:ConfigData['SubscriptionName'] -ForegroundColor Yellow
         Write-Host "  Organization Name:    " -NoNewline; Write-Host $script:OrganizationName -ForegroundColor Yellow
-        Write-Host "  Hostname:             " -NoNewline; Write-Host $script:Hostname -ForegroundColor Yellow
-        Write-Host "  Domain Name:          " -NoNewline; Write-Host $script:DomainName -ForegroundColor Yellow
+        Write-Host "  Bot DNS Hostname:     " -NoNewline; Write-Host $script:Hostname -ForegroundColor Yellow
+        Write-Host "  Bot DNS Domain Name:  " -NoNewline; Write-Host $script:DomainName -ForegroundColor Yellow
         Write-Host "  Organization Code:    " -NoNewline; Write-Host $script:OrganizationCode -ForegroundColor Yellow
         Write-Host "  Environment Type:     " -NoNewline; Write-Host $script:EnvironmentType -ForegroundColor Yellow
         Write-Host "  Environment Index:    " -NoNewline; Write-Host $script:EnvironmentIndex -ForegroundColor Yellow
