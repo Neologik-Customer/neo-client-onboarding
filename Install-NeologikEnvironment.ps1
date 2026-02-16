@@ -83,8 +83,10 @@ $WarningPreference = 'Continue'
 # Script version
 $script:Version = 'v1.9.0'
 
-$script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
-$script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
+# Initialize with timestamp - will be updated after org code and environment type are collected
+$script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$($script:FileTimestamp).log"
+$script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$($script:FileTimestamp).json"
 $script:ConfigData = @{}
 
 # Load Neologik guest user emails from file
@@ -141,6 +143,22 @@ function Write-Log {
         'Error' { Write-Error $Message }
         'Success' { Write-Host $Message -ForegroundColor Green }
     }
+}
+
+function Initialize-ConfigurationFile {
+    <#
+    .SYNOPSIS
+        Initializes the configuration JSON file name with organization code and environment type.
+    #>
+    [CmdletBinding()]
+    param()
+    
+    # Generate configuration file name with org code and env type
+    $configFileName = "Neologik_$($script:OrganizationCode)$($script:EnvironmentType)_Configuration_$($script:FileTimestamp).json"
+    $script:OutputFile = Join-Path $PSScriptRoot $configFileName
+    
+    Write-Host "  ✓ Configuration file initialized: $configFileName" -ForegroundColor Green
+    Write-Log "Configuration file path set to: $($script:OutputFile)" -Level Info
 }
 
 function Write-ScriptHeader {
@@ -2479,6 +2497,69 @@ function Start-NeologikOnboarding {
         Write-Host "║                                                               ║" -ForegroundColor Magenta
         Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Magenta
 
+        # Get Organization Code with validation (FIRST QUESTION)
+        $orgCodeValid = $false
+        while (-not $orgCodeValid) {
+            Write-Host ""
+            Write-Host "Organization Code (exactly 3 characters):" -ForegroundColor Cyan
+            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+            Write-Host $OrganizationCode -ForegroundColor Yellow
+            Write-Host "  Requirements: lowercase, exactly 3 characters, letters and numbers only" -ForegroundColor Gray
+            Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
+            $orgInput = Read-Host
+
+            if ([string]::IsNullOrWhiteSpace($orgInput)) {
+                $script:OrganizationCode = $OrganizationCode.ToLower()
+            }
+            else {
+                $script:OrganizationCode = $orgInput.Trim().ToLower()
+            }
+
+            # Validate length
+            if ($script:OrganizationCode.Length -ne 3) {
+                Write-Host "  ✗ Organization code must be exactly 3 characters. Please try again." -ForegroundColor Red
+                continue
+            }
+
+            # Validate lowercase alphanumeric only
+            if ($script:OrganizationCode -notmatch '^[a-z0-9]{3}$') {
+                Write-Host "  ✗ Organization code must contain only lowercase letters and numbers. Please try again." -ForegroundColor Red
+                continue
+            }
+
+            $orgCodeValid = $true
+            Write-Host "  ✓ Using: $($script:OrganizationCode)" -ForegroundColor Green
+        }
+
+        # Get Environment Type with validation (SECOND QUESTION)
+        $envTypeValid = $false
+        while (-not $envTypeValid) {
+            Write-Host ""
+            Write-Host "Environment Type:" -ForegroundColor Cyan
+            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+            Write-Host $EnvironmentType -ForegroundColor Yellow
+            Write-Host "  Valid options: dev, prd" -ForegroundColor Gray
+            Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
+            $envInput = Read-Host
+
+            if ([string]::IsNullOrWhiteSpace($envInput)) {
+                $script:EnvironmentType = $EnvironmentType.ToLower()
+                $envTypeValid = $true
+                Write-Host "  ✓ Using default: $($script:EnvironmentType)" -ForegroundColor Green
+            }
+            elseif ($envInput.ToLower() -eq 'dev' -or $envInput.ToLower() -eq 'prd') {
+                $script:EnvironmentType = $envInput.ToLower()
+                $envTypeValid = $true
+                Write-Host "  ✓ Using: $($script:EnvironmentType)" -ForegroundColor Green
+            }
+            else {
+                Write-Host "  ✗ Invalid environment type. Must be 'dev' or 'prd'. Please try again." -ForegroundColor Red
+            }
+        }
+
+        # Initialize configuration file now that we have org code and environment type
+        Initialize-ConfigurationFile
+
         # Get Organization Name
         Write-Host ""
         Write-Host "Organization Name (full company name):" -ForegroundColor Cyan
@@ -2528,66 +2609,6 @@ function Start-NeologikOnboarding {
         $script:ConfigData['DomainName'] = $script:DomainName
         Write-Host "  ✓ Using: " -NoNewline -ForegroundColor Green
         Write-Host $script:DomainName -ForegroundColor White
-
-        # Get Organization Code with validation
-        $orgCodeValid = $false
-        while (-not $orgCodeValid) {
-            Write-Host ""
-            Write-Host "Organization Code (exactly 3 characters):" -ForegroundColor Cyan
-            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-            Write-Host $OrganizationCode -ForegroundColor Yellow
-            Write-Host "  Requirements: lowercase, exactly 3 characters, letters and numbers only" -ForegroundColor Gray
-            Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
-            $orgInput = Read-Host
-
-            if ([string]::IsNullOrWhiteSpace($orgInput)) {
-                $script:OrganizationCode = $OrganizationCode.ToLower()
-            }
-            else {
-                $script:OrganizationCode = $orgInput.Trim().ToLower()
-            }
-
-            # Validate length
-            if ($script:OrganizationCode.Length -ne 3) {
-                Write-Host "  ✗ Organization code must be exactly 3 characters. Please try again." -ForegroundColor Red
-                continue
-            }
-
-            # Validate lowercase alphanumeric only
-            if ($script:OrganizationCode -notmatch '^[a-z0-9]{3}$') {
-                Write-Host "  ✗ Organization code must contain only lowercase letters and numbers. Please try again." -ForegroundColor Red
-                continue
-            }
-
-            $orgCodeValid = $true
-            Write-Host "  ✓ Using: $($script:OrganizationCode)" -ForegroundColor Green
-        }
-
-        # Get Environment Type with validation
-        $envTypeValid = $false
-        while (-not $envTypeValid) {
-            Write-Host ""
-            Write-Host "Environment Type:" -ForegroundColor Cyan
-            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-            Write-Host $EnvironmentType -ForegroundColor Yellow
-            Write-Host "  Valid options: dev, prd" -ForegroundColor Gray
-            Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
-            $envInput = Read-Host
-
-            if ([string]::IsNullOrWhiteSpace($envInput)) {
-                $script:EnvironmentType = $EnvironmentType.ToLower()
-                $envTypeValid = $true
-                Write-Host "  ✓ Using default: $($script:EnvironmentType)" -ForegroundColor Green
-            }
-            elseif ($envInput.ToLower() -eq 'dev' -or $envInput.ToLower() -eq 'prd') {
-                $script:EnvironmentType = $envInput.ToLower()
-                $envTypeValid = $true
-                Write-Host "  ✓ Using: $($script:EnvironmentType)" -ForegroundColor Green
-            }
-            else {
-                Write-Host "  ✗ Invalid environment type. Must be 'dev' or 'prd'. Please try again." -ForegroundColor Red
-            }
-        }
 
         # Get Azure Region with real-time validation
         # Query Azure for available locations
