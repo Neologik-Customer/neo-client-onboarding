@@ -8,7 +8,14 @@
 
 Before running the script, prepare the following information. You will be prompted for these during script execution:
 
-### 1. Organization Information
+### 1. Deployment Type
+
+- [ ] **Deployment Type**
+  - Options: `neo-small` or `neo-secure`
+  - Choose the appropriate deployment configuration
+  - **Required** - cannot be empty
+
+### 2. Organization Information
 
 - [ ] **Organization Name** (full company name)
   - Example: "Contoso Ltd", "Acme Corporation"
@@ -22,7 +29,7 @@ Before running the script, prepare the following information. You will be prompt
   - Will be automatically converted to lowercase
   - Default: "abc"
 
-### 2. Environment Configuration
+### 3. Environment Configuration
 
 - [ ] **Environment Type**
   - Options: `dev` (development) or `prd` (production)
@@ -35,7 +42,7 @@ Before running the script, prepare the following information. You will be prompt
   - Must be between 01 and 99
   - Default: "01"
 
-### 3. Network Information
+### 4. Network Information
 
 - [ ] **Hostname** (server/computer name)
   - Example: "server01", "web-server", "app-host"
@@ -47,7 +54,7 @@ Before running the script, prepare the following information. You will be prompt
   - Will be automatically converted to lowercase
   - **Required** - cannot be empty
 
-### 4. Azure Configuration
+### 5. Azure Configuration
 
 - [ ] **Azure Region** (where resources will be created)
   - Must be a valid Azure region name
@@ -59,7 +66,7 @@ Before running the script, prepare the following information. You will be prompt
   - Default: "uksouth"
   - Will be automatically converted to lowercase
 
-### 5. Bot Configuration
+### 6. Bot Configuration
 
 - [ ] **Bot Count**
   - How many bots will be deployed? (1-10)
