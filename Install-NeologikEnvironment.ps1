@@ -855,8 +855,15 @@ function Invoke-GuestUserInvitation {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
         [string[]]$GuestEmails
     )
+
+    # If no guest emails provided, return empty array
+    if ($GuestEmails.Count -eq 0) {
+        Write-Log "No guest users to invite. Skipping guest user invitation." -Level Info
+        return @()
+    }
 
     Write-Log "Inviting Neologik guest users..." -Level Info
 
@@ -919,6 +926,7 @@ function New-NeologikSecurityGroups {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
         [array]$GuestUsers,
 
         [Parameter(Mandatory = $false)]
@@ -987,25 +995,30 @@ function New-NeologikSecurityGroups {
                 Write-Log "Group created successfully (ID: $($group.Id))" -Level Success
             }
 
-            # Add guest users to the group
-            Write-Log "Adding guest users to group: $($groupDef.Name)..." -Level Info
-            
-            foreach ($guestUser in $GuestUsers) {
-                try {
-                    # Check if user is already a member
-                    $isMember = Get-MgGroupMember -GroupId $group.Id -Filter "id eq '$($guestUser.UserId)'" -ErrorAction SilentlyContinue
+            # Add guest users to the group (if any)
+            if ($GuestUsers.Count -gt 0) {
+                Write-Log "Adding guest users to group: $($groupDef.Name)..." -Level Info
+                
+                foreach ($guestUser in $GuestUsers) {
+                    try {
+                        # Check if user is already a member
+                        $isMember = Get-MgGroupMember -GroupId $group.Id -Filter "id eq '$($guestUser.UserId)'" -ErrorAction SilentlyContinue
 
-                    if ($isMember) {
-                        Write-Log "User $($guestUser.Email) is already a member of $($groupDef.Name)" -Level Info
+                        if ($isMember) {
+                            Write-Log "User $($guestUser.Email) is already a member of $($groupDef.Name)" -Level Info
+                        }
+                        else {
+                            New-MgGroupMember -GroupId $group.Id -DirectoryObjectId $guestUser.UserId -ErrorAction Stop
+                            Write-Log "Added $($guestUser.Email) to $($groupDef.Name)" -Level Success
+                        }
                     }
-                    else {
-                        New-MgGroupMember -GroupId $group.Id -DirectoryObjectId $guestUser.UserId -ErrorAction Stop
-                        Write-Log "Added $($guestUser.Email) to $($groupDef.Name)" -Level Success
+                    catch {
+                        Write-Log "Warning: Could not add $($guestUser.Email) to $($groupDef.Name): $_" -Level Warning
                     }
                 }
-                catch {
-                    Write-Log "Warning: Could not add $($guestUser.Email) to $($groupDef.Name): $_" -Level Warning
-                }
+            }
+            else {
+                Write-Log "No guest users to add to group: $($groupDef.Name)" -Level Info
             }
 
             # Add the logged-in user to the group
