@@ -1,6 +1,6 @@
 # Neologik Manual Onboarding Guide
 
-**Guide version:** 1.0
+**Guide version:** 1.0.1
 **Based on script version:** 1.9.0
 **Last updated:** 2026-03-20
 
@@ -309,17 +309,7 @@ done
 
 ## Step 7 — Assign Roles to the Admin Group
 
-### 7a. Contributor at subscription level
-
-```bash
-az role assignment create \
-  --assignee-object-id "${GROUP_ADMIN_ID}" \
-  --assignee-principal-type Group \
-  --role "Contributor" \
-  --scope "/subscriptions/${SUBSCRIPTION_ID}"
-```
-
-### 7b. Key Vault Secrets Officer at resource group level
+### 7a. Key Vault Secrets Officer at resource group level
 
 ```bash
 az role assignment create \
@@ -329,7 +319,7 @@ az role assignment create \
   --scope "${RG_ID}"
 ```
 
-### 7c. Storage Blob Data Contributor at resource group level
+### 7b. Storage Blob Data Contributor at resource group level
 
 ```bash
 az role assignment create \
