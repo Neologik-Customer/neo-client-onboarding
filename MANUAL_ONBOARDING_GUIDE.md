@@ -1,22 +1,34 @@
 # Neologik Manual Onboarding Guide
 
-**Guide version:** 1.0.1
+**Guide version:** 1.0.2
 **Based on script version:** 1.9.0
 **Last updated:** 2026-03-20
 
 This guide covers every step performed by the automated `Install-NeologikEnvironment.ps1` script, translated into manual Azure CLI and Microsoft Graph commands.
 
+RECOMMENDED: All commands can be run directly in [Azure Cloud Shell](https://shell.azure.com) (Bash mode) from the Azure portal — no local tooling required. Cloud Shell has the Azure CLI and `jq` pre-installed and is already authenticated to your Azure account.
+
+Alternatively, these can be run on your local machine provided you [install Azure CLI and `jq`](#required-tools) and [authenticate through the CLI](#step-1--authenticate-to-azure-local-only).
+
 ---
 
 ## Prerequisites
 
+### Azure Subscription
+An Azure subscription must exist before running these steps. If you do not already have one:
+1. Sign in to the [Azure portal](https://portal.azure.com)
+2. Navigate to **Subscriptions** → **Add**
+3. Choose an offer (e.g. Pay-As-You-Go) and complete the setup wizard
+4. Note the **Subscription ID** — you will need it in Step 1
+
 ### Required Access
-- **Owner** role at the Azure subscription level (needed for RBAC assignments)
+- **Owner** role on the target Azure subscription (needed for RBAC assignments)
 - **Global Administrator** role in Entra ID (needed for directory role assignments)
 
 ### Required Tools
+All tools are pre-installed in Azure Cloud Shell. If running locally instead:
 - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) (`az`) — version 2.50+
-- `jq` — for parsing JSON output in shell scripts (optional but recommended)
+- `jq` — for parsing JSON output in shell scripts
 
 ### Variables to set before running commands
 
@@ -62,7 +74,7 @@ BOT_DOMAIN="contoso.com"            # e.g. contoso.com
 
 ---
 
-## Step 1 — Authenticate to Azure
+## Step 1 — Authenticate to Azure (local only)
 
 ```bash
 az login
@@ -792,7 +804,7 @@ After completing the steps above, the following actions are still required befor
 Send `NeologikConfiguration_[timestamp].json` to **support@neologik.ai**.
 
 ### 2. Decide on a hostname
-Confirm your fully qualified bot domain name (FQDN), e.g. `app.yourcompany.com`, with Neologik before creating the TLS certificate.
+Choose your fully qualified bot domain name (FQDN), e.g. `app.yourcompany.com`, and **share it with Neologik before creating the TLS certificate**. The FQDN is required by Neologik to configure the deployment correctly.
 
 ### 3. Create a TLS certificate
 Follow the **PFX-CERT-GUIDE.md** to obtain a `.pfx` certificate file (self-signed or from a CA).
