@@ -27,7 +27,7 @@ This script creates resources and assigns permissions for Neologik deployment in
 
 **Example:** Organization "ABC", dev environment, UK South, index 01, bot agent name "support"
 - Resource Group: `rg-neo-abc-dev-uks-01`
-- Key Vault: `kvneodeployabcdevuks01`
+- Key Vault: `kvneoabcdev01`
 - Storage Account: `stneodeployabcdevuks01`
 - User Group: `Neologik User Group support - abc-dev`
 
@@ -131,7 +131,7 @@ This script creates resources and assigns permissions for Neologik deployment in
 
 | Property | Value |
 |----------|-------|
-| **Name** | `kvneodeploy{org}{env}{region}{index}` |
+| **Name** | `kvneo{org}{env}{index}` |
 | **Authorization** | Microsoft Entra ID RBAC (no access policies) |
 | **Public Access** | Enabled |
 | **Soft Delete** | Enabled (Azure default) |
