@@ -3176,7 +3176,7 @@ function Start-NeologikOnboarding {
             -SecurityGroups $securityGroups
 
         # Step 12: Create Key Vault and store client secret
-        $keyVaultName = "kvneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+        $keyVaultName = "kvneo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$($script:EnvironmentIndex)"
         
         # Key Vault names must be 3-24 characters, only alphanumeric and hyphens
         if ($keyVaultName.Length -gt 24) {

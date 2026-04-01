@@ -233,7 +233,7 @@ All resources are named to include your organization code and environment type f
 - **Admin User Group**: `Neologik Admin User Group - abc-dev`
 - **App Registration**: `Neologik GitHub Service Connection - abc-dev`
 - **Managed Identities**: `neologik-[type]-abc-dev`
-- **Key Vault**: `kvneodeploy<org><env><region><index>` (e.g., kvneodeployabcdevuks01)
+- **Key Vault**: `kvneo<org><env><index>` (e.g., kvneoabcdev01)
 - **Storage Account**: `stneodeploy<org><env><region><index>` (e.g., stneodeployabcdevuks01)
 
 This naming convention makes it easy to identify which customer and environment each resource belongs to.
@@ -297,7 +297,7 @@ Creates:
 ### 6. Key Vault
 
 Creates:
-- **Key Vault**: `kvneodeploy<org><env><region><index>` (e.g., kvneodeployabcdevuks01)
+- **Key Vault**: `kvneo<org><env><index>` (e.g., kvneoabcdev01)
 - **RBAC Authorization**: Enabled (no access policies)
 - **Secrets Stored**:
   - Service principal client secret (automatic)
@@ -396,7 +396,7 @@ The configuration file contains all necessary information to share with Neologik
     "GroupMemberships": ["Neologik Admin User Group - abc-dev"]
   },
   "KeyVault": {
-    "Name": "kvneodeployabcdevuks01",
+    "Name": "kvneoabcdev01",
     "VaultUri": "...",
     "SecretName": "neologik-deployment-service-principle-secret"
   },
@@ -451,7 +451,7 @@ The log file contains detailed execution information:
 ### Client Secret Storage
 
 ✅ **AUTOMATED**: The App Registration client secret is automatically stored in Azure Key Vault:
-- **Key Vault Name**: `kvneodeploy<org><env><region><index>`
+- **Key Vault Name**: `kvneo<org><env><index>`
 - **Secret Name**: `neologik-deployment-service-principle-secret`
 - **Access**: Available to Neologik Admin User Group members via RBAC
 
@@ -607,7 +607,7 @@ Complete these steps in the Azure Portal:
 4. Use **Microsoft Entra ID** authentication (not access key)
 
 #### Store Certificate Password
-1. Navigate to Key Vault: `kvneodeploy<org><env><region><index>`
+1. Navigate to Key Vault: `kvneo<org><env><index>`
 2. Go to Secrets
 3. Create new secret:
    - **Name**: `neologik-deployment-certificate-pfx-secret`
