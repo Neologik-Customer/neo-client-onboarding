@@ -71,7 +71,6 @@ This document reflects the **Moneycorp Development** instantiation of the neo-se
 | **Key Vault Public Access** | Disabled |
 | **SQL Database Access** | Private Endpoint only |
 | **Storage Account Access** | Private (Network Deny default) |
-| **Custom Private DNS** | ✅ Yes (`neologik.internal`) |
 | **AKS Outbound Type** | Load Balancer |
 
 ---
@@ -162,18 +161,11 @@ This document reflects the **Moneycorp Development** instantiation of the neo-se
 | `privatelink.azurewebsites.net` | Web Apps | Microsoft.Web/sites |
 | `privatelink.api.azureml.ms` | AI Hub/Project | Microsoft.MachineLearningServices/workspaces |
 | `privatelink.grafana.azure.com` | Managed Grafana | Microsoft.Dashboard/grafana |
-| `neologik.internal` | Custom A records | User-managed |
 
 **DNS Resolution Flow**:
 ```
 VM/AKS Pod → Private DNS Zone → Private Endpoint IP → Azure Service
 ```
-
-#### Custom Private DNS Zone
-- **Zone Name**: `neologik.internal`
-- **Purpose**: System owner can add custom A records for internal services
-- **VNet Link**: `neologik.internal-vnet-link` → `vnet-neo-mcdev-uks-1`
-- **Usage**: Manual management via Azure Portal or Azure CLI
 
 ---
 
@@ -614,6 +606,25 @@ All storage accounts use Geo-Zone-Redundant Storage (GZRS) and private endpoints
 | `KubernetesRecordingRulesRuleGroup-aksneomcdevuks1` | Kubernetes recording rules |
 | `UXRecordingRulesRuleGroup-aksneomcdevuks1` | UX recording rules |
 
+#### Full Monitoring Stack
+**Module**: `modMonitoring.bicep` — **Enabled**
+
+##### 1. Action Groups (Notifications)
+- **Critical**: `ag-critical-oncall` — Email + SMS for critical alerts
+- **Team**: `ag-team-alerts` — Email + webhook for team notifications
+- **Warning**: `ag-warning-digest` — Email for warning-level alerts
+
+##### 2. Alert Rules
+- Node health alerts (CPU, memory, disk, not ready)
+- Pod health alerts (restarts, evictions, failed scheduling)
+- AKS component alerts (CoreDNS, networking)
+- Application log alerts (error count thresholds)
+- OpenAI service alerts (token errors, throttling)
+
+##### 3. Cost Budgets
+- Monthly budget with threshold alerts (50%, 80%, 90%, 100%)
+- Email notifications to configured addresses
+
 ---
 
 ### Automation Resources
@@ -920,7 +931,6 @@ VM/AKS → Private Endpoint (10.220.x.x) → Azure Service
 | **App GW Public IP** | `appgw-{solutionName}-pip` | `appgw-neo-mcdev-uks-1-pip` |
 | **WAF Policy (AGIC)** | `appgw-{solutionName}-waf-policy` | `appgw-neo-mcdev-uks-1-waf-policy` |
 | **Private Endpoint** | `{serviceName}-pe` | e.g. `kvneomcdevuks1-pe` |
-| **Custom DNS Zone** | Configurable | `neologik.internal` |
 
 ### Managed Identity Naming
 
@@ -1073,7 +1083,6 @@ The **Moneycorp Dev** neo-secure deployment provides:
 - ✅ **All AI capabilities** (OpenAI, AI Search, AI Hub/Project, Document Intelligence) on private network
 - ✅ **6 OpenAI model deployments** (GPT-4.1-mini, GPT-4.1-nano, GPT-5-mini, GPT-5.2, embedding)
 - ✅ **25+ private endpoints** eliminating public internet exposure
-- ✅ **Custom DNS zone** (`neologik.internal`) for internal service discovery
 - ✅ **Management VMs** (Jumpbox, GitHub Runner) for secure administration
 
 **Tenant**: `moneycorp.local` (ID: `234b7362-627a-4a31-9a1f-d340c11da1e0`)  
