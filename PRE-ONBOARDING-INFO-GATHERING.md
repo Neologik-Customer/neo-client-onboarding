@@ -89,4 +89,8 @@ For **each bot**, prepare:
   - Letters and dashes only
   - Used internally for identification
 
+- [ ] **Authentication type** (select "anonymous" or "Teams")
+  - Select "anonymous" to use in public web chats that do not require login
+  - Select "Teams" to use as an app that is integrated into your Teams workspace
+
 ---
