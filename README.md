@@ -165,11 +165,11 @@ Questions you'll be asked:
    - Used to create separate user groups for each bot
 
 10. **Bot Configuration**: For each bot, you'll be asked:
-    - **Agent Name**: Descriptive name for the bot (e.g., "bot", "support")
-      - Lowercase only, max 7 characters, letters and dashes
+    - **Agent Name**: Descriptive name for the bot (e.g., "Neologik", "Support Bot")
+      - Max 30 characters
       - Used in security group names
     - **Short Name**: Short identifier for the bot (e.g., "bot", "sup")
-      - Lowercase only, max 7 characters, letters and dashes
+      - 1–4 characters, lowercase letters and numbers only, must start with a letter
       - Used internally for identification
 
 ### 7. Confirm and Continue
@@ -212,7 +212,8 @@ The script will display your next steps. You need to:
 
 ### 2. Decide on Your Fully Qualified Domain Name (FQDN)
 🌐 **Choose your hostname and coordinate with Neologik:**
-   - Decide on the fully qualified domain name for your deployment (e.g., `app.yourcompany.com`)
+   - A Fully Qualified Domain Name (FQDN) is the complete web address users will type to reach your Neologik deployment — for example, `neologik.yourcompany.com`. It combines a subdomain you choose (e.g. `neologik`) with your organisation's existing domain (e.g. `yourcompany.com`).
+   - Decide on the FQDN for your deployment and confirm it with whoever manages your company's DNS
    - Share this with Neologik at support@neologik.ai
    - ⚠️ **Important:** Complete this step before creating your TLS certificate, as the certificate must match your chosen hostname
 

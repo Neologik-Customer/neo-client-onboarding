@@ -23,7 +23,7 @@ This script creates resources and assigns permissions for Neologik deployment in
 - `{env}` = Environment type (`dev` or `prd`, lowercase)
 - `{region}` = Azure region abbreviation (e.g., `uks`, `eus`, lowercase)
 - `{index}` = Environment index (e.g., `01`, `02`)
-- `{agent-name}` = Bot agent name (lowercase, max 7 characters)
+- `{agent-name}` = Bot short name (1–4 lowercase letters/numbers, must start with a letter)
 
 **Example:** Organization "ABC", dev environment, UK South, index 01, bot agent name "support"
 - Resource Group: `rg-neo-abc-dev-uks-01`
@@ -104,13 +104,6 @@ This script creates resources and assigns permissions for Neologik deployment in
 ### Group Membership
 - Added to: `Neologik Admin User Group - {org}-{env}`
 
-### API Permissions (Entra ID)
-| API | Permission | Type |
-|-----|------------|------|
-| Microsoft Graph | User.Read | Delegated |
-
-**Note:** No admin consent granted by script (standard delegated permission)
-
 ---
 
 ### 6. Role Assignments - Service Principal
@@ -139,7 +132,7 @@ This script creates resources and assigns permissions for Neologik deployment in
 ### Secrets Stored
 | Secret Name | Content |
 |-------------|---------|
-| `neologik-github-service-connection-secret` | Service Principal client secret |
+| `neologik-deployment-service-principle-secret` | Service Principal client secret |
 
 ### Role Assignments
 | Role | Scope | Principal |

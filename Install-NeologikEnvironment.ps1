@@ -3026,7 +3026,7 @@ function Start-NeologikOnboarding {
         # Get Bot Names (Agent Name and Short Name for each bot)
         $script:BotConfigurations = @()
         for ($i = 1; $i -le $script:BotCount; $i++) {
-            $defaultAgentName = if ($i -eq 1) { "bot" } else { "bot$i" }
+            $defaultAgentName = if ($i -eq 1) { "Neologik" } else { "Neologik $i" }
             $agentNameValid = $false
             $agentName = ""
             
