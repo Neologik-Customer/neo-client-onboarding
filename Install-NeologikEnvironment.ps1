@@ -397,17 +397,13 @@ function Connect-AzureEnvironment {
                 Write-Log "Force re-authentication requested" -Level Info
             }
             
-            # Connect to Azure using device code authentication
+            # Connect to Azure using interactive browser authentication
             Write-Log "Authenticating to Azure..." -Level Info
-            Write-Host "`nℹ️  Using device code authentication for Azure login." -ForegroundColor Cyan
-            Write-Host "A code will be displayed. Visit the URL and enter the code to authenticate.`n" -ForegroundColor Cyan
-            
-            if ($TenantId) {
-                $azContext = Connect-AzAccount -TenantId $TenantId -UseDeviceAuthentication -ErrorAction Stop
-            }
-            else {
-                $azContext = Connect-AzAccount -UseDeviceAuthentication -ErrorAction Stop
-            }
+            Write-Host "`nℹ️  A browser window will open for Azure login.`n" -ForegroundColor Cyan
+
+            $connectParams = @{ ErrorAction = 'Stop' }
+            if ($TenantId) { $connectParams['TenantId'] = $TenantId }
+            $azContext = Connect-AzAccount @connectParams
             Write-Log "Connected to Azure as $($azContext.Context.Account.Id)" -Level Success
         }
         elseif ($currentContext -and $currentContext.Account) {
@@ -416,7 +412,7 @@ function Connect-AzureEnvironment {
             # If TenantId is specified and different, reconnect
             if ($TenantId -and $currentContext.Tenant.Id -ne $TenantId) {
                 Write-Log "Switching to specified tenant: $TenantId" -Level Info
-                $azContext = Connect-AzAccount -TenantId $TenantId -UseDeviceAuthentication -ErrorAction Stop
+                $azContext = Connect-AzAccount -TenantId $TenantId -ErrorAction Stop
             }
             else {
                 $azContext = [PSCustomObject]@{
@@ -502,38 +498,15 @@ function Connect-AzureEnvironment {
                 Disconnect-MgGraph -ErrorAction SilentlyContinue
             }
             
-            # Connect to Microsoft Graph - try to reuse Azure authentication first, fallback to device code
+            # Connect to Microsoft Graph using interactive browser authentication
             Write-Log "Connecting to Microsoft Graph..." -Level Info
-            
-            try {
-                # Try to connect without device code first (will use existing Azure token if possible)
-                Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
-                    -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
-                    -ErrorAction Stop
-                Write-Log "Connected to Microsoft Graph using existing credentials" -Level Success
-            }
-            catch {
-                # Fallback to device code if automatic auth fails
-                Write-Log "Automatic authentication failed, using device code..." -Level Info
-                Write-Host ""
-                Write-Host "╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
-                Write-Host "║                                                               ║" -ForegroundColor Yellow
-                Write-Host "║               MICROSOFT GRAPH AUTHENTICATION                  ║" -ForegroundColor Yellow
-                Write-Host "║                                                               ║" -ForegroundColor Yellow
-                Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
-                Write-Host ""
-                Write-Host "A device code will be displayed below." -ForegroundColor Cyan
-                Write-Host "Please follow the instructions to authenticate with Microsoft Graph." -ForegroundColor Cyan
-                Write-Host ""
-                
-                Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
-                    -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
-                    -UseDeviceAuthentication `
-                    -ErrorAction Stop
-                    
-                Write-Host ""
-                Write-Log "Connected to Microsoft Graph" -Level Success
-            }
+            Write-Host "`nℹ️  A browser window will open for Microsoft Graph login.`n" -ForegroundColor Cyan
+
+            Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
+                -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
+                -ErrorAction Stop
+
+            Write-Log "Connected to Microsoft Graph" -Level Success
         }
 
         # Get the actual user ID from Azure AD (works for both member and guest users)
