@@ -2316,28 +2316,15 @@ function Get-UserInput {
         [string]$Prompt,
 
         [Parameter(Mandatory = $true)]
-        [string]$DefaultValue,
-
-        [Parameter(Mandatory = $false)]
-        [switch]$IsSecret
+        [string]$DefaultValue
     )
 
     Write-Host ""
     Write-Host $Prompt -ForegroundColor Cyan
     Write-Host "  Default: " -NoNewline -ForegroundColor Gray
     Write-Host $DefaultValue -ForegroundColor Yellow
-    
-    if ($IsSecret) {
-        Write-Host "  Press Enter to use default, or type new value (input hidden): " -NoNewline -ForegroundColor Gray
-        $secureInput = Read-Host -AsSecureString
-        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureInput)
-        $userInput = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-    }
-    else {
-        Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
-        $userInput = Read-Host
-    }
+    Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
+    $userInput = Read-Host
 
     if ([string]::IsNullOrWhiteSpace($userInput)) {
         Write-Host "  ✓ Using default: $DefaultValue" -ForegroundColor Green
