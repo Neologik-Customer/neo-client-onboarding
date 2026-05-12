@@ -194,7 +194,7 @@ By proceeding with this installation, you acknowledge and agree to
 
     NEOLOGIK TERMS OF USE AND PRIVACY POLICY
 
-   - Terms of Use: https://www.neologik.ai/terms-of-use
+   - Terms of Use: https://www.neologik.ai/terms
    - Privacy Policy: https://www.neologik.ai/privacy-policy
    - You must read and accept both documents to proceed
 
