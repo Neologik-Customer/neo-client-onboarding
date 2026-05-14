@@ -1391,36 +1391,28 @@ function Set-AppRegistrationRoles {
             }
         }
 
-        # Assign Entra ID role (Application Administrator)
+        # Assign Entra ID role (Application Administrator) via the unified
+        # roleManagement endpoint. Works on both PIM and non-PIM tenants;
+        # creates a permanent active assignment that PIM tracks correctly.
+        # The legacy directoryRoles/{id}/members/$ref endpoint is rejected
+        # by Entra in PIM-enabled tenants, which is why we don't use it.
         Write-Log "Assigning Application Administrator role in Entra ID..." -Level Info
-        
+
+        # Built-in role templateId is the roleDefinitionId for unified API.
+        $appAdminRoleDefinitionId = '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3'
+
         try {
-            Import-Module Microsoft.Graph.Identity.DirectoryManagement -ErrorAction Stop
-            
-            # Get all directory roles (filtering not supported, must filter manually)
-            $appAdminRole = Get-MgDirectoryRole -All -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'Application Administrator' }
-            
-            if (-not $appAdminRole) {
-                # Role not activated yet, get template and activate it
-                $roleTemplate = Get-MgDirectoryRoleTemplate -All -ErrorAction Stop | Where-Object { $_.DisplayName -eq 'Application Administrator' }
-                if (-not $roleTemplate) {
-                    throw "InsufficientPermissions"
-                }
-                $appAdminRole = New-MgDirectoryRole -RoleTemplateId $roleTemplate.Id -ErrorAction Stop
-            }
-
-            if (-not $appAdminRole -or [string]::IsNullOrEmpty($appAdminRole.Id)) {
-                throw "InsufficientPermissions"
-            }
-
-            $existingRoleMember = Get-MgDirectoryRoleMember -DirectoryRoleId $appAdminRole.Id -ErrorAction SilentlyContinue | Where-Object { $_.Id -eq $ServicePrincipalId }
+            $filter = "principalId eq '$ServicePrincipalId' and roleDefinitionId eq '$appAdminRoleDefinitionId'"
+            $existingAssignments = Invoke-MgGraphRequest -Method GET `
+                -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$filter" `
+                -ErrorAction Stop
+            $existingRoleAssignment = $existingAssignments.value | Where-Object { $_.directoryScopeId -eq '/' } | Select-Object -First 1
         }
         catch {
-            # Log the actual error for debugging
             Write-Log "ERROR: Failed to check Application Administrator role: $($_.Exception.Message)" -Level Error
-            
+
             if ($_.Exception.Message -match "InsufficientPermissions|Insufficient privileges|Authorization_RequestDenied|Forbidden") {
-                Write-Log "ERROR: Insufficient permissions to assign Application Administrator role" -Level Error
+                Write-Log "ERROR: Insufficient permissions to read role assignments" -Level Error
                 Write-Log "Required Permission: Privileged Role Administrator role in Entra ID" -Level Error
                 Write-Host "`n❌ PERMISSION ERROR" -ForegroundColor Red
                 Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Red
@@ -1436,12 +1428,11 @@ function Set-AppRegistrationRoles {
                 throw "Insufficient permissions: Privileged Role Administrator role required"
             }
             else {
-                # Re-throw the original error so we can see what's really happening
                 throw
             }
         }
 
-        if ($existingRoleMember) {
+        if ($existingRoleAssignment) {
             Write-Log "Application Administrator role already assigned" -Level Info
         }
         else {
@@ -1452,11 +1443,15 @@ function Set-AppRegistrationRoles {
 
             while (-not $roleAssigned -and $retryCount -lt $maxRetries) {
                 try {
-                    # Use New-MgDirectoryRoleMemberByRef instead of New-MgDirectoryRoleMember
                     $body = @{
-                        "@odata.id" = "https://graph.microsoft.com/v1.0/directoryObjects/$ServicePrincipalId"
+                        principalId      = $ServicePrincipalId
+                        roleDefinitionId = $appAdminRoleDefinitionId
+                        directoryScopeId = '/'
                     }
-                    New-MgDirectoryRoleMemberByRef -DirectoryRoleId $appAdminRole.Id -BodyParameter $body -ErrorAction Stop
+                    Invoke-MgGraphRequest -Method POST `
+                        -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments" `
+                        -Body $body `
+                        -ErrorAction Stop | Out-Null
                     Write-Log "Application Administrator role assigned successfully" -Level Success
                     $roleAssigned = $true
                 }
@@ -1478,12 +1473,12 @@ function Set-AppRegistrationRoles {
                         Write-Host ""
                         throw "Insufficient permissions: Global Administrator role required"
                     }
-                    # Handle case where member already exists (race condition or previous partial run)
-                    elseif ($_.Exception.Message -match "already exist") {
+                    # Handle case where assignment already exists (race condition or previous partial run)
+                    elseif ($_.Exception.Message -match "already exist|conflicting object") {
                         Write-Log "Application Administrator role already assigned (detected on add)" -Level Info
                         $roleAssigned = $true
                     }
-                    elseif ($_.Exception.Message -match "does not exist|cannot be found|not found") {
+                    elseif ($_.Exception.Message -match "does not exist|cannot be found|not found|ResourceNotFound") {
                         $retryCount++
                         if ($retryCount -lt $maxRetries) {
                             Write-Log "Service Principal not yet replicated to Entra ID. Retrying in 10 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
