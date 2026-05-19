@@ -622,9 +622,19 @@ function Connect-AzureEnvironment {
 
             # Reuse the existing Azure token for Graph — avoids a second browser prompt
             Write-Log "Connecting to Microsoft Graph via existing Azure token..." -Level Info
-            $graphToken = (Get-AzAccessToken -ResourceTypeName MSGraph -TenantId $script:ConfigData['TenantId'] -ErrorAction Stop).Token
-            Connect-MgGraph -AccessToken $graphToken -ErrorAction Stop
-            Write-Log "Connected to Microsoft Graph using Azure session token" -Level Success
+            try {
+                $graphToken = (Get-AzAccessToken -ResourceTypeName MSGraph -TenantId $script:ConfigData['TenantId'] -ErrorAction Stop).Token
+                Connect-MgGraph -AccessToken $graphToken -ErrorAction Stop
+                Write-Log "Connected to Microsoft Graph using Azure session token" -Level Success
+            }
+            catch {
+                Write-Log "Azure token insufficient for Graph (consent may be required) — falling back to interactive login: $_" -Level Warning
+                Write-Host "`nℹ️  A browser window will open for Microsoft Graph login.`n" -ForegroundColor Cyan
+                Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
+                    -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
+                    -ErrorAction Stop
+                Write-Log "Connected to Microsoft Graph via interactive login" -Level Success
+            }
         }
 
         # Get the actual user ID from Azure AD (works for both member and guest users)
@@ -2722,6 +2732,10 @@ function Start-NeologikOnboarding {
         Write-Host ""
         
         Write-Log "Using subscription: $($currentContext.Subscription.Name) (ID: $($currentContext.Subscription.Id))" -Level Success
+
+        # Step 5b: Validate required permissions before prompting for input
+        Write-Log "Validating required permissions..." -Level Info
+        $null = Test-RequiredPermissions -SubscriptionId $script:ConfigData['SubscriptionId']
 
         # Step 6: Collect remaining configuration inputs (skipped when resuming from checkpoint)
         if (-not $resuming) {
