@@ -88,6 +88,10 @@ $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$($script:FileTimestamp).log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$($script:FileTimestamp).json"
 $script:ConfigData = @{}
+$script:CompletedSteps = [System.Collections.Generic.List[string]]::new()
+$script:ProviderRegistrations = @{}
+$script:CheckpointFile = Join-Path $PSScriptRoot "NeologikCheckpoint.json"
+$script:CheckpointRegionAbbrev = $null
 
 # Load Neologik guest user emails from file
 $script:GuestUsersFile = Join-Path $PSScriptRoot "NeologikGuestUsers.txt"
@@ -218,6 +222,120 @@ By proceeding with this installation, you acknowledge and agree to
         Write-Host "`n✗ Terms not accepted. Installation cancelled.`n" -ForegroundColor Red
         return $false
     }
+}
+
+#endregion
+
+#region Checkpoint Management
+
+function Find-LatestCheckpoint {
+    <#
+    .SYNOPSIS
+        Returns the checkpoint file if it exists in the script directory.
+    #>
+    $path = Join-Path $PSScriptRoot "NeologikCheckpoint.json"
+    if (Test-Path $path) { return Get-Item $path }
+    return $null
+}
+
+function Save-Checkpoint {
+    <#
+    .SYNOPSIS
+        Saves current script state to the checkpoint file so the run can be resumed after a failure.
+    #>
+    [CmdletBinding()]
+    param([string]$Label = 'progress')
+
+    if (-not $script:CheckpointFile) { return }
+
+    $state = [ordered]@{
+        Version               = $script:Version
+        SavedAt               = (Get-Date -Format 'o')
+        Label                 = $Label
+        CompletedSteps        = @($script:CompletedSteps)
+        ProviderRegistrations = $script:ProviderRegistrations
+        RegionAbbrev          = $script:CheckpointRegionAbbrev
+        ConfigData            = $script:ConfigData
+        OrganizationCode      = $script:OrganizationCode
+        EnvironmentType       = $script:EnvironmentType
+        AzureRegion           = $script:AzureRegion
+        OrganizationName      = $script:OrganizationName
+        Hostname              = $script:Hostname
+        DomainName            = $script:DomainName
+        ResourceGroupName     = $script:ResourceGroupName
+        EnvironmentIndex      = $script:EnvironmentIndex
+        BotCount              = $script:BotCount
+        BotConfigurations     = $script:BotConfigurations
+        OutputFile            = $script:OutputFile
+    }
+
+    try {
+        $state | ConvertTo-Json -Depth 10 | Set-Content -Path $script:CheckpointFile -Encoding UTF8
+    }
+    catch {
+        Write-Warning "Could not save checkpoint: $_"
+    }
+}
+
+function Restore-Checkpoint {
+    <#
+    .SYNOPSIS
+        Restores script state from a checkpoint file.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $data = Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+
+    # Restore ConfigData as a flat hashtable
+    $script:ConfigData = @{}
+    foreach ($prop in $data.ConfigData.PSObject.Properties) {
+        $script:ConfigData[$prop.Name] = $prop.Value
+    }
+
+    # Restore ProviderRegistrations as hashtable
+    $script:ProviderRegistrations = @{}
+    if ($data.ProviderRegistrations) {
+        foreach ($prop in $data.ProviderRegistrations.PSObject.Properties) {
+            $script:ProviderRegistrations[$prop.Name] = $prop.Value
+        }
+    }
+
+    # Restore CompletedSteps
+    $script:CompletedSteps = [System.Collections.Generic.List[string]]::new()
+    foreach ($step in $data.CompletedSteps) {
+        $script:CompletedSteps.Add([string]$step)
+    }
+
+    # Restore named script variables
+    $script:OrganizationCode       = $data.OrganizationCode
+    $script:EnvironmentType        = $data.EnvironmentType
+    $script:AzureRegion            = $data.AzureRegion
+    $script:OrganizationName       = $data.OrganizationName
+    $script:Hostname               = $data.Hostname
+    $script:DomainName             = $data.DomainName
+    $script:ResourceGroupName      = $data.ResourceGroupName
+    $script:EnvironmentIndex       = $data.EnvironmentIndex
+    $script:BotCount               = [int]$data.BotCount
+    $script:BotConfigurations      = $data.BotConfigurations
+    $script:CheckpointRegionAbbrev = $data.RegionAbbrev
+    $script:OutputFile             = $data.OutputFile
+}
+
+function Mark-StepCompleted {
+    <#
+    .SYNOPSIS
+        Records a step as completed in the checkpoint.
+    #>
+    [CmdletBinding()]
+    param([string]$StepName)
+    if (-not $script:CompletedSteps.Contains($StepName)) {
+        $script:CompletedSteps.Add($StepName)
+    }
+    Save-Checkpoint -Label $StepName
 }
 
 #endregion
@@ -811,6 +929,17 @@ function New-NeologikResourceGroup {
         return $rg
     }
     catch {
+        # Detect Azure RBAC authorization failures and surface them with a clear message
+        if ($_.Exception.Message -match 'AuthorizationFailed|does not have authorization|does not have.*permission|Forbidden') {
+            Write-Host "`n❌ PERMISSION ERROR: Cannot create resource group '$ResourceGroupName'" -ForegroundColor Red
+            Write-Host "   The current account lacks permission to create resource groups in this subscription." -ForegroundColor Yellow
+            Write-Host "   Required role: 'Owner' or 'Contributor' at subscription scope." -ForegroundColor Yellow
+            Write-Host "   Subscription: $($script:ConfigData['SubscriptionId'])" -ForegroundColor Yellow
+            Write-Host "   Ask your Azure administrator to grant the Owner role on the subscription," -ForegroundColor Cyan
+            Write-Host "   then re-run the script and choose 'Y' to resume from the checkpoint." -ForegroundColor Cyan
+            Write-Log "Resource group creation blocked by Azure RBAC. User: $($script:ConfigData['UserAccount']). Subscription: $($script:ConfigData['SubscriptionId'])" -Level Error
+            throw "Insufficient permissions: Cannot create resource group '$ResourceGroupName' — Owner or Contributor role required at subscription scope"
+        }
         Write-Log "Failed to create/validate resource group: $_" -Level Error
         throw
     }
@@ -1680,7 +1809,7 @@ function New-NeologikKeyVault {
 
 #region Resource Provider Registration
 
-function Register-ComputeResourceProvider {
+function Register-AllResourceProviders {
     <#
     .SYNOPSIS
         Registers Microsoft.Compute resource provider for the subscription.
@@ -1688,16 +1817,88 @@ function Register-ComputeResourceProvider {
     [CmdletBinding()]
     param()
 
-    Write-Log "Registering Microsoft.Compute resource provider..." -Level Info
-    
-    try {
-        Register-RequiredResourceProvider -ProviderNamespace 'Microsoft.Compute'
-        Write-Log "Microsoft.Compute resource provider registered successfully" -Level Success
-        return $true
+    $providers = @(
+        'Microsoft.Compute',
+        'Microsoft.KeyVault',
+        'Microsoft.ManagedIdentity',
+        'Microsoft.Resources',
+        'Microsoft.Storage'
+    )
+
+    Write-Log "Registering all required Azure resource providers..." -Level Info
+
+    foreach ($provider in $providers) {
+        # Skip providers already confirmed registered in a previous run (checkpoint)
+        if ($script:ProviderRegistrations[$provider] -eq 'Registered') {
+            Write-Log "Resource provider '$provider' already registered (from checkpoint)" -Level Info
+            continue
+        }
+
+        try {
+            Register-RequiredResourceProvider -ProviderNamespace $provider
+            $script:ProviderRegistrations[$provider] = 'Registered'
+            Save-Checkpoint -Label "Provider_$provider"
+        }
+        catch {
+            # Timeouts are normal for slow Azure regions — record and continue rather than aborting.
+            # The provider registration continues in the background; on the next run the real-time
+            # state check inside Register-RequiredResourceProvider will pick it up as Registered.
+            if ($_.Exception.Message -match 'timed out|Please try again') {
+                Write-Log "Resource provider '$provider' registration timed out - it may still be registering in Azure" -Level Warning
+                $script:ProviderRegistrations[$provider] = 'TimedOut'
+                Save-Checkpoint -Label "Provider_${provider}_TimedOut"
+            }
+            else {
+                Write-Log "Failed to register resource provider '$provider': $_" -Level Error
+                throw
+            }
+        }
     }
-    catch {
-        Write-Log "Failed to register Microsoft.Compute resource provider: $_" -Level Error
-        throw
+
+    # Report any providers that timed out so the user is aware
+    $timedOutProviders = @($script:ProviderRegistrations.GetEnumerator() | Where-Object { $_.Value -eq 'TimedOut' } | Select-Object -ExpandProperty Key)
+    if ($timedOutProviders.Count -gt 0) {
+        Write-Host "`n⚠️  The following resource providers timed out and may still be registering in Azure:" -ForegroundColor Yellow
+        $timedOutProviders | ForEach-Object { Write-Host "     - $_" -ForegroundColor Yellow }
+        Write-Host "   This is normal — Azure continues registering them in the background." -ForegroundColor Gray
+        Write-Host "   Re-run the script and choose 'Y' to resume; timed-out providers will be re-checked" -ForegroundColor Gray
+        Write-Host "   and skipped automatically once they reach the 'Registered' state." -ForegroundColor Gray
+        Write-Host ""
+        Write-Log "Resource provider registration timed out for: $($timedOutProviders -join ', ')" -Level Warning
+    }
+    else {
+        Write-Log "All resource providers registered successfully" -Level Success
+    }
+
+    # Register Microsoft.Compute/EncryptionAtHost feature (required for AKS encrypted node pools)
+    Write-Log "Checking Microsoft.Compute/EncryptionAtHost feature registration..." -Level Info
+    try {
+        $feature = Get-AzProviderFeature -ProviderNamespace 'Microsoft.Compute' -FeatureName 'EncryptionAtHost' -ErrorAction Stop
+        if ($feature.RegistrationState -eq 'Registered') {
+            Write-Log "Microsoft.Compute/EncryptionAtHost feature is already registered" -Level Info
+        } else {
+            Write-Log "Registering Microsoft.Compute/EncryptionAtHost feature..." -Level Info
+            Register-AzProviderFeature -ProviderNamespace 'Microsoft.Compute' -FeatureName 'EncryptionAtHost' -ErrorAction Stop | Out-Null
+
+            # Wait up to 10 minutes for feature registration
+            $maxRetries = 20
+            $waitSeconds = 30
+            for ($i = 0; $i -lt $maxRetries; $i++) {
+                Start-Sleep -Seconds $waitSeconds
+                $feature = Get-AzProviderFeature -ProviderNamespace 'Microsoft.Compute' -FeatureName 'EncryptionAtHost' -ErrorAction Stop
+                Write-Log "EncryptionAtHost feature status: $($feature.RegistrationState)" -Level Info
+                if ($feature.RegistrationState -eq 'Registered') {
+                    Register-AzResourceProvider -ProviderNamespace 'Microsoft.Compute' -ErrorAction Stop | Out-Null
+                    Write-Log "Microsoft.Compute/EncryptionAtHost feature registered successfully" -Level Success
+                    break
+                }
+            }
+            if ($feature.RegistrationState -ne 'Registered') {
+                Write-Log "Microsoft.Compute/EncryptionAtHost feature registration timed out — check Azure portal for status" -Level Warning
+            }
+        }
+    } catch {
+        Write-Log "Failed to register Microsoft.Compute/EncryptionAtHost feature: $_" -Level Warning
     }
 }
 
@@ -2358,13 +2559,59 @@ function Start-NeologikOnboarding {
     param()
 
     try {
+        $resuming = $false
         Write-ScriptHeader
 
-        # Step 0: Show Terms and Conditions and get acceptance
-        $termsAccepted = Show-TermsAndConditions
-        if (-not $termsAccepted) {
-            Write-Log "Installation cancelled by user - terms not accepted" -Level Warning
-            exit 0
+        # Check for an existing checkpoint and offer to resume
+        $existingCheckpoint = Find-LatestCheckpoint
+        if ($existingCheckpoint) {
+            $age = (Get-Date) - $existingCheckpoint.LastWriteTime
+            $ageStr = if ($age.TotalDays -ge 1) { "$([int]$age.TotalDays) day(s) ago" }
+                      elseif ($age.TotalHours -ge 1) { "$([int]$age.TotalHours) hour(s) ago" }
+                      else { "$([int]$age.TotalMinutes) minute(s) ago" }
+
+            Write-Host "`n╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
+            Write-Host "║                                                               ║" -ForegroundColor Yellow
+            Write-Host "║                  RESUME PREVIOUS RUN?                         ║" -ForegroundColor Yellow
+            Write-Host "║                                                               ║" -ForegroundColor Yellow
+            Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "  A saved checkpoint was found ($ageStr):" -ForegroundColor Gray
+            Write-Host "  $($existingCheckpoint.Name)" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "  Resume from this checkpoint? (default: Y): " -NoNewline -ForegroundColor Yellow
+            $resumeChoice = Read-Host
+
+            if ([string]::IsNullOrWhiteSpace($resumeChoice) -or $resumeChoice -eq 'Y' -or $resumeChoice -eq 'y') {
+                Restore-Checkpoint -Path $existingCheckpoint.FullName
+                $resuming = $true
+
+                Write-Host "`n  ✓ Checkpoint loaded." -ForegroundColor Green
+                Write-Host "    Org: $($script:OrganizationCode)  |  Env: $($script:EnvironmentType)  |  Region: $($script:AzureRegion)" -ForegroundColor Cyan
+                Write-Host "    Resource Group: $($script:ResourceGroupName)" -ForegroundColor Cyan
+                $timedOut = @($script:ProviderRegistrations.GetEnumerator() | Where-Object { $_.Value -eq 'TimedOut' })
+                if ($timedOut.Count -gt 0) {
+                    Write-Host "    Provider registrations to retry: $($timedOut.Count)" -ForegroundColor Yellow
+                }
+                Write-Host ""
+                Write-Log "Resuming from checkpoint: $($existingCheckpoint.FullName)" -Level Info
+            }
+            else {
+                Write-Host "`n  Starting a fresh run..." -ForegroundColor Green
+                Write-Host ""
+            }
+        }
+
+        # Step 0: Show Terms and Conditions (skip when resuming — already accepted)
+        if (-not $resuming) {
+            $termsAccepted = Show-TermsAndConditions
+            if (-not $termsAccepted) {
+                Write-Log "Installation cancelled by user - terms not accepted" -Level Warning
+                exit 0
+            }
+        }
+        else {
+            Write-Log "Resuming from checkpoint — Terms and Conditions acceptance carried over" -Level Info
         }
 
         # Step 1: Check PowerShell version first
@@ -2454,6 +2701,12 @@ function Start-NeologikOnboarding {
         $null = Connect-AzureEnvironment -TenantId $TenantId
 
         # Step 5: Get current subscription from context
+        # On resume, switch to the subscription from the checkpoint before reading the context.
+        if ($resuming -and $script:ConfigData['SubscriptionId']) {
+            Set-AzContext -SubscriptionId $script:ConfigData['SubscriptionId'] -ErrorAction Stop | Out-Null
+            Write-Log "Restored Azure context to subscription: $($script:ConfigData['SubscriptionId'])" -Level Info
+        }
+
         $currentContext = Get-AzContext
         if (-not $currentContext -or -not $currentContext.Subscription) {
             throw "No active Azure subscription found. Please ensure you're logged in with access to a subscription."
@@ -2475,7 +2728,9 @@ function Start-NeologikOnboarding {
         
         Write-Log "Using subscription: $($currentContext.Subscription.Name) (ID: $($currentContext.Subscription.Id))" -Level Success
 
-        # Step 6: Collect remaining configuration inputs
+        # Step 6: Collect remaining configuration inputs (skipped when resuming from checkpoint)
+        if (-not $resuming) {
+
         Write-Host "`n╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Magenta
         Write-Host "║                                                               ║" -ForegroundColor Magenta
         Write-Host "║                   CONFIGURATION SETUP                         ║" -ForegroundColor Magenta
@@ -3128,6 +3383,21 @@ function Start-NeologikOnboarding {
         Write-Host "Press Enter to continue with these settings, or Ctrl+C to cancel..." -ForegroundColor Yellow
         Read-Host
 
+        # Save configuration to checkpoint now that it has been confirmed.
+        # This allows a resume if any subsequent step fails (e.g. permission errors or provider timeouts).
+        $script:CheckpointRegionAbbrev = $regionAbbrev
+        Mark-StepCompleted 'ConfigGathered'
+
+        } else {
+            # Resume path: restore the region abbreviation local variable from checkpoint data.
+            $regionAbbrev = $script:CheckpointRegionAbbrev
+
+            Write-Host "`n  ⏩ Configuration restored from checkpoint — skipping input prompts" -ForegroundColor Gray
+            Write-Host "     Org: $($script:OrganizationCode)  |  Env: $($script:EnvironmentType)  |  Region: $($script:AzureRegion)" -ForegroundColor Cyan
+            Write-Host "     Resource Group: $($script:ResourceGroupName)  |  Bots: $($script:BotCount)" -ForegroundColor Cyan
+            Write-Host ""
+        }
+
         # Step 7: Create resource group
         $null = New-NeologikResourceGroup -ResourceGroupName $script:ResourceGroupName -Location $script:AzureRegion
 
@@ -3164,8 +3434,9 @@ function Start-NeologikOnboarding {
             -SecurityGroups $securityGroups `
             -SubscriptionId $script:ConfigData['SubscriptionId']
 
-        # Step 13: Register Microsoft.Compute Resource Provider
-        Register-ComputeResourceProvider
+        # Step 13: Register all required Azure resource providers
+        Register-AllResourceProviders
+        Mark-StepCompleted 'ResourceProviders'
 
         # Step 14: Create Storage Account and blob container for certificates
         $storageAccountName = "stneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
@@ -3191,22 +3462,40 @@ function Start-NeologikOnboarding {
         # Step 16: Export configuration
         Export-ConfigurationData
 
+        # Remove checkpoint on successful completion — no longer needed
+        if ($script:CheckpointFile -and (Test-Path $script:CheckpointFile)) {
+            Remove-Item $script:CheckpointFile -ErrorAction SilentlyContinue
+            Write-Log "Checkpoint file removed after successful completion" -Level Info
+        }
+
         Write-Log "Neologik onboarding completed successfully!" -Level Success
     }
     catch {
         Write-Log "Onboarding failed: $_" -Level Error
         Write-Log "Stack Trace: $($_.ScriptStackTrace)" -Level Error
-        
-        # Check if this is a permission error to set appropriate exit code
+
         if ($_.Exception.Message -match "Insufficient permissions:|ERROR: Insufficient permissions") {
-            exit 2  # Exit code 2 = Permission error
+            Write-Host "`n❌ Onboarding stopped: insufficient permissions." -ForegroundColor Red
+            Write-Host "   See the error details above for the specific permission required." -ForegroundColor Yellow
+            if ($script:CheckpointFile -and (Test-Path $script:CheckpointFile)) {
+                Write-Host ""
+                Write-Host "  ✓ Your configuration has been saved as a checkpoint." -ForegroundColor Green
+                Write-Host "    Once permissions are granted, re-run the script and choose 'Y' to resume" -ForegroundColor Cyan
+                Write-Host "    from where you left off — no need to re-enter configuration." -ForegroundColor Cyan
+            }
+            Write-Host ""
+            exit 2
         }
         else {
             Write-Host "`n❌ Onboarding failed. Please check the log file for details:" -ForegroundColor Red
             Write-Host "   $script:LogFile" -ForegroundColor Yellow
+            if ($script:CheckpointFile -and (Test-Path $script:CheckpointFile)) {
+                Write-Host ""
+                Write-Host "  ✓ Your configuration has been saved as a checkpoint." -ForegroundColor Green
+                Write-Host "    Re-run the script and choose 'Y' to resume from where you left off." -ForegroundColor Cyan
+            }
             Write-Host ""
-            
-            exit 1  # Exit code 1 = General error
+            exit 1
         }
     }
 }
