@@ -212,7 +212,8 @@ The script will display your next steps. You need to:
 
 ### 2. Decide on Your Fully Qualified Domain Name (FQDN)
 🌐 **Choose your hostname and coordinate with Neologik:**
-   - Decide on the fully qualified domain name for your deployment (e.g., `app.yourcompany.com`)
+   - A Fully Qualified Domain Name (FQDN) is the complete web address users will type to reach your Neologik deployment — for example, `neologik.yourcompany.com`. It combines a subdomain you choose (e.g. `neologik`) with your organisation's existing domain (e.g. `yourcompany.com`).
+   - Decide on the FQDN for your deployment and confirm it with whoever manages your company's DNS
    - Share this with Neologik at support@neologik.ai
    - ⚠️ **Important:** Complete this step before creating your TLS certificate, as the certificate must match your chosen hostname
 

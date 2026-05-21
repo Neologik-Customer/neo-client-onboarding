@@ -104,13 +104,6 @@ This script creates resources and assigns permissions for Neologik deployment in
 ### Group Membership
 - Added to: `Neologik Admin User Group - {org}-{env}`
 
-### API Permissions (Entra ID)
-| API | Permission | Type |
-|-----|------------|------|
-| Microsoft Graph | User.Read | Delegated |
-
-**Note:** No admin consent granted by script (standard delegated permission)
-
 ---
 
 ### 6. Role Assignments - Service Principal
@@ -139,7 +132,7 @@ This script creates resources and assigns permissions for Neologik deployment in
 ### Secrets Stored
 | Secret Name | Content |
 |-------------|---------|
-| `neologik-github-service-connection-secret` | Service Principal client secret |
+| `neologik-deployment-service-principle-secret` | Service Principal client secret |
 
 ### Role Assignments
 | Role | Scope | Principal |
