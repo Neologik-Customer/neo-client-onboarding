@@ -1,4 +1,4 @@
-# Azure Environment Changes - Quick Reference
+# Neologik Onboarding - Quick Reference
 
 ## Overview
 This script creates resources and assigns permissions for Neologik deployment in a customer's Azure tenant.
@@ -7,13 +7,46 @@ This script creates resources and assigns permissions for Neologik deployment in
 
 ---
 
-## Required Permissions to Run Script
+## Prerequisites
+
+### Required Permissions to Run Script
 
 **User must have:**
 - ✅ **Owner** role at subscription level
 - ✅ **Global Administrator** role in Entra ID
 
 **Reason:** Script assigns Azure RBAC roles (requires Owner) and Entra ID directory roles (requires Global Administrator)
+
+---
+
+### vCPU Quota
+
+Neologik requires sufficient vCPU quota in the target subscription and region before deployment can proceed. Check and request increases **before** running the onboarding script.
+
+#### Checking current quota
+
+1. Azure Portal → **Subscriptions** → select your subscription → **Usage + quotas**
+2. Filter by your target region and search for **`Standard D2ds v6`** or **`Standard DC2ds v6`** to see current usage vs. limit
+
+#### Requesting an increase
+
+Azure Portal → **Usage + quotas** → select the quota line → **New Quota Request**
+
+---
+
+### Azure OpenAI Quota
+
+Neologik requires sufficient Azure OpenAI token quota in the target region before deployment can proceed. Check and request increases **before** running the onboarding script.
+
+#### Checking current quota
+
+1. Sign in to [Azure AI Foundry](https://ai.azure.com)
+2. Navigate to **Operate** → **Quota** in the left pane
+3. Find **gpt-5.4-mini** in the list and confirm you have sufficient tokens-per-minute (TPM) available in your target region
+
+#### Requesting an increase
+
+Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). Requests typically take up to 10 business days to approve.
 
 ---
 
