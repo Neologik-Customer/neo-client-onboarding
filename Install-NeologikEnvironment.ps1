@@ -235,8 +235,7 @@ function Find-LatestCheckpoint {
     .SYNOPSIS
         Returns the checkpoint file if it exists in the script directory.
     #>
-    $path = Join-Path $PSScriptRoot "NeologikCheckpoint.json"
-    if (Test-Path $path) { return Get-Item $path }
+    if (Test-Path $script:CheckpointFile) { return Get-Item $script:CheckpointFile }
     return $null
 }
 
@@ -290,7 +289,14 @@ function Restore-Checkpoint {
         [string]$Path
     )
 
-    $data = Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    try {
+        $data = Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "Checkpoint file is corrupt or unreadable: $_"
+        Write-Host "`n  ⚠ Could not load checkpoint. Starting a fresh run instead." -ForegroundColor Yellow
+        return $false
+    }
 
     # Restore ConfigData as a flat hashtable
     $script:ConfigData = @{}
@@ -834,14 +840,14 @@ function Test-QuotaRequirements {
                 foreach ($q in $openAiQuotas) {
                     $available = $q.limit - $q.currentValue
                     $label     = $q.name.localizedValue
-                    if ($q.limit -gt 0) {
+                    if ($available -gt 0) {
                         Write-Host "  ✓ ${label}: $($q.currentValue)/$($q.limit) TPM used ($available available)" -ForegroundColor Green
                         Write-Log "OpenAI gpt-5.4-mini quota: $($q.currentValue)/$($q.limit) TPM used" -Level Info
                     }
                     else {
-                        Write-Host "  ✗ ${label}: no quota allocated (limit is 0)" -ForegroundColor Red
-                        Write-Log "OpenAI gpt-5.4-mini quota limit is 0 in $Location" -Level Warning
-                        $quotaIssues += "Azure OpenAI gpt-5.4-mini quota is 0 in ${Location} — a quota increase request is required (https://aka.ms/oai/stuquotarequest)"
+                        Write-Host "  ✗ ${label}: $($q.currentValue)/$($q.limit) TPM used (none available)" -ForegroundColor Red
+                        Write-Log "OpenAI gpt-5.4-mini quota exhausted: $($q.currentValue)/$($q.limit)" -Level Warning
+                        $quotaIssues += "Azure OpenAI gpt-5.4-mini quota is exhausted in ${Location} — a quota increase request is required (https://aka.ms/oai/stuquotarequest)"
                     }
                 }
             }
@@ -2033,6 +2039,7 @@ function Register-AllResourceProviders {
             for ($i = 0; $i -lt $maxRetries; $i++) {
                 Start-Sleep -Seconds $waitSeconds
                 $feature = Get-AzProviderFeature -ProviderNamespace 'Microsoft.Compute' -FeatureName 'EncryptionAtHost' -ErrorAction Stop
+                Write-Host "  ⏳ EncryptionAtHost: $($feature.RegistrationState) ($($i + 1)/$maxRetries)..." -ForegroundColor Gray
                 Write-Log "EncryptionAtHost feature status: $($feature.RegistrationState)" -Level Info
                 if ($feature.RegistrationState -eq 'Registered') {
                     Register-AzResourceProvider -ProviderNamespace 'Microsoft.Compute' -ErrorAction Stop | Out-Null
@@ -2730,8 +2737,9 @@ function Start-NeologikOnboarding {
             $resumeChoice = Read-Host
 
             if ([string]::IsNullOrWhiteSpace($resumeChoice) -or $resumeChoice -eq 'Y' -or $resumeChoice -eq 'y') {
-                Restore-Checkpoint -Path $existingCheckpoint.FullName
-                $resuming = $true
+                $restored = Restore-Checkpoint -Path $existingCheckpoint.FullName
+                if ($restored -eq $false) { $resuming = $false }
+                else { $resuming = $true }
 
                 Write-Host "`n  ✓ Checkpoint loaded." -ForegroundColor Green
                 Write-Host "    Org: $($script:OrganizationCode)  |  Env: $($script:EnvironmentType)  |  Region: $($script:AzureRegion)" -ForegroundColor Cyan
