@@ -179,9 +179,7 @@ function Connect-Graph {
     Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
 
     Write-Host ""
-    Write-Host "Sign in: a device code will appear below." -ForegroundColor Cyan
-    Write-Host "Open the URL, paste the code, sign in." -ForegroundColor Cyan
-    Write-Host "On the consent screen, TICK 'Consent on behalf of your organization', then Accept." -ForegroundColor Yellow
+    Write-Host "Step 1: sign in (device code below — open the URL, paste the code, sign in)." -ForegroundColor Cyan
     Write-Host ""
 
     $params = @{
@@ -199,7 +197,24 @@ function Connect-Graph {
         Write-Log "Sign-in did not complete" -Level Error
         exit 1
     }
-    Write-Log "Connected as $($ctx.Account) on tenant $($ctx.TenantId)" -Level Success
+    Write-Log "Signed in as $($ctx.Account)" -Level Success
+
+    $consentUrl = "https://login.microsoftonline.com/$($ctx.TenantId)/adminconsent?client_id=14d82eec-204b-4c2f-b7e8-296a70dab67e"
+    Write-Host ""
+    Write-Host "Step 2: granting admin consent — opening browser..." -ForegroundColor Cyan
+    Write-Host "  In the browser: sign in if asked, then click Accept." -ForegroundColor Cyan
+    Write-Host ""
+    try { Start-Process $consentUrl -ErrorAction Stop } catch {
+        Write-Host "Could not open browser. Open this URL manually:" -ForegroundColor Yellow
+        Write-Host "  $consentUrl" -ForegroundColor Yellow
+    }
+    Write-Host "Press Enter once you have clicked Accept..." -NoNewline
+    Read-Host | Out-Null
+
+    # Refresh the token so it picks up the new admin consent grant
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    Connect-MgGraph @params
+    Write-Log "Re-signed in with admin consent active" -Level Success
 }
 
 function Find-NeologikApps {
