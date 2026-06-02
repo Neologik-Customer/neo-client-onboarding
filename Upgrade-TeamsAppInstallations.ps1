@@ -250,6 +250,7 @@ function Initialize-GraphSession {
         NoWelcome = $true
     }
     if ($TenantId) { $params['TenantId'] = $TenantId }
+    else           { $params['Audience'] = 'organizations' }
 
     Invoke-GraphConnect -Params $params
 
