@@ -449,8 +449,8 @@ function Get-UsersWithInstallation {
                 $consecutiveForbidden++
                 Write-Log "    Skipped $($user.UserPrincipalName): 403 Forbidden ($consecutiveForbidden so far)" -Level Warning
 
-                if ($consecutiveForbidden -ge 3 -and -not $consentAlreadyAttempted) {
-                    Write-Log "Three consecutive 403s — admin consent likely missing. Triggering consent flow now." -Level Warning
+                if (-not $consentAlreadyAttempted) {
+                    Write-Log "403 Forbidden on per-user read — admin consent likely missing. Triggering consent flow now." -Level Warning
                     $consentAlreadyAttempted = $true
                     $context = Get-MgContext
                     Invoke-AdminConsentFlow -TenantSegment $context.TenantId
@@ -462,7 +462,7 @@ function Get-UsersWithInstallation {
                     continue
                 }
 
-                if ($consecutiveForbidden -ge 6) {
+                if ($consecutiveForbidden -ge 3) {
                     Write-Log "Aborting — still seeing 403s after admin consent flow." -Level Error
                     Write-Host @"
 
