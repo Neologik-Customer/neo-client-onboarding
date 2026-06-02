@@ -1,22 +1,38 @@
-# Teams App Bulk Upgrade Guide
+# Updating Neologik Teams Apps
 
-## Overview
+This guide covers the two steps required to roll out an updated Neologik Teams bot to all your users:
 
-When Neologik publishes a new version of a Teams bot to your tenant's app catalog, each user normally has to click an **Update** banner inside Teams to accept the new version. For tenants with many users, the prompts trickle out over hours or days and users frequently ignore them.
+1. **Upload the new app package** to your tenant's Teams app catalog (a `.zip` provided by Neologik).
+2. **Silently propagate the new version** to every user via the PowerShell script in this repository.
 
-The [`Upgrade-TeamsAppInstallations.ps1`](Upgrade-TeamsAppInstallations.ps1) script in this repository **silently force-upgrades every user's installed Neologik bot to the latest catalog version** in a single run — no Update prompt shown to anyone.
-
-This guide is written for your tenant administrator to run against your own tenant.
+Both steps are run by your tenant administrator against your own tenant.
 
 ---
 
-## When to Run This
+## Step 1 — Upload the New App Package to Your Tenant
 
-Run after Neologik notifies you of a new bot version, or whenever you want to confirm every user is on the latest version.
+Neologik will send you an updated app package (a `.zip` file containing the new manifest, icons, and configuration). To make it available in your tenant:
 
-A single run handles **every** Neologik bot in your catalog. You don't need to run it per bot.
+1. Sign in to the **Teams Admin Center** at <https://admin.teams.microsoft.com> with a **Teams Administrator** or **Global Administrator** account.
+2. In the left navigation, expand **Teams apps** and click **Manage apps**.
+3. Search for the existing Neologik app by name (for example, *Neologik — Your Bot Name*). Click the app to open its details.
+4. Click **Actions** → **Update**.
+5. Upload the new `.zip` file supplied by Neologik. Confirm the upload.
+6. Teams Admin Center shows the new version with status **Published**.
 
-Typical cadence: once a quarter, or after major bot updates.
+If Neologik supplied multiple `.zip` files (one per bot), repeat the upload for each bot.
+
+> **At this point the new version is in your catalog but users still have the old one installed.** Their Teams clients will show an "Update" banner over the next 24-72 hours as they sync the catalog. Step 2 below pushes the update to every user immediately.
+
+---
+
+## Step 2 — Silently Roll Out to All Users
+
+The [`Upgrade-TeamsAppInstallations.ps1`](Upgrade-TeamsAppInstallations.ps1) script in this repository **silently force-upgrades every user's installed Neologik bot to the latest catalog version** in a single run — no Update prompt shown to anyone.
+
+A single run handles **every** Neologik bot you uploaded in Step 1. You don't need to run it per bot.
+
+Run time scales with the number of bots and users in your tenant — anywhere from a few minutes to around an hour for large tenants. Leave the PowerShell window open until you see the final summary.
 
 ---
 
@@ -43,60 +59,72 @@ Check your version:
 $PSVersionTable.PSVersion
 ```
 
-If `Major` is `5`, install PowerShell 7 via the Microsoft Store, or:
+If `Major` is `5`, install PowerShell 7 from the Microsoft Store:
+
+1. Press the **Windows key**, type **Microsoft Store**, and open it.
+2. In the search box, type **PowerShell 7** and press Enter.
+3. Click the result titled **PowerShell** — with version **7.x.x** published by **Microsoft Corporation**. (The icon is a dark-blue square with a white prompt.)
+4. Click **Install**.
+5. Wait for the install to finish.
+
+#### After PowerShell 7 is installed
+
+Close all PowerShell windows and open a new **PowerShell 7** window (search Start menu for `pwsh`).
+
+> You do **not** need to run PowerShell as Administrator. The script installs its dependencies in your user profile and writes the log and CSV report next to itself.
+
+Verify the version:
 
 ```powershell
-winget install --id Microsoft.PowerShell --source winget
+$PSVersionTable.PSVersion
 ```
 
-Then close all PowerShell windows and open a new **PowerShell 7** window (search Start menu for `pwsh`).
+`Major` should now show `7`.
 
 ### 2. Get the script
 
 If you have already cloned this repository for onboarding, the script is already on your machine — `Upgrade-TeamsAppInstallations.ps1` next to `Install-NeologikEnvironment.ps1`.
 
-Otherwise, clone the repository:
+> **Choose a folder you have read/write access to.** The script writes its log and CSV report next to itself. Good choices: `C:\Neologik`, your `Documents` folder, your `Desktop`. Avoid `C:\Program Files`, network shares, or any read-only location.
+
+Otherwise, choose one of:
+
+**Option A — Download the repository as a ZIP (no Git required):**
+
+1. Open the repository in your browser: <https://github.com/Neologik-Customer/neo-client-onboarding>.
+2. Click the green **Code** button, then **Download ZIP**.
+3. Extract the ZIP into a writable folder of your choice (for example `C:\Neologik` or your Documents folder).
+4. Open PowerShell 7 and change into that folder:
+
+   ```powershell
+   cd C:\Neologik\neo-client-onboarding-main
+   ```
+
+**Option B — Clone with Git:**
 
 ```powershell
+cd C:\Neologik
 git clone https://github.com/Neologik-Customer/neo-client-onboarding.git
 cd neo-client-onboarding
 ```
 
 ---
 
-## First Run — Grant Admin Consent
+## Running the Script
 
-The very first time you run the script in your tenant, you need to grant **admin consent on behalf of your organisation** for the Microsoft Graph permissions the script uses. This is a one-time action.
-
-Run with the device-code flag — it surfaces the consent screen reliably:
+In your PowerShell 7 window, first allow scripts to run for this session only:
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File .\Upgrade-TeamsAppInstallations.ps1 -UseDeviceAuthentication -WhatIf
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-The script will:
-
-1. Display a device code and a URL.
-2. You open the URL in any browser, paste the code, and sign in as a Global Administrator.
-3. A consent screen lists the required permissions.
-
-> **On the consent screen, TICK the box "Consent on behalf of your organization" before clicking Accept.**
->
-> Without that tick, consent applies only to your account and the script will fail for everyone else.
-
-After consent is granted, the script will list the Neologik apps in your catalog and exit (because of `-WhatIf`).
-
-You only need to do this once. Future runs sign in silently using your machine's normal browser auth.
-
----
-
-## Running the Upgrade
-
-After the one-time setup, run:
+Then run the script:
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File .\Upgrade-TeamsAppInstallations.ps1
+.\Upgrade-TeamsAppInstallations.ps1 -UseDeviceAuthentication
 ```
+
+> The first time you run it in your tenant, a consent screen appears in your browser — **TICK "Consent on behalf of your organization"** before clicking Accept. This grants the script's Microsoft Graph permissions tenant-wide. Future runs sign in without showing the consent screen.
 
 The script will:
 
@@ -106,16 +134,15 @@ The script will:
 4. For each bot: enumerate users, identify stale installations, upgrade silently.
 5. Write a CSV report and log file next to the script.
 
-A typical tenant takes 2–10 minutes depending on user count.
+Run time scales with bot and user count — a few minutes for small tenants, up to around an hour for large tenants. Leave the window open until the final summary appears.
 
 ### Useful options
 
 | Flag | Purpose |
 |------|---------|
 | `-WhatIf` | Dry run — report what would change without making any changes. |
-| `-NamePrefix "..."` | Narrow to specific apps (e.g. `-NamePrefix "Neologik - Sales"`). |
+| `-NamePrefix "..."` | Narrow to specific apps (e.g. `-NamePrefix "Neologik - Bot A"`). |
 | `-AppId <guid>` | Upgrade a specific bot by manifest GUID. Accepts multiple. |
-| `-UseDeviceAuthentication` | Use device-code sign-in instead of browser (corporate locked-down machines). |
 | `-Force` | Skip the YES/NO confirmation prompt. |
 
 ---
@@ -132,25 +159,26 @@ Microsoft.Graph modules ready
 Signed in as admin@yourtenant.com on tenant aaaa1111-...
 Searching org catalog for Neologik apps...
 Matched 3 Neologik app(s) in catalog:
-  - Neologik - Claire Chalmers  v1.1.214  (...)
-  - Booking Assistant           v1.1.146  (...)
-  - Contract Agent              v1.1.199  (...)
+  - Neologik - Bot A    v1.1.214  (...)
+  - Neologik - Bot B    v1.1.146  (...)
+  - Neologik - Bot C    v1.1.199  (...)
 
 About to upgrade installations for the apps listed above.
 Type YES to proceed, or anything else to abort: YES
 
---- Neologik - Claire Chalmers (v1.1.214) ---
+--- Neologik - Bot A (v1.1.214) ---
   Found 47 installation(s)
 ...
 
 Report written: TeamsAppUpgrade_<timestamp>.csv
 
 Summary:
-App                            Status         Count
----                            ------         -----
-Neologik - Claire Chalmers     Upgraded         42
-Neologik - Claire Chalmers     AlreadyLatest     5
-Booking Assistant              Upgraded         18
+
+Name                                  Users Updated
+----                                  -------------
+Neologik - Bot A, Upgraded                       42
+Neologik - Bot A, AlreadyLatest                   5
+Neologik - Bot B, Upgraded                       18
 ...
 ```
 
@@ -158,35 +186,18 @@ The CSV next to the script lists every user × app with `FromVersion`, `ToVersio
 
 ---
 
-## Troubleshooting
+## Output Files
 
-### `cannot be loaded because running scripts is disabled on this system`
+Each run drops two timestamped files in the same folder as the script:
 
-Re-run with `-ExecutionPolicy Bypass`:
+| File | Contents |
+|------|----------|
+| `TeamsAppUpgrade_<timestamp>.log` | Full run log: every step, every API call result, any warnings. Useful for troubleshooting. |
+| `TeamsAppUpgrade_<timestamp>.csv` | One row per (user × app): `Upn`, `App`, `ExternalId`, `FromVersion`, `ToVersion`, `Status`. Use this as the audit record of who was upgraded. |
 
-```powershell
-pwsh -ExecutionPolicy Bypass -File .\Upgrade-TeamsAppInstallations.ps1
-```
+**Keep these files** — they're the audit trail for the rollout. Neither contains secrets, only user UPNs, display names, and app version numbers.
 
-### Browser sign-in window is blocked or hangs
-
-Use device-code instead:
-
-```powershell
-pwsh -ExecutionPolicy Bypass -File .\Upgrade-TeamsAppInstallations.ps1 -UseDeviceAuthentication
-```
-
-### `403 Forbidden reading other users' installed apps`
-
-Admin consent was not fully granted. Re-run with `-UseDeviceAuthentication -WhatIf`, and when the consent screen appears, **tick "Consent on behalf of your organization"** before clicking Accept.
-
-### `No Neologik apps found in org catalog`
-
-You're either signed in to the wrong tenant or Neologik hasn't published any bots to your tenant yet. Check Teams Admin Center → Manage apps and confirm.
-
-### Some specific users show `Failed: 403` in the CSV
-
-Their installation may be subject to a per-user app permission policy in your tenant. Review Teams Admin Center → App permission policies.
+If anything goes wrong, attach both files when contacting Neologik support — they're the fastest way to diagnose.
 
 ---
 

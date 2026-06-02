@@ -7,7 +7,7 @@
     Calls Microsoft Graph to:
     1. List all Teams apps in the org catalog whose displayName matches a
        prefix (default "Neologik") — picks up every Neologik bot regardless
-       of suffix (Claire Chalmers, Bidding, Lotti, SQL Agent, etc.).
+       of suffix in the display name.
     2. For each matched app, find its current installations across the tenant.
     3. Upgrade stale installations to the latest catalog version silently —
        no "Update" prompt shown to the user.
@@ -47,7 +47,7 @@
 
 .EXAMPLE
     .\Upgrade-TeamsAppInstallations.ps1 -NamePrefix "Neologik - Claire"
-    # Only the Claire Chalmers bot.
+    # Only apps whose display name starts with that prefix.
 
 .EXAMPLE
     .\Upgrade-TeamsAppInstallations.ps1 -AppId "afcd3e4c-1d8d-4094-8cba-5f9e7059cd58"
@@ -485,7 +485,7 @@ function Invoke-Main {
     $report | Export-Csv -Path $script:ReportFile -NoTypeInformation
     Write-Log "`nReport written: $script:ReportFile" -Level Success
 
-    $summary = $report | Group-Object App, Status | Select-Object Name, Count
+    $summary = $report | Group-Object App, Status | Select-Object Name, @{ Name = 'Users Updated'; Expression = { $_.Count } }
     Write-Host "`nSummary:" -ForegroundColor Cyan
     $summary | Format-Table -AutoSize | Out-Host
 
