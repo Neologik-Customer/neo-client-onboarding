@@ -243,44 +243,40 @@ function Test-CrossUserReadAccess {
 function Invoke-AdminConsentFlow {
     param([string]$TenantSegment)
 
-    if (-not $TenantSegment) { $TenantSegment = 'common' }
-
-    $scopeString = ($script:RequiredScopes -join ' ')
-    $encodedScope = [System.Uri]::EscapeDataString($scopeString)
-    $consentUrl = "https://login.microsoftonline.com/$TenantSegment/v2.0/adminconsent?client_id=$($script:GraphPowerShellClientId)&scope=$encodedScope&redirect_uri=https%3A%2F%2Flogin.microsoftonline.com%2Fcommon%2Foauth2%2Fnativeclient"
-
     Write-Host @"
 
 ------------------------------------------------------------------
                   ADMIN CONSENT REQUIRED
 ------------------------------------------------------------------
 
-Admin consent is not granted in this tenant for the Microsoft Graph
-PowerShell SDK enterprise app. Without it, the script cannot read
-other users' Teams app installations.
+The script needs admin consent for these Microsoft Graph scopes
+to be granted to the Microsoft Graph PowerShell SDK app in this tenant:
 
-Opening the admin consent page in your default browser now.
+  - AppCatalog.Read.All
+  - TeamsAppInstallation.ReadWriteAndConsentForUser.All
+  - User.Read.All
 
-  1. Sign in with a Global Admin / Cloud App Admin account if prompted.
-  2. Review the requested permissions.
-  3. Click ACCEPT to grant consent FOR THE WHOLE ORGANIZATION.
-  4. The browser may show a generic 'success' or a blank/error page
-     after redirect — that's fine. What matters is the consent
-     was recorded.
+When you continue, the script will:
+  1. Sign you out of the current Graph session.
+  2. Re-sign you in via DEVICE CODE flow — which uses a normal
+     Microsoft sign-in page (not WAM), so the full consent screen
+     is shown.
 
-Consent URL (manual fallback if the browser does not open):
-  $consentUrl
+On the consent screen in your browser:
 
+  >>>  TICK the box 'Consent on behalf of your organization'  <<<
+  >>>  THEN click ACCEPT.                                     <<<
+
+You need to be signed in as a Global Administrator (or Cloud
+Application Administrator / Application Administrator) for the
+org-consent checkbox to be enabled.
+
+If you DON'T tick the box, consent applies only to your account
+and the script will keep failing for other users.
+
+Press Enter to continue...
 "@ -ForegroundColor Yellow
 
-    try {
-        Start-Process $consentUrl -ErrorAction Stop
-    }
-    catch {
-        Write-Host "Could not auto-open the browser. Copy the URL above and open it manually." -ForegroundColor Yellow
-    }
-
-    Write-Host "Press Enter once the consent flow is complete..." -ForegroundColor Cyan -NoNewline
     Read-Host | Out-Null
 }
 
