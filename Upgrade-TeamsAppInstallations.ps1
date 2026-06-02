@@ -421,7 +421,10 @@ function Get-UsersWithInstallation {
     $installs = [System.Collections.Generic.List[object]]::new()
     $idx = 0
     $consecutiveForbidden = 0
-    foreach ($user in $users) {
+    $consentAlreadyAttempted = $false
+    $i = 0
+    while ($i -lt $users.Count) {
+        $user = $users[$i]
         $idx++
         if ($idx % 50 -eq 0) {
             Write-Host "    Checked $idx / $($users.Count)..." -ForegroundColor DarkGray
@@ -442,38 +445,54 @@ function Get-UsersWithInstallation {
                     })
                 }
             }
+            $i++
         }
         catch {
             $msg = $_.Exception.Message
             if ($msg -match '403|Forbidden|insufficient privileges') {
                 $consecutiveForbidden++
-                if ($consecutiveForbidden -ge 5) {
-                    Write-Log "Aborting — $consecutiveForbidden consecutive 403 responses on per-user reads." -Level Error
+                Write-Log "    Skipped $($user.UserPrincipalName): 403 Forbidden ($consecutiveForbidden so far)" -Level Warning
+
+                if ($consecutiveForbidden -ge 3 -and -not $consentAlreadyAttempted) {
+                    Write-Log "Three consecutive 403s — admin consent likely missing. Triggering consent flow now." -Level Warning
+                    $consentAlreadyAttempted = $true
+                    $context = Get-MgContext
+                    Invoke-AdminConsentFlow -TenantSegment $context.TenantId
+                    Write-Log "Re-authenticating to pick up the new consent grant..." -Level Info
+                    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+                    Invoke-GraphSignIn -ForceDeviceCode
+                    $consecutiveForbidden = 0
+                    # Don't advance $i — retry the same user with the new token
+                    continue
+                }
+
+                if ($consecutiveForbidden -ge 6) {
+                    Write-Log "Aborting — still seeing 403s after admin consent flow." -Level Error
                     Write-Host @"
 
-The Graph token has the required scopes in claims, but the Graph API is
-refusing per-user installedApps reads. Common causes:
+The script attempted to grant admin consent and re-authenticate, but
+per-user reads are still 403. Likely causes:
 
-  - A Conditional Access policy is blocking the Graph PowerShell SDK
-    enterprise app for this account.
-  - The 'Consent on behalf of organization' tick was accepted by a user
-    who does not actually have a tenant-wide consent role at the moment
-    of running (e.g. PIM role expired between consent and run).
-  - The tenant has a policy disabling user consent that also blocks
-    delegated admin operations through this app.
+  - The Accept button was not clicked on the admin consent screen.
+  - The signed-in account does not have a role that grants tenant-wide
+    consent: needs Global Administrator / Cloud Application Administrator /
+    Application Administrator.
+  - A Conditional Access policy is blocking the Graph PowerShell SDK app
+    (id 14d82eec-204b-4c2f-b7e8-296a70dab67e) for this account.
+  - Entra ID -> Enterprise apps -> Consent and permissions has 'Do not
+    allow user consent' configured restrictively for delegated admin ops.
 
-Action: have a Global Administrator sign in fresh in a private/incognito
-browser, re-run the script with -UseDeviceAuthentication, and tick the
-org-consent box. If still failing, check Entra ID -> Sign-in logs for
-the AAD app id 14d82eec-204b-4c2f-b7e8-296a70dab67e.
+Check Entra ID -> Sign-in logs for the Graph PowerShell app ID above.
 
 "@ -ForegroundColor Red
-                    throw "Aborted after $consecutiveForbidden consecutive 403s on per-user installedApps reads."
+                    throw "Aborted after $consecutiveForbidden consecutive 403s (consent flow already attempted)."
                 }
-                Write-Log "    Skipped $($user.UserPrincipalName): 403 Forbidden ($consecutiveForbidden/5 before abort)" -Level Warning
+
+                $i++
             } else {
                 $consecutiveForbidden = 0
                 Write-Log "    Skipped $($user.UserPrincipalName): $msg" -Level Warning
+                $i++
             }
         }
     }
