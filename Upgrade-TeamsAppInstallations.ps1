@@ -64,7 +64,7 @@
     Requires Entra role: Cloud Application Administrator (or higher)
     Graph delegated scopes consented at sign-in:
         - AppCatalog.Read.All
-        - TeamsAppInstallation.ReadWriteAndConsentForUser.All
+        - TeamsAppInstallation.ReadWriteAndConsentForUser
         - User.Read.All
 #>
 
@@ -171,7 +171,7 @@ function Install-GraphModule {
 
 $script:RequiredScopes = @(
     'AppCatalog.Read.All',
-    'TeamsAppInstallation.ReadWriteAndConsentForUser.All',
+    'TeamsAppInstallation.ReadWriteAndConsentForUser',
     'User.Read.All'
 )
 
@@ -223,20 +223,14 @@ function Grant-AdminConsent {
 function Invoke-GraphConnect {
     param([hashtable]$Params)
 
+    $Params['UseDeviceAuthentication'] = $true
+
     Write-Host ""
-    Write-Host "A sign-in window will open. Sign in as a Global Administrator." -ForegroundColor Cyan
-    Write-Host "If the browser doesn't open or sign-in fails, the script will fall back to device code." -ForegroundColor DarkGray
+    Write-Host "Device-code sign-in: copy the code shown below, open the URL, sign in as Global Admin." -ForegroundColor Cyan
+    Write-Host "If a consent screen appears, TICK 'Consent on behalf of your organization' before Accept." -ForegroundColor Yellow
     Write-Host ""
 
-    try {
-        Connect-MgGraph @Params -ErrorAction Stop
-    }
-    catch {
-        Write-Log "Browser sign-in failed: $($_.Exception.Message)" -Level Warning
-        Write-Host "Retrying with device-code flow..." -ForegroundColor Yellow
-        $Params['UseDeviceAuthentication'] = $true
-        Connect-MgGraph @Params -ErrorAction Stop
-    }
+    Connect-MgGraph @Params -ErrorAction Stop
 }
 
 function Initialize-GraphSession {
@@ -435,7 +429,7 @@ function Invoke-UserUpgrade {
         if ($_.Exception.Message -match '403|Forbidden|insufficient privileges') {
             Write-Log "INSUFFICIENT PRIVILEGES on upgrade call." -Level Error
             Write-Host "The signed-in account can read the catalog but cannot upgrade installations." -ForegroundColor Yellow
-            Write-Host "It is missing the TeamsAppInstallation.ReadWriteAndConsentForUser.All scope or an Entra role" -ForegroundColor Yellow
+            Write-Host "It is missing the TeamsAppInstallation.ReadWriteAndConsentForUser scope or an Entra role" -ForegroundColor Yellow
             Write-Host "with that consent. Ask the customer to assign Cloud Application Administrator (or higher)." -ForegroundColor Yellow
             throw "Aborting — insufficient privileges on upgrade endpoint."
         }
