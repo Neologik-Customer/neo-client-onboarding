@@ -201,10 +201,70 @@ function Invoke-GraphSignIn {
     }
 }
 
-function Get-MissingScopes {
-    $context = Get-MgContext
-    if (-not $context) { return @($script:RequiredScopes) }
-    return @($script:RequiredScopes | Where-Object { $context.Scopes -notcontains $_ })
+$script:GraphPowerShellClientId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
+
+function Test-CrossUserReadAccess {
+    # Probe whether the current token actually permits cross-user installedApps reads.
+    # Get-MgContext.Scopes alone is not sufficient — WAM returns tokens with the
+    # scopes as claims even when the Graph PowerShell enterprise app does NOT have
+    # admin consent for them in the tenant. Only an actual call reveals the truth.
+    try {
+        $oneUser = Get-MgUser -Top 1 -Property Id -ErrorAction Stop
+        if (-not $oneUser) { return $true }  # no users to probe against — nothing to upgrade anyway
+        $uri = "https://graph.microsoft.com/v1.0/users/$($oneUser.Id)/teamwork/installedApps?`$top=1"
+        Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop | Out-Null
+        return $true
+    }
+    catch {
+        if ($_.Exception.Message -match '403|Forbidden|insufficient privileges') {
+            return $false
+        }
+        throw
+    }
+}
+
+function Invoke-AdminConsentFlow {
+    param([string]$TenantSegment)
+
+    if (-not $TenantSegment) { $TenantSegment = 'common' }
+
+    $scopeString = ($script:RequiredScopes -join ' ')
+    $encodedScope = [System.Uri]::EscapeDataString($scopeString)
+    $consentUrl = "https://login.microsoftonline.com/$TenantSegment/v2.0/adminconsent?client_id=$($script:GraphPowerShellClientId)&scope=$encodedScope&redirect_uri=https%3A%2F%2Flogin.microsoftonline.com%2Fcommon%2Foauth2%2Fnativeclient"
+
+    Write-Host @"
+
+------------------------------------------------------------------
+                  ADMIN CONSENT REQUIRED
+------------------------------------------------------------------
+
+Admin consent is not granted in this tenant for the Microsoft Graph
+PowerShell SDK enterprise app. Without it, the script cannot read
+other users' Teams app installations.
+
+Opening the admin consent page in your default browser now.
+
+  1. Sign in with a Global Admin / Cloud App Admin account if prompted.
+  2. Review the requested permissions.
+  3. Click ACCEPT to grant consent FOR THE WHOLE ORGANIZATION.
+  4. The browser may show a generic 'success' or a blank/error page
+     after redirect — that's fine. What matters is the consent
+     was recorded.
+
+Consent URL (manual fallback if the browser does not open):
+  $consentUrl
+
+"@ -ForegroundColor Yellow
+
+    try {
+        Start-Process $consentUrl -ErrorAction Stop
+    }
+    catch {
+        Write-Host "Could not auto-open the browser. Copy the URL above and open it manually." -ForegroundColor Yellow
+    }
+
+    Write-Host "Press Enter once the consent flow is complete..." -ForegroundColor Cyan -NoNewline
+    Read-Host | Out-Null
 }
 
 function Connect-Graph {
@@ -218,51 +278,39 @@ function Connect-Graph {
     }
     Write-Log "Connected as $($context.Account) on tenant $($context.TenantId)" -Level Success
 
-    $missing = Get-MissingScopes
-    if ($missing.Count -gt 0) {
-        Write-Log "Admin consent not yet granted for: $($missing -join ', ')" -Level Warning
+    Write-Log "Probing cross-user read access..." -Level Info
+    if (Test-CrossUserReadAccess) {
+        Write-Log "Cross-user read access confirmed" -Level Success
+        return
+    }
+
+    Write-Log "Probe failed — admin consent missing for the Graph PowerShell app in this tenant" -Level Warning
+    Invoke-AdminConsentFlow -TenantSegment $context.TenantId
+
+    Write-Log "Re-authenticating to pick up the new consent grant..." -Level Info
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    Invoke-GraphSignIn -ForceDeviceCode
+
+    Write-Log "Re-probing cross-user read access..." -Level Info
+    if (-not (Test-CrossUserReadAccess)) {
+        Write-Log "Probe still failing after consent flow" -Level Error
         Write-Host @"
 
-The signed-in token does NOT include the required Graph scope(s) above.
-This means admin consent has not been granted in this tenant for the
-Microsoft Graph PowerShell enterprise app.
+Admin consent was not successfully granted. Possible causes:
 
-The script will now re-authenticate via device-code flow so the full
-consent prompt is shown in your browser.
+  - The Accept button was not clicked on the consent screen.
+  - The account used does not have a role that can grant tenant-wide consent
+    (needs Global Administrator / Cloud App Administrator / Application Administrator).
+  - A Conditional Access policy is blocking the consent operation.
+  - 'User Consent Settings' (Entra ID -> Enterprise apps -> Consent and permissions)
+    has 'Do not allow user consent' for all apps, including admin operations.
 
-  -->  When the browser shows the consent screen, TICK the box       <--
-  -->  'Consent on behalf of your organization' BEFORE clicking      <--
-  -->  Accept. You need Global Administrator (or Cloud App Admin     <--
-  -->  / Application Administrator) to do this.                      <--
-
-"@ -ForegroundColor Yellow
-
-        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-        Invoke-GraphSignIn -ForceDeviceCode
-
-        $missing = Get-MissingScopes
-        if ($missing.Count -gt 0) {
-            Write-Log "Required scopes still missing after re-auth: $($missing -join ', ')" -Level Error
-            Write-Host @"
-
-Admin consent was not granted. Either:
-  - The 'Consent on behalf of your organization' checkbox was not ticked.
-  - The account signed in with does not have a role that allows tenant-wide consent.
-
-Required Entra roles (any one):
-  - Global Administrator
-  - Cloud Application Administrator
-  - Application Administrator
-
-Aborting — re-run the script and tick the org-consent checkbox.
+Aborting — investigate the above and re-run.
 
 "@ -ForegroundColor Red
-            exit 1
-        }
-        Write-Log "Admin consent granted for all required scopes" -Level Success
-    } else {
-        Write-Log "All required Graph scopes are present in the token" -Level Success
+        exit 1
     }
+    Write-Log "Admin consent granted and verified" -Level Success
 }
 
 function Find-NeologikApps {
