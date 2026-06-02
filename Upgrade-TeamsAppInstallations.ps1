@@ -204,14 +204,31 @@ function Invoke-GraphSignIn {
 $script:GraphPowerShellClientId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
 
 function Test-CrossUserReadAccess {
-    # Probe whether the current token actually permits cross-user installedApps reads.
+    # Probe whether the current token actually permits CROSS-user installedApps reads.
     # Get-MgContext.Scopes alone is not sufficient — WAM returns tokens with the
     # scopes as claims even when the Graph PowerShell enterprise app does NOT have
     # admin consent for them in the tenant. Only an actual call reveals the truth.
+    #
+    # CRITICAL: must probe against a user OTHER than the signed-in user. Reading
+    # one's own /users/{me-id}/teamwork/installedApps works under user-consent,
+    # masking the admin-consent gap.
     try {
-        $oneUser = Get-MgUser -Top 1 -Property Id -ErrorAction Stop
-        if (-not $oneUser) { return $true }  # no users to probe against — nothing to upgrade anyway
-        $uri = "https://graph.microsoft.com/v1.0/users/$($oneUser.Id)/teamwork/installedApps?`$top=1"
+        $context = Get-MgContext
+        $myUpn = $context.Account
+        $myId = $null
+        if ($myUpn) {
+            try { $myId = (Get-MgUser -UserId $myUpn -Property Id -ErrorAction Stop).Id } catch { $myId = $null }
+        }
+
+        $candidates = Get-MgUser -Top 5 -Property Id, UserPrincipalName -ErrorAction Stop
+        $other = $candidates | Where-Object { $_.Id -ne $myId } | Select-Object -First 1
+
+        if (-not $other) {
+            Write-Log "Probe inconclusive — tenant has fewer than 2 users; cannot test cross-user read" -Level Warning
+            return $true
+        }
+
+        $uri = "https://graph.microsoft.com/v1.0/users/$($other.Id)/teamwork/installedApps?`$top=1"
         Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop | Out-Null
         return $true
     }
