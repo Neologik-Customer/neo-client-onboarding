@@ -175,155 +175,31 @@ $script:RequiredScopes = @(
     'User.Read.All'
 )
 
-function Invoke-GraphSignIn {
-    param([switch]$ForceDeviceCode)
-
-    $connectParams = @{ Scopes = $script:RequiredScopes; NoWelcome = $true }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    if ($ForceDeviceCode -or $UseDeviceAuthentication) {
-        $connectParams['UseDeviceAuthentication'] = $true
-        Write-Host "  Device code authentication — code will appear shortly." -ForegroundColor Yellow
-    } else {
-        Write-Host "  A browser window will open — sign in with an admin account." -ForegroundColor Yellow
-    }
-
-    try {
-        Connect-MgGraph @connectParams
-    }
-    catch {
-        if (-not $connectParams['UseDeviceAuthentication']) {
-            Write-Log "Browser auth failed: $($_.Exception.Message). Retrying with device code..." -Level Warning
-            $connectParams['UseDeviceAuthentication'] = $true
-            Connect-MgGraph @connectParams
-        } else {
-            throw
-        }
-    }
-}
-
-$script:GraphPowerShellClientId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
-
-function Test-CrossUserReadAccess {
-    # Probe whether the current token actually permits CROSS-user installedApps reads.
-    # Get-MgContext.Scopes alone is not sufficient — WAM returns tokens with the
-    # scopes as claims even when the Graph PowerShell enterprise app does NOT have
-    # admin consent for them in the tenant. Only an actual call reveals the truth.
-    #
-    # CRITICAL: must probe against a user OTHER than the signed-in user. Reading
-    # one's own /users/{me-id}/teamwork/installedApps works under user-consent,
-    # masking the admin-consent gap.
-    try {
-        $context = Get-MgContext
-        $myUpn = $context.Account
-        $myId = $null
-        if ($myUpn) {
-            try { $myId = (Get-MgUser -UserId $myUpn -Property Id -ErrorAction Stop).Id } catch { $myId = $null }
-        }
-
-        $candidates = Get-MgUser -Top 5 -Property Id, UserPrincipalName -ErrorAction Stop
-        $other = $candidates | Where-Object { $_.Id -ne $myId } | Select-Object -First 1
-
-        if (-not $other) {
-            Write-Log "Probe inconclusive — tenant has fewer than 2 users; cannot test cross-user read" -Level Warning
-            return $true
-        }
-
-        $uri = "https://graph.microsoft.com/v1.0/users/$($other.Id)/teamwork/installedApps?`$top=1"
-        Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop | Out-Null
-        return $true
-    }
-    catch {
-        if ($_.Exception.Message -match '403|Forbidden|insufficient privileges') {
-            return $false
-        }
-        throw
-    }
-}
-
-function Invoke-AdminConsentFlow {
-    param([string]$TenantSegment)
-
-    Write-Host @"
-
-------------------------------------------------------------------
-                  ADMIN CONSENT REQUIRED
-------------------------------------------------------------------
-
-The script needs admin consent for these Microsoft Graph scopes
-to be granted to the Microsoft Graph PowerShell SDK app in this tenant:
-
-  - AppCatalog.Read.All
-  - TeamsAppInstallation.ReadWriteAndConsentForUser.All
-  - User.Read.All
-
-When you continue, the script will:
-  1. Sign you out of the current Graph session.
-  2. Re-sign you in via DEVICE CODE flow — which uses a normal
-     Microsoft sign-in page (not WAM), so the full consent screen
-     is shown.
-
-On the consent screen in your browser:
-
-  >>>  TICK the box 'Consent on behalf of your organization'  <<<
-  >>>  THEN click ACCEPT.                                     <<<
-
-You need to be signed in as a Global Administrator (or Cloud
-Application Administrator / Application Administrator) for the
-org-consent checkbox to be enabled.
-
-If you DON'T tick the box, consent applies only to your account
-and the script will keep failing for other users.
-
-Press Enter to continue...
-"@ -ForegroundColor Yellow
-
-    Read-Host | Out-Null
-}
-
 function Connect-Graph {
-    Write-Log "Signing in to Microsoft Graph..." -Level Info
-    Invoke-GraphSignIn
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
 
-    $context = Get-MgContext
-    if (-not $context) {
+    Write-Host ""
+    Write-Host "Sign in: a device code will appear below." -ForegroundColor Cyan
+    Write-Host "Open the URL, paste the code, sign in." -ForegroundColor Cyan
+    Write-Host "On the consent screen, TICK 'Consent on behalf of your organization', then Accept." -ForegroundColor Yellow
+    Write-Host ""
+
+    $params = @{
+        Scopes                  = $script:RequiredScopes
+        UseDeviceAuthentication = $true
+        NoWelcome               = $true
+    }
+    if ($TenantId) { $params['TenantId'] = $TenantId }
+    else           { $params['Audience'] = 'organizations' }
+
+    Connect-MgGraph @params
+
+    $ctx = Get-MgContext
+    if (-not $ctx) {
         Write-Log "Sign-in did not complete" -Level Error
         exit 1
     }
-    Write-Log "Connected as $($context.Account) on tenant $($context.TenantId)" -Level Success
-
-    Write-Log "Probing cross-user read access..." -Level Info
-    if (Test-CrossUserReadAccess) {
-        Write-Log "Cross-user read access confirmed" -Level Success
-        return
-    }
-
-    Write-Log "Probe failed — admin consent missing for the Graph PowerShell app in this tenant" -Level Warning
-    Invoke-AdminConsentFlow -TenantSegment $context.TenantId
-
-    Write-Log "Re-authenticating to pick up the new consent grant..." -Level Info
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-    Invoke-GraphSignIn -ForceDeviceCode
-
-    Write-Log "Re-probing cross-user read access..." -Level Info
-    if (-not (Test-CrossUserReadAccess)) {
-        Write-Log "Probe still failing after consent flow" -Level Error
-        Write-Host @"
-
-Admin consent was not successfully granted. Possible causes:
-
-  - The Accept button was not clicked on the consent screen.
-  - The account used does not have a role that can grant tenant-wide consent
-    (needs Global Administrator / Cloud App Administrator / Application Administrator).
-  - A Conditional Access policy is blocking the consent operation.
-  - 'User Consent Settings' (Entra ID -> Enterprise apps -> Consent and permissions)
-    has 'Do not allow user consent' for all apps, including admin operations.
-
-Aborting — investigate the above and re-run.
-
-"@ -ForegroundColor Red
-        exit 1
-    }
-    Write-Log "Admin consent granted and verified" -Level Success
+    Write-Log "Connected as $($ctx.Account) on tenant $($ctx.TenantId)" -Level Success
 }
 
 function Find-NeologikApps {
@@ -416,11 +292,7 @@ function Get-UsersWithInstallation {
 
     $installs = [System.Collections.Generic.List[object]]::new()
     $idx = 0
-    $consecutiveForbidden = 0
-    $consentAlreadyAttempted = $false
-    $i = 0
-    while ($i -lt $users.Count) {
-        $user = $users[$i]
+    foreach ($user in $users) {
         $idx++
         if ($idx % 50 -eq 0) {
             Write-Host "    Checked $idx / $($users.Count)..." -ForegroundColor DarkGray
@@ -428,7 +300,6 @@ function Get-UsersWithInstallation {
         try {
             $uri = "https://graph.microsoft.com/v1.0/users/$($user.Id)/teamwork/installedApps?`$filter=teamsApp/id eq '$CatalogAppId'&`$expand=teamsApp,teamsAppDefinition"
             $r = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
-            $consecutiveForbidden = 0
             if ($r.value -and $r.value.Count -gt 0) {
                 foreach ($inst in $r.value) {
                     $installs.Add([PSCustomObject]@{
@@ -441,55 +312,15 @@ function Get-UsersWithInstallation {
                     })
                 }
             }
-            $i++
         }
         catch {
-            $msg = $_.Exception.Message
-            if ($msg -match '403|Forbidden|insufficient privileges') {
-                $consecutiveForbidden++
-                Write-Log "    Skipped $($user.UserPrincipalName): 403 Forbidden ($consecutiveForbidden so far)" -Level Warning
-
-                if (-not $consentAlreadyAttempted) {
-                    Write-Log "403 Forbidden on per-user read — admin consent likely missing. Triggering consent flow now." -Level Warning
-                    $consentAlreadyAttempted = $true
-                    $context = Get-MgContext
-                    Invoke-AdminConsentFlow -TenantSegment $context.TenantId
-                    Write-Log "Re-authenticating to pick up the new consent grant..." -Level Info
-                    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-                    Invoke-GraphSignIn -ForceDeviceCode
-                    $consecutiveForbidden = 0
-                    # Don't advance $i — retry the same user with the new token
-                    continue
-                }
-
-                if ($consecutiveForbidden -ge 3) {
-                    Write-Log "Aborting — still seeing 403s after admin consent flow." -Level Error
-                    Write-Host @"
-
-The script attempted to grant admin consent and re-authenticate, but
-per-user reads are still 403. Likely causes:
-
-  - The Accept button was not clicked on the admin consent screen.
-  - The signed-in account does not have a role that grants tenant-wide
-    consent: needs Global Administrator / Cloud Application Administrator /
-    Application Administrator.
-  - A Conditional Access policy is blocking the Graph PowerShell SDK app
-    (id 14d82eec-204b-4c2f-b7e8-296a70dab67e) for this account.
-  - Entra ID -> Enterprise apps -> Consent and permissions has 'Do not
-    allow user consent' configured restrictively for delegated admin ops.
-
-Check Entra ID -> Sign-in logs for the Graph PowerShell app ID above.
-
-"@ -ForegroundColor Red
-                    throw "Aborted after $consecutiveForbidden consecutive 403s (consent flow already attempted)."
-                }
-
-                $i++
-            } else {
-                $consecutiveForbidden = 0
-                Write-Log "    Skipped $($user.UserPrincipalName): $msg" -Level Warning
-                $i++
+            if ($_.Exception.Message -match '403|Forbidden|insufficient privileges') {
+                Write-Host ""
+                Write-Log "403 Forbidden reading other users' installed apps." -Level Error
+                Write-Host "Admin consent is missing. Re-run the script and TICK 'Consent on behalf of your organization' on the sign-in screen." -ForegroundColor Yellow
+                throw "Aborted: admin consent not granted."
             }
+            Write-Log "    Skipped $($user.UserPrincipalName): $($_.Exception.Message)" -Level Warning
         }
     }
 
