@@ -223,14 +223,28 @@ function Grant-AdminConsent {
 function Invoke-GraphConnect {
     param([hashtable]$Params)
 
-    $Params['UseDeviceAuthentication'] = $true
-
+    if ($UseDeviceAuthentication) {
+        $Params['UseDeviceAuthentication'] = $true
+        Write-Host "Device-code sign-in: code will appear below — open the URL, paste, sign in." -ForegroundColor Cyan
+        Write-Host "If a consent screen appears, TICK 'Consent on behalf of your organization' before Accept." -ForegroundColor Yellow
+    } else {
+        Write-Host "A sign-in window will open. Sign in as Global Admin." -ForegroundColor Cyan
+        Write-Host "If a consent screen appears, TICK 'Consent on behalf of your organization' before Accept." -ForegroundColor Yellow
+    }
     Write-Host ""
-    Write-Host "Device-code sign-in: copy the code shown below, open the URL, sign in as Global Admin." -ForegroundColor Cyan
-    Write-Host "If a consent screen appears, TICK 'Consent on behalf of your organization' before Accept." -ForegroundColor Yellow
-    Write-Host ""
 
-    Connect-MgGraph @Params -ErrorAction Stop
+    try {
+        Connect-MgGraph @Params -ErrorAction Stop
+    }
+    catch {
+        if (-not $Params['UseDeviceAuthentication']) {
+            Write-Log "Browser sign-in failed: $($_.Exception.Message). Retrying with device code..." -Level Warning
+            $Params['UseDeviceAuthentication'] = $true
+            Connect-MgGraph @Params -ErrorAction Stop
+        } else {
+            throw
+        }
+    }
 }
 
 function Initialize-GraphSession {
