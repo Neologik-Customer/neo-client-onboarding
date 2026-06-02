@@ -175,20 +175,62 @@ $script:RequiredScopes = @(
     'User.Read.All'
 )
 
-function Connect-Graph {
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+$script:GraphPowerShellAppId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
+$script:MicrosoftGraphAppId  = '00000003-0000-0000-c000-000000000000'
 
-    Write-Host ""
-    Write-Host "Step 1: sign in (device code below — open the URL, paste the code, sign in)." -ForegroundColor Cyan
-    Write-Host ""
+function Grant-AdminConsent {
+    # Programmatically grant org-wide admin consent for the required scopes on
+    # the Microsoft Graph PowerShell SDK enterprise app. The signed-in user must
+    # hold a directory role that permits oauth2PermissionGrant management
+    # (Global Administrator / Cloud App Administrator / Application
+    # Administrator / Privileged Role Administrator).
+    Write-Log "Granting org-wide admin consent for required scopes..." -Level Info
+
+    $graphPsSp = (Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '$($script:GraphPowerShellAppId)'").value | Select-Object -First 1
+    if (-not $graphPsSp) {
+        Write-Log "  Provisioning Microsoft Graph PowerShell SP in this tenant..." -Level Info
+        $createBody = @{ appId = $script:GraphPowerShellAppId } | ConvertTo-Json
+        $graphPsSp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/servicePrincipals' -Body $createBody -ContentType 'application/json'
+    }
+    $graphSp = (Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '$($script:MicrosoftGraphAppId)'").value | Select-Object -First 1
+
+    $existing = (Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/oauth2PermissionGrants?`$filter=clientId eq '$($graphPsSp.id)' and resourceId eq '$($graphSp.id)' and consentType eq 'AllPrincipals'").value | Select-Object -First 1
+
+    if ($existing) {
+        $existingScopes = $existing.scope -split ' '
+        $missing = $script:RequiredScopes | Where-Object { $existingScopes -notcontains $_ }
+        if (-not $missing) {
+            Write-Log "  Admin consent already in place — no changes needed" -Level Success
+            return
+        }
+        $merged = (($existingScopes + $script:RequiredScopes) | Sort-Object -Unique) -join ' '
+        $body = @{ scope = $merged } | ConvertTo-Json
+        Invoke-MgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/oauth2PermissionGrants/$($existing.id)" -Body $body -ContentType 'application/json' | Out-Null
+        Write-Log "  Existing grant updated with missing scopes" -Level Success
+    } else {
+        $body = @{
+            clientId    = $graphPsSp.id
+            consentType = 'AllPrincipals'
+            principalId = $null
+            resourceId  = $graphSp.id
+            scope       = ($script:RequiredScopes -join ' ')
+        } | ConvertTo-Json
+        Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/oauth2PermissionGrants' -Body $body -ContentType 'application/json' | Out-Null
+        Write-Log "  Admin consent granted org-wide" -Level Success
+    }
+}
+
+function Initialize-GraphSession {
+    # Bootstrap scopes: includes DelegatedPermissionGrant.ReadWrite.All so a
+    # Global Admin can self-consent at sign-in and then create the org-wide
+    # grants for the operational scopes via Graph API.
+    $bootstrapScopes = @($script:RequiredScopes + 'DelegatedPermissionGrant.ReadWrite.All' + 'Application.ReadWrite.All' | Sort-Object -Unique)
 
     $params = @{
-        Scopes                  = $script:RequiredScopes
-        UseDeviceAuthentication = $true
-        NoWelcome               = $true
+        Scopes    = $bootstrapScopes
+        NoWelcome = $true
     }
     if ($TenantId) { $params['TenantId'] = $TenantId }
-    else           { $params['Audience'] = 'organizations' }
 
     Connect-MgGraph @params
 
@@ -197,24 +239,31 @@ function Connect-Graph {
         Write-Log "Sign-in did not complete" -Level Error
         exit 1
     }
-    Write-Log "Signed in as $($ctx.Account)" -Level Success
+    Write-Log "Signed in as $($ctx.Account) on tenant $($ctx.TenantId)" -Level Success
 
-    $consentUrl = "https://login.microsoftonline.com/$($ctx.TenantId)/adminconsent?client_id=14d82eec-204b-4c2f-b7e8-296a70dab67e"
-    Write-Host ""
-    Write-Host "Step 2: granting admin consent — opening browser..." -ForegroundColor Cyan
-    Write-Host "  In the browser: sign in if asked, then click Accept." -ForegroundColor Cyan
-    Write-Host ""
-    try { Start-Process $consentUrl -ErrorAction Stop } catch {
-        Write-Host "Could not open browser. Open this URL manually:" -ForegroundColor Yellow
-        Write-Host "  $consentUrl" -ForegroundColor Yellow
+    try {
+        Grant-AdminConsent
     }
-    Write-Host "Press Enter once you have clicked Accept..." -NoNewline
-    Read-Host | Out-Null
+    catch {
+        Write-Log "Auto-consent failed: $($_.Exception.Message)" -Level Error
+        Write-Host ""
+        Write-Host "The signed-in account may not have sufficient privileges." -ForegroundColor Yellow
+        Write-Host "Need: Global Administrator / Cloud App Administrator / Application Administrator." -ForegroundColor Yellow
+        exit 1
+    }
 
-    # Refresh the token so it picks up the new admin consent grant
+    # Refresh the SDK's token so it includes the newly-granted SP-level scopes
     Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    $params['Scopes'] = $script:RequiredScopes
     Connect-MgGraph @params
     Write-Log "Re-signed in with admin consent active" -Level Success
+}
+
+function Show-AdminConsentRequired {
+    Write-Host ""
+    Write-Host "Admin consent could not be granted automatically." -ForegroundColor Red
+    Write-Host "Sign in with a Global Administrator account when prompted and re-run." -ForegroundColor Yellow
+    Write-Host ""
 }
 
 function Find-NeologikApps {
@@ -330,9 +379,7 @@ function Get-UsersWithInstallation {
         }
         catch {
             if ($_.Exception.Message -match '403|Forbidden|insufficient privileges') {
-                Write-Host ""
-                Write-Log "403 Forbidden reading other users' installed apps." -Level Error
-                Write-Host "Admin consent is missing. Re-run the script and TICK 'Consent on behalf of your organization' on the sign-in screen." -ForegroundColor Yellow
+                Show-AdminConsentRequired
                 throw "Aborted: admin consent not granted."
             }
             Write-Log "    Skipped $($user.UserPrincipalName): $($_.Exception.Message)" -Level Warning
@@ -385,7 +432,7 @@ function Invoke-Main {
     Write-Header
     Test-PowerShellVersion
     Install-GraphModule
-    Connect-Graph
+    Initialize-GraphSession
 
     $catalogApps = Find-NeologikApps
 
