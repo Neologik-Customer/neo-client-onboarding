@@ -234,13 +234,8 @@ function Invoke-GraphConnect {
 }
 
 function Initialize-GraphSession {
-    # Bootstrap scopes: includes DelegatedPermissionGrant.ReadWrite.All so a
-    # Global Admin can self-consent at sign-in and then create the org-wide
-    # grants for the operational scopes via Graph API.
-    $bootstrapScopes = @($script:RequiredScopes + 'DelegatedPermissionGrant.ReadWrite.All' + 'Application.ReadWrite.All' | Sort-Object -Unique)
-
     $params = @{
-        Scopes    = $bootstrapScopes
+        Scopes    = $script:RequiredScopes
         NoWelcome = $true
     }
     if ($TenantId) { $params['TenantId'] = $TenantId }
@@ -254,23 +249,6 @@ function Initialize-GraphSession {
         exit 1
     }
     Write-Log "Signed in as $($ctx.Account) on tenant $($ctx.TenantId)" -Level Success
-
-    try {
-        Grant-AdminConsent
-    }
-    catch {
-        Write-Log "Auto-consent failed: $($_.Exception.Message)" -Level Error
-        Write-Host ""
-        Write-Host "The signed-in account may not have sufficient privileges." -ForegroundColor Yellow
-        Write-Host "Need: Global Administrator / Cloud App Administrator / Application Administrator." -ForegroundColor Yellow
-        exit 1
-    }
-
-    # Refresh the SDK's token so it includes the newly-granted SP-level scopes
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-    $params['Scopes'] = $script:RequiredScopes
-    Invoke-GraphConnect -Params $params
-    Write-Log "Re-signed in with admin consent active" -Level Success
 }
 
 function Show-AdminConsentRequired {
