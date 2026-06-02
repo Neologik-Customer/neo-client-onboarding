@@ -220,6 +220,25 @@ function Grant-AdminConsent {
     }
 }
 
+function Invoke-GraphConnect {
+    param([hashtable]$Params)
+
+    Write-Host ""
+    Write-Host "A sign-in window will open. Sign in as a Global Administrator." -ForegroundColor Cyan
+    Write-Host "If the browser doesn't open or sign-in fails, the script will fall back to device code." -ForegroundColor DarkGray
+    Write-Host ""
+
+    try {
+        Connect-MgGraph @Params -ErrorAction Stop
+    }
+    catch {
+        Write-Log "Browser sign-in failed: $($_.Exception.Message)" -Level Warning
+        Write-Host "Retrying with device-code flow..." -ForegroundColor Yellow
+        $Params['UseDeviceAuthentication'] = $true
+        Connect-MgGraph @Params -ErrorAction Stop
+    }
+}
+
 function Initialize-GraphSession {
     # Bootstrap scopes: includes DelegatedPermissionGrant.ReadWrite.All so a
     # Global Admin can self-consent at sign-in and then create the org-wide
@@ -232,7 +251,7 @@ function Initialize-GraphSession {
     }
     if ($TenantId) { $params['TenantId'] = $TenantId }
 
-    Connect-MgGraph @params
+    Invoke-GraphConnect -Params $params
 
     $ctx = Get-MgContext
     if (-not $ctx) {
@@ -255,7 +274,7 @@ function Initialize-GraphSession {
     # Refresh the SDK's token so it includes the newly-granted SP-level scopes
     Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
     $params['Scopes'] = $script:RequiredScopes
-    Connect-MgGraph @params
+    Invoke-GraphConnect -Params $params
     Write-Log "Re-signed in with admin consent active" -Level Success
 }
 
