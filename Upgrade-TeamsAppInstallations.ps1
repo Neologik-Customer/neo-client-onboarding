@@ -17,13 +17,9 @@
     Global Administrator) without prior Graph experience and without access
     to the neo-env-config repo.
 
-.PARAMETER NamePrefix
-    Match Teams apps whose displayName starts with this string. Default:
-    "Neologik" — covers every Neologik bot in the tenant.
-
 .PARAMETER AppId
     Optional override. Specific Teams app manifest "id" GUID(s) to upgrade.
-    When supplied, skips the displayName lookup and operates only on these.
+    When supplied, skips the auto-discovery and operates only on these.
     Accepts multiple GUIDs.
 
 .PARAMETER TenantId
@@ -43,14 +39,10 @@
 
 .EXAMPLE
     .\Upgrade-TeamsAppInstallations.ps1
-    # Upgrades every "Neologik *" app in the tenant.
+    # Upgrades every Neologik bot in the tenant.
 
 .EXAMPLE
-    .\Upgrade-TeamsAppInstallations.ps1 -NamePrefix "Neologik - Claire"
-    # Only apps whose display name starts with that prefix.
-
-.EXAMPLE
-    .\Upgrade-TeamsAppInstallations.ps1 -AppId "afcd3e4c-1d8d-4094-8cba-5f9e7059cd58"
+    .\Upgrade-TeamsAppInstallations.ps1 -AppId "00000000-0000-0000-0000-000000000000"
     # Specific bot by manifest GUID.
 
 .EXAMPLE
@@ -70,9 +62,6 @@
 
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [Parameter(Mandatory = $false)]
-    [string]$NamePrefix = 'Neologik',
-
     [Parameter(Mandatory = $false)]
     [ValidatePattern('^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$')]
     [string[]]$AppId,
@@ -116,7 +105,7 @@ function Write-Log {
 }
 
 function Write-Header {
-    $target = if ($AppId) { "AppIds: $($AppId -join ', ')" } else { "NamePrefix: '$NamePrefix'" }
+    $target = if ($AppId) { "AppIds: $($AppId -join ', ')" } else { "All Neologik apps" }
     $header = @"
 
 ===============================================================

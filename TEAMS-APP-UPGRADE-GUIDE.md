@@ -141,7 +141,6 @@ Run time scales with bot and user count — a few minutes for small tenants, up 
 | Flag | Purpose |
 |------|---------|
 | `-WhatIf` | Dry run — report what would change without making any changes. |
-| `-NamePrefix "..."` | Narrow to specific apps (e.g. `-NamePrefix "Neologik - Bot A"`). |
 | `-AppId <guid>` | Upgrade a specific bot by manifest GUID. Accepts multiple. |
 | `-Force` | Skip the YES/NO confirmation prompt. |
 
