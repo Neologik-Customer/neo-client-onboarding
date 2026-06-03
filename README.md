@@ -10,6 +10,7 @@ Welcome! This repository contains everything you need to set up your Neologik en
 - **Install-NeologikEnvironment.ps1** - The PowerShell script that creates your Azure resources
 - **PFX-CERT-GUIDE.md** - Instructions for creating your TLS/SSL certificate
 - **FINISHING-STEPS-GUIDE.md** - Final steps after Neologik completes the deployment
+- **Upgrade-TeamsAppInstallations.ps1** + **TEAMS-APP-UPGRADE-GUIDE.md** - Bulk-upgrade every user's installed Neologik Teams bot to the latest version (run periodically, after onboarding)
 
 **How to Use This Repository:**
 
