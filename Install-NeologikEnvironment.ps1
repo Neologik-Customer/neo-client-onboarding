@@ -333,7 +333,7 @@ function Restore-Checkpoint {
     $script:OutputFile             = $data.OutputFile
 }
 
-function Mark-StepCompleted {
+function Complete-OnboardingStep {
     <#
     .SYNOPSIS
         Records a step as completed in the checkpoint.
@@ -632,7 +632,9 @@ function Connect-AzureEnvironment {
             Write-Log "Connecting to Microsoft Graph via existing Azure token..." -Level Info
             try {
                 $graphToken = (Get-AzAccessToken -ResourceTypeName MSGraph -TenantId $script:ConfigData['TenantId'] -ErrorAction Stop).Token
-                Connect-MgGraph -AccessToken $graphToken -ErrorAction Stop
+                # Microsoft.Graph 2.x requires -AccessToken as a SecureString (plain string is deprecated, fails in 3.x)
+                $secureGraphToken = ConvertTo-SecureString -String $graphToken -AsPlainText -Force
+                Connect-MgGraph -AccessToken $secureGraphToken -ErrorAction Stop
                 Write-Log "Connected to Microsoft Graph using Azure session token" -Level Success
             }
             catch {
@@ -884,10 +886,10 @@ function Test-QuotaRequirements {
         Write-Host "  Deploying without sufficient quota may cause failures later." -ForegroundColor Gray
         Write-Host "  See QUICK-REFERENCE.md → Prerequisites for how to request increases." -ForegroundColor Gray
         Write-Host ""
-        Write-Host "  Continue anyway? (Y/N, default: N): " -NoNewline -ForegroundColor Yellow
+        Write-Host "  Continue anyway? (Y/N, default: Y): " -NoNewline -ForegroundColor Yellow
         $continueChoice = Read-Host
 
-        if ($continueChoice -eq 'Y' -or $continueChoice -eq 'y') {
+        if ([string]::IsNullOrWhiteSpace($continueChoice) -or $continueChoice -eq 'Y' -or $continueChoice -eq 'y') {
             Write-Host "  Continuing with quota warnings acknowledged..." -ForegroundColor Yellow
             Write-Log "User chose to continue despite quota warnings: $($quotaIssues -join '; ')" -Level Warning
         }
@@ -3545,7 +3547,7 @@ function Start-NeologikOnboarding {
         # Save configuration to checkpoint now that it has been confirmed.
         # This allows a resume if any subsequent step fails (e.g. permission errors or provider timeouts).
         $script:CheckpointRegionAbbrev = $regionAbbrev
-        Mark-StepCompleted 'ConfigGathered'
+        Complete-OnboardingStep 'ConfigGathered'
 
         } else {
             # Resume path: restore the region abbreviation local variable from checkpoint data.
@@ -3598,7 +3600,7 @@ function Start-NeologikOnboarding {
 
         # Step 13: Register all required Azure resource providers
         Register-AllResourceProviders
-        Mark-StepCompleted 'ResourceProviders'
+        Complete-OnboardingStep 'ResourceProviders'
 
         # Step 14: Create Storage Account and blob container for certificates
         $storageAccountName = "stneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
