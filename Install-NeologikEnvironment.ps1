@@ -1377,7 +1377,10 @@ function Set-NeologikRoleAssignments {
         [array]$SecurityGroups,
 
         [Parameter(Mandatory = $true)]
-        [string]$SubscriptionId
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceGroupName
     )
 
     Write-Log "Assigning roles to security groups..." -Level Info
@@ -1390,40 +1393,62 @@ function Set-NeologikRoleAssignments {
             throw "Neologik Admin User Group not found"
         }
 
-        Write-Log "Assigning Contributor role to $($adminGroup.Name)..." -Level Info
+        $subScope = "/subscriptions/$SubscriptionId"
+        $rgScope  = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName"
 
-        # Check if role assignment already exists
+        # Verify permissions with a test call before assigning anything
         try {
-            $existingAssignment = Get-AzRoleAssignment -ObjectId $adminGroup.Id `
+            $null = Get-AzRoleAssignment -ObjectId $adminGroup.Id `
                 -RoleDefinitionName 'Contributor' `
-                -Scope "/subscriptions/$SubscriptionId" `
+                -Scope $subScope `
                 -ErrorAction Stop
         }
         catch {
-            Write-Log "ERROR: Unable to verify Contributor role assignment - insufficient permissions" -Level Error
+            Write-Log "ERROR: Unable to verify role assignments - insufficient permissions" -Level Error
             Write-Host "`n❌ INSUFFICIENT PERMISSIONS" -ForegroundColor Red
             Write-Host "Cannot verify role assignments. Owner role at subscription level is required." -ForegroundColor Yellow
             throw "Insufficient permissions: Cannot verify role assignments"
         }
 
-        if ($existingAssignment) {
-            Write-Log "Contributor role already assigned to $($adminGroup.Name)" -Level Info
-        }
-        else {
-            # Add retry logic for newly created security groups
+        # Roles to assign at subscription scope
+        $subRoles = @(
+            'Contributor',
+            'Cost Management Contributor',
+            'Monitoring Contributor'
+        )
+
+        # Roles to assign at resource-group scope
+        $rgRoles = @(
+            'Key Vault Administrator',
+            'Storage Blob Data Contributor',
+            'Storage Blob Data Owner',
+            'Storage Table Data Contributor',
+            'Azure Kubernetes Service RBAC Cluster Admin',
+            'Cognitive Services Contributor',
+            'Cognitive Services Data Reader',
+            'Cognitive Services OpenAI Contributor',
+            'Cosmos DB Account Reader Role',
+            'Search Service Contributor',
+            'Search Index Data Reader',
+            'Azure AI Developer',
+            'AzureML Data Scientist'
+        )
+
+        $assignRole = {
+            param($ObjectId, $RoleName, $Scope, $GroupName)
+            $existing = Get-AzRoleAssignment -ObjectId $ObjectId -RoleDefinitionName $RoleName -Scope $Scope -ErrorAction SilentlyContinue
+            if ($existing) {
+                Write-Log "$RoleName already assigned to $GroupName" -Level Info
+                return
+            }
             $retryCount = 0
             $maxRetries = 10
-            $roleAssigned = $false
-
-            while (-not $roleAssigned -and $retryCount -lt $maxRetries) {
+            $assigned = $false
+            while (-not $assigned -and $retryCount -lt $maxRetries) {
                 try {
-                    New-AzRoleAssignment -ObjectId $adminGroup.Id `
-                        -RoleDefinitionName 'Contributor' `
-                        -Scope "/subscriptions/$SubscriptionId" `
-                        -ErrorAction Stop | Out-Null
-
-                    Write-Log "Contributor role assigned successfully" -Level Success
-                    $roleAssigned = $true
+                    New-AzRoleAssignment -ObjectId $ObjectId -RoleDefinitionName $RoleName -Scope $Scope -ErrorAction Stop | Out-Null
+                    Write-Log "$RoleName assigned to $GroupName successfully" -Level Success
+                    $assigned = $true
                 }
                 catch {
                     if ($_.Exception.Message -match "does not exist|cannot be found|BadRequest") {
@@ -1432,37 +1457,28 @@ function Set-NeologikRoleAssignments {
                             Write-Log "Security group not yet replicated. Retrying in 10 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
                             Start-Sleep -Seconds 10
                         }
-                        else {
-                            throw
-                        }
+                        else { throw }
                     }
-                    else {
-                        throw
-                    }
+                    else { throw }
                 }
             }
         }
 
-        $script:ConfigData['RoleAssignments'] = @(
-            @{
-                Principal = $adminGroup.Name
-                PrincipalType = 'Security Group'
-                Role = 'Contributor'
-                Scope = 'Subscription'
-            },
-            @{
-                Principal = $adminGroup.Name
-                PrincipalType = 'Security Group'
-                Role = 'Key Vault Secrets Officer'
-                Scope = 'Resource Group'
-            },
-            @{
-                Principal = $adminGroup.Name
-                PrincipalType = 'Security Group'
-                Role = 'Storage Blob Data Contributor'
-                Scope = 'Resource Group'
-            }
-        )
+        foreach ($role in $subRoles) {
+            Write-Log "Assigning $role to $($adminGroup.Name) at subscription scope..." -Level Info
+            & $assignRole $adminGroup.Id $role $subScope $adminGroup.Name
+        }
+
+        foreach ($role in $rgRoles) {
+            Write-Log "Assigning $role to $($adminGroup.Name) at resource group scope..." -Level Info
+            & $assignRole $adminGroup.Id $role $rgScope $adminGroup.Name
+        }
+
+        $script:ConfigData['RoleAssignments'] = ($subRoles | ForEach-Object {
+            @{ Principal = $adminGroup.Name; PrincipalType = 'Security Group'; Role = $_; Scope = 'Subscription' }
+        }) + ($rgRoles | ForEach-Object {
+            @{ Principal = $adminGroup.Name; PrincipalType = 'Security Group'; Role = $_; Scope = 'Resource Group' }
+        })
 
         return $true
     }
@@ -1558,8 +1574,9 @@ function New-NeologikAppRegistration {
             ObjectId = $app.Id
             ServicePrincipalId = $sp.Id
             SecretExpiry = $secretEndDate.ToString('yyyy-MM-dd')
-            SubscriptionRoles = @('Contributor', 'User Access Administrator')
-            EntraRole = 'Application Administrator'
+            SubscriptionRoles = @('Contributor', 'Cost Management Contributor')
+            RGRoles = @('Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor')
+            GraphAppRoles = @('Application.Read.All', 'Application.ReadWrite.OwnedBy')
         }
 
         return @{
@@ -1571,6 +1588,133 @@ function New-NeologikAppRegistration {
     catch {
         Write-Log "Failed to create App Registration: $_" -Level Error
         throw
+    }
+}
+
+function Grant-GraphAppRolePermissions {
+    <#
+    .SYNOPSIS
+        Grants lower-scoped Microsoft Graph application permissions to a service principal
+        or managed identity, replacing the tenant-wide 'Application Administrator' directory role.
+    .DESCRIPTION
+        Assigns Microsoft Graph app roles (default: Application.Read.All and
+        Application.ReadWrite.OwnedBy) via appRoleAssignments. Idempotent and retries while the
+        principal replicates to Entra ID.
+
+        NOTE: Application.ReadWrite.OwnedBy only permits managing app registrations the principal
+        OWNS. Any flow that mutates an app registration with this identity (e.g. secret rotation)
+        must first register the identity as an owner of that app.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PrincipalId,
+
+        [Parameter(Mandatory = $false)]
+        [string]$PrincipalDescription = 'service principal',
+
+        [Parameter(Mandatory = $false)]
+        [string[]]$AppRoles = @('Application.Read.All', 'Application.ReadWrite.OwnedBy')
+    )
+
+    # Microsoft Graph well-known IDs (appId of Microsoft Graph + application-permission app role IDs)
+    $graphAppId = '00000003-0000-0000-c000-000000000000'
+    $knownGraphAppRoleIds = @{
+        'Application.Read.All'          = '9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30'
+        'Application.ReadWrite.OwnedBy' = '18a4783c-866b-4cc7-a460-3d0e455a3d5e'
+    }
+
+    Write-Log "Granting Microsoft Graph app permissions ($($AppRoles -join ', ')) to $PrincipalDescription..." -Level Info
+
+    # Resolve the Microsoft Graph service principal object ID in this tenant
+    try {
+        $graphSpResponse = Invoke-MgGraphRequest -Method GET `
+            -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '$graphAppId'" `
+            -ErrorAction Stop
+        $graphSpId = $graphSpResponse.value | Select-Object -First 1 -ExpandProperty id
+    }
+    catch {
+        Write-Log "ERROR: Failed to resolve the Microsoft Graph service principal: $($_.Exception.Message)" -Level Error
+        throw
+    }
+
+    if (-not $graphSpId) {
+        throw "Could not resolve the Microsoft Graph service principal (appId $graphAppId) in this tenant."
+    }
+
+    foreach ($roleName in $AppRoles) {
+        $appRoleId = $knownGraphAppRoleIds[$roleName]
+        if (-not $appRoleId) {
+            throw "Unknown Microsoft Graph app role '$roleName'. Add its app role ID to `$knownGraphAppRoleIds."
+        }
+
+        # Skip if the app role is already assigned to this principal
+        try {
+            $existing = Invoke-MgGraphRequest -Method GET `
+                -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$PrincipalId/appRoleAssignments" `
+                -ErrorAction Stop
+            $alreadyAssigned = $existing.value | Where-Object { $_.appRoleId -eq $appRoleId -and $_.resourceId -eq $graphSpId } | Select-Object -First 1
+        }
+        catch {
+            if ($_.Exception.Message -match "InsufficientPermissions|Insufficient privileges|Authorization_RequestDenied|Forbidden") {
+                Write-Log "ERROR: Insufficient permissions to read Graph app role assignments" -Level Error
+                Write-Host "`n❌ PERMISSION ERROR" -ForegroundColor Red
+                Write-Host "Assigning Microsoft Graph application permissions requires Privileged Role Administrator or Global Administrator in Entra ID." -ForegroundColor Yellow
+                throw "Insufficient permissions: cannot read app role assignments"
+            }
+            $alreadyAssigned = $null
+        }
+
+        if ($alreadyAssigned) {
+            Write-Log "Graph app role '$roleName' already assigned" -Level Info
+            continue
+        }
+
+        # Assign, retrying while the principal replicates to Entra ID
+        $retryCount = 0
+        $maxRetries = 10
+        $roleAssigned = $false
+
+        while (-not $roleAssigned -and $retryCount -lt $maxRetries) {
+            try {
+                $body = @{
+                    principalId = $PrincipalId
+                    resourceId  = $graphSpId
+                    appRoleId   = $appRoleId
+                }
+                Invoke-MgGraphRequest -Method POST `
+                    -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$PrincipalId/appRoleAssignments" `
+                    -Body $body `
+                    -ErrorAction Stop | Out-Null
+                Write-Log "Graph app role '$roleName' assigned successfully" -Level Success
+                $roleAssigned = $true
+            }
+            catch {
+                if ($_.Exception.Message -match "already exist|conflicting object|Permission being assigned already exists") {
+                    Write-Log "Graph app role '$roleName' already assigned (detected on add)" -Level Info
+                    $roleAssigned = $true
+                }
+                elseif ($_.Exception.Message -match "Forbidden|Authorization_RequestDenied|Insufficient privileges") {
+                    Write-Log "ERROR: Insufficient permissions to assign Graph app role '$roleName'" -Level Error
+                    Write-Host "`n❌ PERMISSION ERROR" -ForegroundColor Red
+                    Write-Host "Required: Privileged Role Administrator or Global Administrator in Entra ID." -ForegroundColor Yellow
+                    throw "Insufficient permissions: cannot assign Graph app role '$roleName'"
+                }
+                elseif ($_.Exception.Message -match "does not exist|cannot be found|not found|ResourceNotFound") {
+                    $retryCount++
+                    if ($retryCount -lt $maxRetries) {
+                        Write-Log "$PrincipalDescription not yet replicated to Entra ID. Retrying in 10 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
+                        Start-Sleep -Seconds 10
+                    }
+                    else {
+                        throw
+                    }
+                }
+                else {
+                    throw
+                }
+            }
+        }
     }
 }
 
@@ -1586,6 +1730,9 @@ function Set-AppRegistrationRoles {
 
         [Parameter(Mandatory = $true)]
         [string]$SubscriptionId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceGroupName,
 
         [Parameter(Mandatory = $true)]
         [array]$SecurityGroups
@@ -1617,7 +1764,7 @@ function Set-AppRegistrationRoles {
         }
 
         # Assign subscription roles
-        $roles = @('Contributor', 'User Access Administrator')
+        $roles = @('Contributor', 'Cost Management Contributor')
 
         foreach ($roleName in $roles) {
             Write-Log "Assigning $roleName role..." -Level Info
@@ -1692,109 +1839,59 @@ function Set-AppRegistrationRoles {
             }
         }
 
-        # Assign Entra ID role (Application Administrator) via the unified
-        # roleManagement endpoint. Works on both PIM and non-PIM tenants;
-        # creates a permanent active assignment that PIM tracks correctly.
-        # The legacy directoryRoles/{id}/members/$ref endpoint is rejected
-        # by Entra in PIM-enabled tenants, which is why we don't use it.
-        Write-Log "Assigning Application Administrator role in Entra ID..." -Level Info
+        # Assign resource-group-scoped roles (previously required UAA to assign during deployment)
+        $rgScope = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName"
+        $rgRoles = @('Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor')
 
-        # Built-in role templateId is the roleDefinitionId for unified API.
-        $appAdminRoleDefinitionId = '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3'
+        foreach ($roleName in $rgRoles) {
+            Write-Log "Assigning $roleName role at resource group scope..." -Level Info
 
-        try {
-            $filter = "principalId eq '$ServicePrincipalId' and roleDefinitionId eq '$appAdminRoleDefinitionId'"
-            $existingAssignments = Invoke-MgGraphRequest -Method GET `
-                -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$filter" `
-                -ErrorAction Stop
-            $existingRoleAssignment = $existingAssignments.value | Where-Object { $_.directoryScopeId -eq '/' } | Select-Object -First 1
-        }
-        catch {
-            Write-Log "ERROR: Failed to check Application Administrator role: $($_.Exception.Message)" -Level Error
+            $existingAssignment = Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
+                -RoleDefinitionName $roleName `
+                -Scope $rgScope `
+                -ErrorAction SilentlyContinue
 
-            if ($_.Exception.Message -match "InsufficientPermissions|Insufficient privileges|Authorization_RequestDenied|Forbidden") {
-                Write-Log "ERROR: Insufficient permissions to read role assignments" -Level Error
-                Write-Log "Required Permission: Privileged Role Administrator role in Entra ID" -Level Error
-                Write-Host "`n❌ PERMISSION ERROR" -ForegroundColor Red
-                Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Red
-                Write-Host ""
-                Write-Host "You do not have sufficient permissions to complete this setup." -ForegroundColor Yellow
-                Write-Host ""
-                Write-Host "Required Permissions:" -ForegroundColor Cyan
-                Write-Host "  ✔ Owner role at subscription level" -ForegroundColor Gray
-                Write-Host "  ✗ Privileged Role Administrator role in Entra ID (MISSING)" -ForegroundColor Red
-                Write-Host ""
-                Write-Host "Please contact a user with Privileged Role Administrator permissions to run this script." -ForegroundColor Yellow
-                Write-Host ""
-                throw "Insufficient permissions: Privileged Role Administrator role required"
+            if ($existingAssignment) {
+                Write-Log "$roleName role already assigned at RG scope" -Level Info
             }
             else {
-                throw
-            }
-        }
+                $retryCount = 0
+                $maxRetries = 10
+                $roleAssigned = $false
 
-        if ($existingRoleAssignment) {
-            Write-Log "Application Administrator role already assigned" -Level Info
-        }
-        else {
-            # Add retry logic for newly created service principals
-            $retryCount = 0
-            $maxRetries = 10
-            $roleAssigned = $false
+                while (-not $roleAssigned -and $retryCount -lt $maxRetries) {
+                    try {
+                        New-AzRoleAssignment -ObjectId $ServicePrincipalId `
+                            -RoleDefinitionName $roleName `
+                            -Scope $rgScope `
+                            -ErrorAction Stop | Out-Null
 
-            while (-not $roleAssigned -and $retryCount -lt $maxRetries) {
-                try {
-                    $body = @{
-                        principalId      = $ServicePrincipalId
-                        roleDefinitionId = $appAdminRoleDefinitionId
-                        directoryScopeId = '/'
-                    }
-                    Invoke-MgGraphRequest -Method POST `
-                        -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments" `
-                        -Body $body `
-                        -ErrorAction Stop | Out-Null
-                    Write-Log "Application Administrator role assigned successfully" -Level Success
-                    $roleAssigned = $true
-                }
-                catch {
-                    # Check if it's a permission error (Forbidden/Authorization)
-                    if ($_.Exception.Message -match "Forbidden|Authorization_RequestDenied|Insufficient privileges") {
-                        Write-Log "ERROR: Insufficient permissions to assign Application Administrator role" -Level Error
-                        Write-Log "Required Permission: Global Administrator or Privileged Role Administrator role in Entra ID" -Level Error
-                        Write-Host "`n❌ PERMISSION ERROR" -ForegroundColor Red
-                        Write-Host "════════════════════════════════════════════════════════════════" -ForegroundColor Red
-                        Write-Host ""
-                        Write-Host "You do not have sufficient permissions to complete this setup." -ForegroundColor Yellow
-                        Write-Host ""
-                        Write-Host "Required Permissions:" -ForegroundColor Cyan
-                        Write-Host "  ✔ Owner role at subscription level" -ForegroundColor Gray
-                        Write-Host "  ✗ Global Administrator role in Entra ID (MISSING)" -ForegroundColor Red
-                        Write-Host ""
-                        Write-Host "Please contact a user with Global Administrator permissions to run this script." -ForegroundColor Yellow
-                        Write-Host ""
-                        throw "Insufficient permissions: Global Administrator role required"
-                    }
-                    # Handle case where assignment already exists (race condition or previous partial run)
-                    elseif ($_.Exception.Message -match "already exist|conflicting object") {
-                        Write-Log "Application Administrator role already assigned (detected on add)" -Level Info
+                        Write-Log "$roleName role assigned successfully at RG scope" -Level Success
                         $roleAssigned = $true
                     }
-                    elseif ($_.Exception.Message -match "does not exist|cannot be found|not found|ResourceNotFound") {
-                        $retryCount++
-                        if ($retryCount -lt $maxRetries) {
-                            Write-Log "Service Principal not yet replicated to Entra ID. Retrying in 10 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
-                            Start-Sleep -Seconds 10
+                    catch {
+                        if ($_.Exception.Message -match "does not exist|cannot be found|BadRequest") {
+                            $retryCount++
+                            if ($retryCount -lt $maxRetries) {
+                                Write-Log "Service Principal not yet replicated. Retrying in 10 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
+                                Start-Sleep -Seconds 10
+                            }
+                            else {
+                                throw
+                            }
                         }
                         else {
                             throw
                         }
                     }
-                    else {
-                        throw
-                    }
                 }
             }
         }
+
+        # Grant lower-scoped Microsoft Graph application permissions to the service principal.
+        # Replaces the tenant-wide 'Application Administrator' Entra directory role with
+        # Application.Read.All + Application.ReadWrite.OwnedBy (manage owned apps only).
+        Grant-GraphAppRolePermissions -PrincipalId $ServicePrincipalId -PrincipalDescription 'App Registration service principal'
 
         # Update ConfigData with group membership
         if ($script:ConfigData['AppRegistration'] -and $adminGroup) {
@@ -2282,7 +2379,7 @@ function New-NeologikStorageAccount {
 function New-NeologikManagedIdentities {
     <#
     .SYNOPSIS
-        Creates User Assigned Managed Identities.
+        Creates User Assigned Managed Identities and assigns all required RBAC roles.
     #>
     [CmdletBinding()]
     param(
@@ -2321,7 +2418,8 @@ function New-NeologikManagedIdentities {
                 Name = "neologik-script-runner-service-connection$nameSuffix"
                 DisplayName = "Neologik Script Runner Service Connection$displaySuffix"
                 Roles = @('Contributor')
-                EntraRole = 'Application Administrator'
+                RGRoles = @('Key Vault Secrets Officer', 'Azure Bot Service Contributor Role')
+                GraphAppRoles = @('Application.Read.All', 'Application.ReadWrite.OwnedBy')
             },
             @{
                 Name = "neologik-sql-managed-identity$nameSuffix"
@@ -2365,9 +2463,9 @@ function New-NeologikManagedIdentities {
                 }
             }
 
-            # Assign subscription roles
+            # Assign subscription-scoped roles
             foreach ($roleName in $miDef.Roles) {
-                Write-Log "Assigning $roleName role to $displayName..." -Level Info
+                Write-Log "Assigning $roleName role to $displayName at subscription scope..." -Level Info
 
                 $existingAssignment = Get-AzRoleAssignment -ObjectId $mi.PrincipalId `
                     -RoleDefinitionName $roleName `
@@ -2378,7 +2476,6 @@ function New-NeologikManagedIdentities {
                     Write-Log "$roleName role already assigned" -Level Info
                 }
                 else {
-                    # Add retry logic as role assignment might need time after MI creation
                     $retryCount = 0
                     $maxRetries = 10
                     $assigned = $false
@@ -2400,6 +2497,49 @@ function New-NeologikManagedIdentities {
                             }
                             else {
                                 throw
+                            }
+                        }
+                    }
+                }
+            }
+
+            # Assign resource-group-scoped roles
+            if ($miDef.RGRoles) {
+                $rgScope = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName"
+                foreach ($roleName in $miDef.RGRoles) {
+                    Write-Log "Assigning $roleName role to $displayName at resource group scope..." -Level Info
+
+                    $existingAssignment = Get-AzRoleAssignment -ObjectId $mi.PrincipalId `
+                        -RoleDefinitionName $roleName `
+                        -Scope $rgScope `
+                        -ErrorAction SilentlyContinue
+
+                    if ($existingAssignment) {
+                        Write-Log "$roleName role already assigned at RG scope" -Level Info
+                    }
+                    else {
+                        $retryCount = 0
+                        $maxRetries = 10
+                        $assigned = $false
+
+                        while (-not $assigned -and $retryCount -lt $maxRetries) {
+                            try {
+                                New-AzRoleAssignment -ObjectId $mi.PrincipalId `
+                                    -RoleDefinitionName $roleName `
+                                    -Scope $rgScope `
+                                    -ErrorAction Stop | Out-Null
+                                $assigned = $true
+                                Write-Log "$roleName role assigned successfully at RG scope" -Level Success
+                            }
+                            catch {
+                                $retryCount++
+                                if ($retryCount -lt $maxRetries) {
+                                    Write-Log "Retrying role assignment in 10 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
+                                    Start-Sleep -Seconds 10
+                                }
+                                else {
+                                    throw
+                                }
                             }
                         }
                     }
@@ -2471,13 +2611,22 @@ function New-NeologikManagedIdentities {
                 }
             }
 
+            # Grant lower-scoped Microsoft Graph app permissions (replaces Application Administrator)
+            if ($miDef.GraphAppRoles) {
+                Grant-GraphAppRolePermissions -PrincipalId $mi.PrincipalId `
+                    -PrincipalDescription "Managed Identity '$($miDef.Name)'" `
+                    -AppRoles $miDef.GraphAppRoles
+            }
+
             $createdIdentities += @{
                 Name = $mi.Name
                 PrincipalId = $mi.PrincipalId
                 ClientId = $mi.ClientId
                 ResourceId = $mi.Id
                 SubscriptionRoles = $miDef.Roles
+                RGRoles = $miDef.RGRoles
                 EntraRole = $miDef.EntraRole
+                GraphAppRoles = $miDef.GraphAppRoles
                 GroupMemberships = @()  # Managed Identities are not added to security groups
             }
         }
@@ -3616,12 +3765,13 @@ function Start-NeologikOnboarding {
         $securityGroups = New-NeologikSecurityGroups -GuestUsers $guestUsers -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType -BotNames $agentNames
 
         # Step 10: Assign roles to security groups
-        Set-NeologikRoleAssignments -SecurityGroups $securityGroups -SubscriptionId $script:ConfigData['SubscriptionId']
+        Set-NeologikRoleAssignments -SecurityGroups $securityGroups -SubscriptionId $script:ConfigData['SubscriptionId'] -ResourceGroupName $script:ResourceGroupName
 
         # Step 11: Create App Registration
         $appReg = New-NeologikAppRegistration -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType
         Set-AppRegistrationRoles -ServicePrincipalId $appReg.ServicePrincipal.Id `
             -SubscriptionId $script:ConfigData['SubscriptionId'] `
+            -ResourceGroupName $script:ResourceGroupName `
             -SecurityGroups $securityGroups
 
         # Step 12: Create Key Vault and store client secret
