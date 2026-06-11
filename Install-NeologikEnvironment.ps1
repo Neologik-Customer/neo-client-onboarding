@@ -631,9 +631,23 @@ function Connect-AzureEnvironment {
             # Reuse the existing Azure token for Graph — avoids a second browser prompt
             Write-Log "Connecting to Microsoft Graph via existing Azure token..." -Level Info
             try {
-                $graphToken = (Get-AzAccessToken -ResourceTypeName MSGraph -TenantId $script:ConfigData['TenantId'] -ErrorAction Stop).Token
-                # Microsoft.Graph 2.x requires -AccessToken as a SecureString (plain string is deprecated, fails in 3.x)
-                $secureGraphToken = ConvertTo-SecureString -String $graphToken -AsPlainText -Force
+                # Az.Accounts >= 2.17 returns .Token as a SecureString (mandatory in 5.x). Request it
+                # explicitly when supported; older versions still hand back a plain JWT string.
+                if ((Get-Command Get-AzAccessToken).Parameters.ContainsKey('AsSecureString')) {
+                    $graphToken = (Get-AzAccessToken -ResourceTypeName MSGraph -TenantId $script:ConfigData['TenantId'] -AsSecureString -ErrorAction Stop).Token
+                }
+                else {
+                    $graphToken = (Get-AzAccessToken -ResourceTypeName MSGraph -TenantId $script:ConfigData['TenantId'] -ErrorAction Stop).Token
+                }
+                # Microsoft.Graph 2.x requires -AccessToken as a SecureString. If Az already gave us one,
+                # pass it through — wrapping it again coerces it to the literal "System.Security.SecureString"
+                # and yields a garbage token (Graph 401 IDX14102 on the first call).
+                if ($graphToken -is [System.Security.SecureString]) {
+                    $secureGraphToken = $graphToken
+                }
+                else {
+                    $secureGraphToken = ConvertTo-SecureString -String $graphToken -AsPlainText -Force
+                }
                 Connect-MgGraph -AccessToken $secureGraphToken -ErrorAction Stop
                 Write-Log "Connected to Microsoft Graph using Azure session token" -Level Success
             }
@@ -740,23 +754,48 @@ function Test-RequiredPermissions {
 
         # Check Global Administrator role
         Write-Log "Checking Global Administrator role..." -Level Info
-        $userId = (Get-MgUser -UserId $script:ConfigData['UserAccount']).Id
-        $globalAdminRole = Get-MgDirectoryRole -Filter "displayName eq 'Global Administrator'"
-        
-        if (-not $globalAdminRole) {
-            # Activate the role template if not activated
-            $roleTemplate = Get-MgDirectoryRoleTemplate -Filter "displayName eq 'Global Administrator'"
-            $globalAdminRole = New-MgDirectoryRole -RoleTemplateId $roleTemplate.Id
-        }
 
-        $adminMembers = Get-MgDirectoryRoleMember -DirectoryRoleId $globalAdminRole.Id
-        $isGlobalAdmin = $adminMembers | Where-Object { $_.Id -eq $userId }
+        $isGlobalAdmin = $false
+        $globalAdminConfirmed = $true
+        try {
+            $userId = (Get-MgUser -UserId $script:ConfigData['UserAccount']).Id
+            $globalAdminRole = Get-MgDirectoryRole -Filter "displayName eq 'Global Administrator'"
+
+            if (-not $globalAdminRole) {
+                # Activate the role template if not activated
+                $roleTemplate = Get-MgDirectoryRoleTemplate -Filter "displayName eq 'Global Administrator'"
+                $globalAdminRole = New-MgDirectoryRole -RoleTemplateId $roleTemplate.Id
+            }
+
+            $adminMembers = Get-MgDirectoryRoleMember -DirectoryRoleId $globalAdminRole.Id
+            $isGlobalAdmin = [bool]($adminMembers | Where-Object { $_.Id -eq $userId })
+        }
+        catch {
+            # The check itself failed (e.g. a Graph token/permission issue such as IDX14102) —
+            # we cannot confirm the role either way, so treat it as unconfirmed rather than fatal.
+            $globalAdminConfirmed = $false
+            Write-Log "Unable to verify Global Administrator role: $_" -Level Warning
+        }
 
         if ($isGlobalAdmin) {
             Write-Log "User has Global Administrator role" -Level Success
         }
-        else {
+        elseif ($globalAdminConfirmed) {
+            # The check ran successfully and the user is definitively not a member — fail hard.
             throw "User does not have Global Administrator role. Global Administrator role is required."
+        }
+        else {
+            # The check could not complete (e.g. a Graph token/permission error such as IDX14102),
+            # so membership is genuinely unknown — let the operator decide whether to continue.
+            Write-Host ""
+            Write-Host "⚠️  Unable to verify the Global Administrator role for $userAccount (the check failed to run)." -ForegroundColor Yellow
+            Write-Host "    Global Administrator is required for app registration, admin consent, and guest invitations." -ForegroundColor Yellow
+            Write-Host "    Continuing without confirming it may cause later steps to fail." -ForegroundColor Yellow
+            $proceed = Read-Host "Proceed anyway? [Y/n]"
+            if ($proceed -match '^\s*(n|no)\s*$') {
+                throw "Global Administrator role could not be verified and the operator chose not to continue."
+            }
+            Write-Log "Operator chose to proceed without a verified Global Administrator role." -Level Warning
         }
 
         Write-Log "All required permissions validated successfully" -Level Success
