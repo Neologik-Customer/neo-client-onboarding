@@ -1621,7 +1621,7 @@ function Grant-GraphAppRolePermissions {
     $graphAppId = '00000003-0000-0000-c000-000000000000'
     $knownGraphAppRoleIds = @{
         'Application.Read.All'          = '9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30'
-        'Application.ReadWrite.OwnedBy' = '18a4783c-866b-4cc7-a460-3d0e455a3d5e'
+        'Application.ReadWrite.OwnedBy' = '18a4783c-866b-4cc7-a460-3d5e5662c884'
     }
 
     Write-Log "Granting Microsoft Graph app permissions ($($AppRoles -join ', ')) to $PrincipalDescription..." -Level Info
