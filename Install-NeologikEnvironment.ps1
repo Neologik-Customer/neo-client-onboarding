@@ -3769,11 +3769,11 @@ function Start-NeologikOnboarding {
         $securityGroups = New-NeologikSecurityGroups -GuestUsers $guestUsers -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType -BotNames $agentNames
 
         # Step 10: Assign roles to security groups
-        Set-NeologikRoleAssignments -SecurityGroups $securityGroups -SubscriptionId $script:ConfigData['SubscriptionId'] -ResourceGroupName $script:ResourceGroupName
+        $null = Set-NeologikRoleAssignments -SecurityGroups $securityGroups -SubscriptionId $script:ConfigData['SubscriptionId'] -ResourceGroupName $script:ResourceGroupName
 
         # Step 11: Create App Registration
         $appReg = New-NeologikAppRegistration -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType
-        Set-AppRegistrationRoles -ServicePrincipalId $appReg.ServicePrincipal.Id `
+        $null = Set-AppRegistrationRoles -ServicePrincipalId $appReg.ServicePrincipal.Id `
             -SubscriptionId $script:ConfigData['SubscriptionId'] `
             -ResourceGroupName $script:ResourceGroupName `
             -SecurityGroups $securityGroups
