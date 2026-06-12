@@ -1677,14 +1677,18 @@ function Grant-GraphAppRolePermissions {
 
         while (-not $roleAssigned -and $retryCount -lt $maxRetries) {
             try {
+                # Pass the body as a JSON string (not a hashtable): Invoke-MgGraphRequest's
+                # hashtable serialization recurses into a string value's .Chars indexer and
+                # throws "Self referencing loop detected ... Path 'resourceId.Chars'".
                 $body = @{
-                    principalId = $PrincipalId
-                    resourceId  = $graphSpId
-                    appRoleId   = $appRoleId
-                }
+                    principalId = [string]$PrincipalId
+                    resourceId  = [string]$graphSpId
+                    appRoleId   = [string]$appRoleId
+                } | ConvertTo-Json -Compress
                 Invoke-MgGraphRequest -Method POST `
                     -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$PrincipalId/appRoleAssignments" `
                     -Body $body `
+                    -ContentType 'application/json' `
                     -ErrorAction Stop | Out-Null
                 Write-Log "Graph app role '$roleName' assigned successfully" -Level Success
                 $roleAssigned = $true
