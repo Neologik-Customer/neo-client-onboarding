@@ -1575,7 +1575,7 @@ function New-NeologikAppRegistration {
             ServicePrincipalId = $sp.Id
             SecretExpiry = $secretEndDate.ToString('yyyy-MM-dd')
             SubscriptionRoles = @('Contributor', 'Cost Management Contributor')
-            RGRoles = @('Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor')
+            RGRoles = @('Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
             GraphAppRoles = @('Application.Read.All', 'Application.ReadWrite.OwnedBy')
         }
 
@@ -1844,8 +1844,16 @@ function Set-AppRegistrationRoles {
         }
 
         # Assign resource-group-scoped roles (previously required UAA to assign during deployment)
+        # 'Role Based Access Control Administrator' replaces the legacy sub-scoped 'User Access
+        # Administrator': the deployment Bicep creates role assignments in-template (kubelet Managed
+        # Identity Operator, workload-identity grants, kubelet AcrPull), which require
+        # Microsoft.Authorization/roleAssignments/write. RBAC Administrator grants that (roleAssignments
+        # management only, no deny-assignment management). Scoped to the environment resource group to
+        # contain blast radius. NOTE: if this environment points at a SHARED container-registry RG
+        # (paramCrResourceGroup != this RG), the kubelet AcrPull/Push assignment lands there and needs
+        # a separate RBAC Administrator grant on that shared RG (one-time shared-infra setup).
         $rgScope = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName"
-        $rgRoles = @('Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor')
+        $rgRoles = @('Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
 
         foreach ($roleName in $rgRoles) {
             Write-Log "Assigning $roleName role at resource group scope..." -Level Info
