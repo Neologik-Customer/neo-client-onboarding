@@ -1924,27 +1924,29 @@ function New-NeologikKeyVault {
             }
         }
 
-        # Assign Key Vault Secrets Officer role to Neologik Admin User Group at Resource Group level
+        # Assign Key Vault data-plane roles to Neologik Admin User Group at Resource Group level
         $adminGroup = $SecurityGroups | Where-Object { $_.Name -like 'Neologik Admin User Group*' }
-        
+
         if ($adminGroup) {
-            Write-Log "Assigning Key Vault Secrets Officer role to $($adminGroup.Name) at Resource Group level..." -Level Info
-            
-            $existingAssignment = Get-AzRoleAssignment -ObjectId $adminGroup.Id `
-                -RoleDefinitionName 'Key Vault Secrets Officer' `
-                -Scope $rgScope `
-                -ErrorAction SilentlyContinue
+            foreach ($roleName in @('Key Vault Secrets Officer', 'Key Vault Certificates Officer')) {
+                Write-Log "Assigning $roleName role to $($adminGroup.Name) at Resource Group level..." -Level Info
 
-            if ($existingAssignment) {
-                Write-Log "Key Vault Secrets Officer role already assigned to $($adminGroup.Name) at Resource Group level" -Level Info
-            }
-            else {
-                New-AzRoleAssignment -ObjectId $adminGroup.Id `
-                    -RoleDefinitionName 'Key Vault Secrets Officer' `
+                $existingAssignment = Get-AzRoleAssignment -ObjectId $adminGroup.Id `
+                    -RoleDefinitionName $roleName `
                     -Scope $rgScope `
-                    -ErrorAction Stop | Out-Null
+                    -ErrorAction SilentlyContinue
 
-                Write-Log "Key Vault Secrets Officer role assigned to $($adminGroup.Name) at Resource Group level successfully" -Level Success
+                if ($existingAssignment) {
+                    Write-Log "$roleName role already assigned to $($adminGroup.Name) at Resource Group level" -Level Info
+                }
+                else {
+                    New-AzRoleAssignment -ObjectId $adminGroup.Id `
+                        -RoleDefinitionName $roleName `
+                        -Scope $rgScope `
+                        -ErrorAction Stop | Out-Null
+
+                    Write-Log "$roleName role assigned to $($adminGroup.Name) at Resource Group level successfully" -Level Success
+                }
             }
         }
 
@@ -2682,11 +2684,12 @@ function Export-ConfigurationData {
         Write-Host "  1. Review the configuration file (available locally and in Storage Account)"
         Write-Host "  2. Service principal client secret is securely stored in Key Vault: $($script:ConfigData['KeyVault'].Name)"
         Write-Host "     Secret name: $($script:ConfigData['KeyVault'].SecretName)"
-        Write-Host "  3. Upload your TLS certificate (.pfx file) to Storage Account blob container:"
-        Write-Host "     Storage Account: $($script:ConfigData['StorageAccount'].Name)"
-        Write-Host "     Container: $($script:ConfigData['StorageAccount'].CertificateContainerName)"
-        Write-Host "  4. Store the certificate PFX password in Key Vault as a secret:"
-        Write-Host "     Secret name: 'neologik-deployment-certificate-pfx-secret'"
+        Write-Host "  3. Import your TLS certificate (.pfx file) into Key Vault as a certificate:"
+        Write-Host "     Key Vault:        $($script:ConfigData['KeyVault'].Name)"
+        Write-Host "     Certificate name: keyvault-neo-ingress"
+        Write-Host "     Command:"
+        Write-Host "       az keyvault certificate import --vault-name $($script:ConfigData['KeyVault'].Name) --name keyvault-neo-ingress --file certificate.pfx --password <PFX_PASSWORD>"
+        Write-Host "     (The PFX password is consumed at import time — it does not need to be stored separately.)"
         Write-Host ""
 
         return $script:OutputFile
