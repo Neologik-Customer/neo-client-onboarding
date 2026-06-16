@@ -1412,26 +1412,19 @@ function Set-NeologikRoleAssignments {
 
         # Roles to assign at subscription scope
         $subRoles = @(
-            'Contributor',
-            'Cost Management Contributor',
-            'Monitoring Contributor'
+            'Contributor'
         )
 
         # Roles to assign at resource-group scope
         $rgRoles = @(
             'Key Vault Administrator',
-            'Storage Blob Data Contributor',
             'Storage Blob Data Owner',
             'Storage Table Data Contributor',
             'Azure Kubernetes Service RBAC Cluster Admin',
-            'Cognitive Services Contributor',
             'Cognitive Services Data Reader',
             'Cognitive Services OpenAI Contributor',
-            'Cosmos DB Account Reader Role',
-            'Search Service Contributor',
             'Search Index Data Reader',
-            'Azure AI Developer',
-            'AzureML Data Scientist'
+            'Azure AI Developer'
         )
 
         $assignRole = {
