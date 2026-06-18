@@ -1467,9 +1467,12 @@ function Set-NeologikRoleAssignments {
             & $assignRole $adminGroup.Id $role $rgScope $adminGroup.Name
         }
 
-        $script:ConfigData['RoleAssignments'] = ($subRoles | ForEach-Object {
+        # @(...) forces arrays so the concatenation is array+array — a single-element pipeline
+        # (e.g. $subRoles = @('Contributor')) otherwise unrolls to a lone hashtable and
+        # `hashtable + array` throws "A hash table can only be added to another hash table".
+        $script:ConfigData['RoleAssignments'] = @($subRoles | ForEach-Object {
             @{ Principal = $adminGroup.Name; PrincipalType = 'Security Group'; Role = $_; Scope = 'Subscription' }
-        }) + ($rgRoles | ForEach-Object {
+        }) + @($rgRoles | ForEach-Object {
             @{ Principal = $adminGroup.Name; PrincipalType = 'Security Group'; Role = $_; Scope = 'Resource Group' }
         })
 
