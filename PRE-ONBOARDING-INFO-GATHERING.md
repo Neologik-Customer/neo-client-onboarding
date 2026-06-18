@@ -75,18 +75,17 @@ Before running the script, prepare the following information. You will be prompt
 
 For **each bot**, prepare:
 
-- [ ] **Agent Name** (descriptive name)
-  - Example: "bot", "RAMS Agent", "support"
-  - Lowercase only
-  - Maximum 7 characters
-  - Letters and dashes only
+- [ ] **Full Bot Name** (descriptive name)
+  - Example: "bot", "RAMS Agent", "Customer Service Bot"
+  - Letters (upper or lower case), numbers, spaces, dashes and underscores
+  - No length limit
   - Used in security group names
 
 - [ ] **Short Name** (short identifier)
   - Example: "bot", "sup", "rams"
-  - Lowercase only
-  - Maximum 7 characters
-  - Letters and dashes only
+  - Lowercase
+  - 1–4 characters
+  - Must start with a letter, letters/numbers/dashes only
   - Used internally for identification
 
 - [ ] **Authentication type** (select "anonymous" or "Teams")

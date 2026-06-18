@@ -614,8 +614,9 @@ Re-deployed at end of template (`modKeyVaultSecurityUpdate`) to lock down access
 - **Purpose**: Execute deployment scripts (SSH key generation, Entra ID operations)
 
 **Required Pre-deployment Permissions**:
-- **Microsoft Graph**: Application.ReadWrite.All, Directory.ReadWrite.All
-- **Key Vault**: Key Vault Secrets Officer
+- **Subscription**: Contributor
+- **Resource Group**: Key Vault Secrets Officer, Azure Bot Service Contributor Role
+- **Microsoft Graph**: None (the Script Runner UAMI does not manage app registrations)
 
 ##### 2. AKS Cluster Identity
 - **Name**: `idaksclusterneomcprduks1`

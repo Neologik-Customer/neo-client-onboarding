@@ -9,6 +9,34 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Version 1.9.1
+**Built**: June 18, 2026  
+**Git Tag**: v1.9.1
+
+### Major Changes
+- **Documentation Sync** - Aligned onboarding docs with the current `Install-NeologikEnvironment.ps1` reduced-permission model and bot-naming rules
+
+### Infrastructure Changes
+- **Reduced Permission Model** (documentation only — reflects existing script behaviour):
+  - Deploy service principal / GitHub service connection: Microsoft Graph app roles `Application.Read.All` + `Application.ReadWrite.OwnedBy` (replacing the tenant-wide Application Administrator directory role); subscription roles Contributor + Cost Management Contributor; resource-group roles Key Vault Certificates Officer, Key Vault Secrets Officer, Storage Blob Data Contributor, Azure Kubernetes Service RBAC Cluster Admin, Monitoring Contributor, and Role Based Access Control Administrator (replacing the subscription-scoped User Access Administrator)
+  - Script Runner UAMI: subscription Contributor; resource-group Key Vault Secrets Officer + Azure Bot Service Contributor Role; no Microsoft Graph app roles
+- **Bot Naming Rules** (documentation only):
+  - Short name: lowercase, 1–4 characters, must start with a letter, letters/numbers/dashes only
+  - Full bot name: letters, numbers, spaces, dashes and underscores; no length limit
+
+### Files Changed
+- Modified: [README.md](README.md) - Bot name rules; checkpoint/resume note
+- Modified: [QUICK-REFERENCE.md](QUICK-REFERENCE.md) - Bot name rules; reduced-permission role tables
+- Modified: [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md) - Reduced-permission model; operator prerequisite wording; JSON config example
+- Modified: [PRE-ONBOARDING-INFO-GATHERING.md](PRE-ONBOARDING-INFO-GATHERING.md) - Bot name rules
+- Modified: mcdev deployment reference docs - Script Runner UAMI permissions
+- Modified: [VERSION_HISTORY.md](VERSION_HISTORY.md) - This entry
+
+### Breaking Changes
+- None (documentation only)
+
+---
+
 ## Version 1.9.0
 **Built**: January 15, 2026  
 **Git Tag**: v1.9.0
