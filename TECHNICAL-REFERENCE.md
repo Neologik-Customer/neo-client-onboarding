@@ -70,8 +70,7 @@ This repository contains a robust PowerShell script that automates the complete 
 - **Subscription**: Azure subscription with appropriate billing setup
 - **User Permissions**: 
   - **Owner** role at the subscription level (required for RBAC assignments)
-  - **Privileged Role Administrator** role in Azure AD (Entra ID) - required for assigning Application Administrator role to service principals
-  - **Global Administrator** role also works but Privileged Role Administrator is the minimum required
+  - **Global Administrator** or **Privileged Role Administrator** role in Azure AD (Entra ID) - required to grant the scoped Microsoft Graph app-role assignments (Application.Read.All + Application.ReadWrite.OwnedBy) to the service principal
   - Note: "Contributor" or "Co-Administrator" roles are insufficient for role assignments
 
 ### Network Requirements
@@ -216,8 +215,8 @@ The script includes comprehensive validation for all inputs:
 - **Environment Index**: Must be a number between 01 and 99
 - **Resource Group Name**: Must follow Azure naming conventions (1-90 characters, alphanumerics, underscores, hyphens, periods, parentheses, cannot end with period)
 - **Bot Count**: Must be between 1 and 10
-- **Agent Name**: Lowercase only, max 7 characters, letters and dashes, must start with letter, no duplicates
-- **Short Name**: Lowercase only, max 7 characters, letters and dashes, must start with letter, no duplicates
+- **Full Bot Name**: Letters (upper or lower case), numbers, spaces, dashes and underscores; no length limit; no duplicates
+- **Short Name**: Lowercase, 1–4 characters, must start with a letter, letters/numbers/dashes only, no duplicates
 
 The script will keep prompting until valid input is provided, ensuring all resources are created with proper names.
 
@@ -289,8 +288,14 @@ Creates:
 - **Client Secret**: 365-day expiration, **automatically stored in Key Vault**
 - **Roles**:
   - Contributor (Subscription) - with retry logic
-  - User Access Administrator (Subscription) - with retry logic
-  - Application Administrator (Entra ID) - with retry logic
+  - Cost Management Contributor (Subscription) - with retry logic
+  - Key Vault Certificates Officer (Resource Group) - with retry logic
+  - Key Vault Secrets Officer (Resource Group) - with retry logic
+  - Storage Blob Data Contributor (Resource Group) - with retry logic
+  - Azure Kubernetes Service RBAC Cluster Admin (Resource Group) - with retry logic
+  - Monitoring Contributor (Resource Group) - with retry logic
+  - Role Based Access Control Administrator (Resource Group) - with retry logic
+  - Application.Read.All + Application.ReadWrite.OwnedBy (Microsoft Graph app roles) - with retry logic
 - **Added to**: Neologik Admin User Group - abc-dev
 - **Note**: Includes organization code and environment type in lowercase
 
@@ -329,7 +334,8 @@ Creates two User Assigned Managed Identities with retry logic for replication de
 1. **neologik-script-runner-service-connection-abc-dev**
    - Display Name: Neologik Script Runner Service Connection - abc-dev
    - Contributor role (Subscription)
-   - Application Administrator role (Entra ID)
+   - Key Vault Secrets Officer role (Resource Group)
+   - Azure Bot Service Contributor Role (Resource Group)
    - Includes organization code and environment type
 
 2. **neologik-sql-managed-identity-abc-dev**
@@ -391,7 +397,8 @@ The configuration file contains all necessary information to share with Neologik
     "Name": "Neologik GitHub Service Connection - abc-dev",
     "ClientId": "...",
     "SecretExpiry": "...",
-    "SubscriptionRoles": ["Contributor", "User Access Administrator"],
+    "SubscriptionRoles": ["Contributor", "Cost Management Contributor"],
+    "ResourceGroupRoles": ["Key Vault Certificates Officer", "Key Vault Secrets Officer", "Storage Blob Data Contributor", "Azure Kubernetes Service RBAC Cluster Admin", "Monitoring Contributor", "Role Based Access Control Administrator"],
     "GraphAppRoles": ["Application.Read.All", "Application.ReadWrite.OwnedBy"],
     "GroupMemberships": ["Neologik Admin User Group - abc-dev"]
   },
@@ -411,7 +418,7 @@ The configuration file contains all necessary information to share with Neologik
       "PrincipalId": "...",
       "ClientId": "...",
       "SubscriptionRoles": ["Contributor"],
-      "GraphAppRoles": ["Application.Read.All", "Application.ReadWrite.OwnedBy"],
+      "ResourceGroupRoles": ["Key Vault Secrets Officer", "Azure Bot Service Contributor Role"],
       "GroupMemberships": []
     },
     {

@@ -553,11 +553,12 @@ All storage accounts use Geo-Zone-Redundant Storage (GZRS) and private endpoints
 - **Purpose**: Execute deployment scripts (SSH key generation, Entra ID operations)
 
 **Required Pre-deployment Permissions**:
-- **Microsoft Graph**:
-  - Application.ReadWrite.All (for creating service principals)
-  - Directory.ReadWrite.All (for Entra ID operations)
-- **Key Vault**:
+- **Subscription**:
+  - Contributor
+- **Resource Group**:
   - Key Vault Secrets Officer (for storing secrets)
+  - Azure Bot Service Contributor Role (for bot service management)
+- **Microsoft Graph**: None (the Script Runner UAMI does not manage app registrations)
 
 ##### 2. AKS Cluster Identity
 - **Name**: `idaksclusterneomcdevuks1`

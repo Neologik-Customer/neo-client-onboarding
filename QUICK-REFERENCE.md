@@ -56,7 +56,7 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 - `{env}` = Environment type (`dev` or `prd`, lowercase)
 - `{region}` = Azure region abbreviation (e.g., `uks`, `eus`, lowercase)
 - `{index}` = Environment index (e.g., `01`, `02`)
-- `{agent-name}` = Bot agent name (lowercase, max 7 characters)
+- `{agent-name}` = Full bot name (letters, numbers, spaces, dashes and underscores; no length limit). Each bot also has a short name (lowercase, 1–4 characters, must start with a letter, letters/numbers/dashes only)
 
 **Example:** Organization "ABC", dev environment, UK South, index 01, bot agent name "support"
 - Resource Group: `rg-neo-abc-dev-uks-01`
@@ -146,8 +146,15 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 | Role | Scope | Principal |
 |------|-------|-----------|
 | **Contributor** | Subscription | Service Principal |
-| **User Access Administrator** | Subscription | Service Principal |
-| **Application Administrator** | Entra ID (Directory Role) | Service Principal |
+| **Cost Management Contributor** | Subscription | Service Principal |
+| **Key Vault Certificates Officer** | Resource Group | Service Principal |
+| **Key Vault Secrets Officer** | Resource Group | Service Principal |
+| **Storage Blob Data Contributor** | Resource Group | Service Principal |
+| **Azure Kubernetes Service RBAC Cluster Admin** | Resource Group | Service Principal |
+| **Monitoring Contributor** | Resource Group | Service Principal |
+| **Role Based Access Control Administrator** | Resource Group | Service Principal |
+| **Application.Read.All** | Microsoft Graph (app role) | Service Principal |
+| **Application.ReadWrite.OwnedBy** | Microsoft Graph (app role) | Service Principal |
 
 ---
 
@@ -211,7 +218,8 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 | Role | Scope |
 |------|-------|
 | **Contributor** | Subscription |
-| **Application Administrator** | Entra ID (Directory Role) |
+| **Key Vault Secrets Officer** | Resource Group |
+| **Azure Bot Service Contributor Role** | Resource Group |
 
 ### Identity 2: SQL Managed Identity
 | Property | Value |
@@ -232,19 +240,31 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 | Principal | Role |
 |-----------|------|
 | Service Principal (GitHub) | Contributor |
-| Service Principal (GitHub) | User Access Administrator |
+| Service Principal (GitHub) | Cost Management Contributor |
 | Managed Identity (Script Runner) | Contributor |
 
 ### Resource Group Level
 | Principal | Role |
 |-----------|------|
+| Service Principal (GitHub) | Key Vault Certificates Officer |
+| Service Principal (GitHub) | Key Vault Secrets Officer |
+| Service Principal (GitHub) | Storage Blob Data Contributor |
+| Service Principal (GitHub) | Azure Kubernetes Service RBAC Cluster Admin |
+| Service Principal (GitHub) | Monitoring Contributor |
+| Service Principal (GitHub) | Role Based Access Control Administrator |
+| Managed Identity (Script Runner) | Key Vault Secrets Officer |
+| Managed Identity (Script Runner) | Azure Bot Service Contributor Role |
 | Neologik Admin User Group | Contributor |
 | Neologik Admin User Group | Key Vault Secrets Officer |
 | Neologik Admin User Group | Storage Blob Data Contributor |
 
+### Microsoft Graph (App Roles)
+| Principal | Role |
+|-----------|------|
+| Service Principal (GitHub) | Application.Read.All |
+| Service Principal (GitHub) | Application.ReadWrite.OwnedBy |
+
 ### Entra ID (Directory Roles)
 | Principal | Role |
 |-----------|------|
-| Service Principal (GitHub) | Application Administrator |
-| Managed Identity (Script Runner) | Application Administrator |
 | Managed Identity (SQL) | Directory Readers |
