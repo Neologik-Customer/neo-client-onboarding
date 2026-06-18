@@ -3613,14 +3613,14 @@ function Start-NeologikOnboarding {
         # Get Bot Names (Agent Name and Short Name for each bot)
         $script:BotConfigurations = @()
         for ($i = 1; $i -le $script:BotCount; $i++) {
-            $defaultAgentName = if ($i -eq 1) { "bot" } else { "bot$i" }
+            $defaultAgentName = if ($i -eq 1) { "Bot Name" } else { "Bot Name $i" }
             $agentNameValid = $false
             $agentName = ""
             
             # Get Agent Name
             while (-not $agentNameValid) {
                 Write-Host ""
-                Write-Host "Full Agent Name for Bot $i`:" -ForegroundColor Cyan
+                Write-Host "Full Bot Name for Bot $i`:" -ForegroundColor Cyan
                 Write-Host "  Default: " -NoNewline -ForegroundColor Gray
                 Write-Host $defaultAgentName -ForegroundColor Yellow
                 Write-Host "  Requirements: letters, numbers, spaces, dashes, and underscores allowed" -ForegroundColor Gray
@@ -3664,7 +3664,7 @@ function Start-NeologikOnboarding {
                 Write-Host "Bot $i Short Name:" -ForegroundColor Cyan
                 Write-Host "  Default: " -NoNewline -ForegroundColor Gray
                 Write-Host $defaultBotShortName -ForegroundColor Yellow
-                Write-Host "  Requirements: lowercase, max 4 characters, letters and dashes only" -ForegroundColor Gray
+                Write-Host "  Requirements: lowercase, max 4 characters, letters, numbers and dashes only" -ForegroundColor Gray
                 Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
                 $botShortNameInput = Read-Host
 
@@ -3687,8 +3687,8 @@ function Start-NeologikOnboarding {
                 }
 
                 # Validate characters (lowercase letters and dashes only)
-                if ($botShortName -notmatch '^[a-z][a-z\-]*$') {
-                    Write-Host "  ✗ Bot short name must contain only lowercase letters and dashes, and must start with a letter. Please try again." -ForegroundColor Red
+                if ($botShortName -notmatch '^[a-z][a-z0-9\-]*$') {
+                    Write-Host "  ✗ Bot short name must contain only lowercase letters, numbers and dashes, and must start with a letter. Please try again." -ForegroundColor Red
                     continue
                 }
 
