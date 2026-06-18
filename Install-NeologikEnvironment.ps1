@@ -6,6 +6,8 @@
     This script automates the complete onboarding process for Neologik customers, including:
     - PowerShell version validation and updates
     - Azure authentication with required permissions
+    - Role validation (Subscription Owner and Global Administrator)
+    - Quota pre-flight checks (vCPU and Azure OpenAI gpt-5.4-mini)
     - Guest user invitations
     - Subscription, resource group, and security group creation
     - App registration and managed identity setup
@@ -88,6 +90,10 @@ $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$($script:FileTimestamp).log"
 $script:OutputFile = Join-Path $PSScriptRoot "NeologikConfiguration_$($script:FileTimestamp).json"
 $script:ConfigData = @{}
+$script:CompletedSteps = [System.Collections.Generic.List[string]]::new()
+$script:ProviderRegistrations = @{}
+$script:CheckpointFile = Join-Path $PSScriptRoot "NeologikCheckpoint.json"
+$script:CheckpointRegionAbbrev = $null
 
 # Load Neologik guest user emails from file
 $script:GuestUsersFile = Join-Path $PSScriptRoot "NeologikGuestUsers.txt"
@@ -218,6 +224,126 @@ By proceeding with this installation, you acknowledge and agree to
         Write-Host "`n✗ Terms not accepted. Installation cancelled.`n" -ForegroundColor Red
         return $false
     }
+}
+
+#endregion
+
+#region Checkpoint Management
+
+function Find-LatestCheckpoint {
+    <#
+    .SYNOPSIS
+        Returns the checkpoint file if it exists in the script directory.
+    #>
+    if (Test-Path $script:CheckpointFile) { return Get-Item $script:CheckpointFile }
+    return $null
+}
+
+function Save-Checkpoint {
+    <#
+    .SYNOPSIS
+        Saves current script state to the checkpoint file so the run can be resumed after a failure.
+    #>
+    [CmdletBinding()]
+    param([string]$Label = 'progress')
+
+    if (-not $script:CheckpointFile) { return }
+
+    $state = [ordered]@{
+        Version               = $script:Version
+        SavedAt               = (Get-Date -Format 'o')
+        Label                 = $Label
+        CompletedSteps        = @($script:CompletedSteps)
+        ProviderRegistrations = $script:ProviderRegistrations
+        RegionAbbrev          = $script:CheckpointRegionAbbrev
+        ConfigData            = $script:ConfigData
+        OrganizationCode      = $script:OrganizationCode
+        EnvironmentType       = $script:EnvironmentType
+        AzureRegion           = $script:AzureRegion
+        OrganizationName      = $script:OrganizationName
+        Hostname              = $script:Hostname
+        DomainName            = $script:DomainName
+        ResourceGroupName     = $script:ResourceGroupName
+        EnvironmentIndex      = $script:EnvironmentIndex
+        BotCount              = $script:BotCount
+        BotConfigurations     = $script:BotConfigurations
+        OutputFile            = $script:OutputFile
+    }
+
+    try {
+        $state | ConvertTo-Json -Depth 10 | Set-Content -Path $script:CheckpointFile -Encoding UTF8
+    }
+    catch {
+        Write-Warning "Could not save checkpoint: $_"
+    }
+}
+
+function Restore-Checkpoint {
+    <#
+    .SYNOPSIS
+        Restores script state from a checkpoint file.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    try {
+        $data = Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "Checkpoint file is corrupt or unreadable: $_"
+        Write-Host "`n  ⚠ Could not load checkpoint. Starting a fresh run instead." -ForegroundColor Yellow
+        return $false
+    }
+
+    # Restore ConfigData as a flat hashtable
+    $script:ConfigData = @{}
+    foreach ($prop in $data.ConfigData.PSObject.Properties) {
+        $script:ConfigData[$prop.Name] = $prop.Value
+    }
+
+    # Restore ProviderRegistrations as hashtable
+    $script:ProviderRegistrations = @{}
+    if ($data.ProviderRegistrations) {
+        foreach ($prop in $data.ProviderRegistrations.PSObject.Properties) {
+            $script:ProviderRegistrations[$prop.Name] = $prop.Value
+        }
+    }
+
+    # Restore CompletedSteps
+    $script:CompletedSteps = [System.Collections.Generic.List[string]]::new()
+    foreach ($step in $data.CompletedSteps) {
+        $script:CompletedSteps.Add([string]$step)
+    }
+
+    # Restore named script variables
+    $script:OrganizationCode       = $data.OrganizationCode
+    $script:EnvironmentType        = $data.EnvironmentType
+    $script:AzureRegion            = $data.AzureRegion
+    $script:OrganizationName       = $data.OrganizationName
+    $script:Hostname               = $data.Hostname
+    $script:DomainName             = $data.DomainName
+    $script:ResourceGroupName      = $data.ResourceGroupName
+    $script:EnvironmentIndex       = $data.EnvironmentIndex
+    $script:BotCount               = [int]$data.BotCount
+    $script:BotConfigurations      = $data.BotConfigurations
+    $script:CheckpointRegionAbbrev = $data.RegionAbbrev
+    $script:OutputFile             = $data.OutputFile
+}
+
+function Complete-OnboardingStep {
+    <#
+    .SYNOPSIS
+        Records a step as completed in the checkpoint.
+    #>
+    [CmdletBinding()]
+    param([string]$StepName)
+    if (-not $script:CompletedSteps.Contains($StepName)) {
+        $script:CompletedSteps.Add($StepName)
+    }
+    Save-Checkpoint -Label $StepName
 }
 
 #endregion
@@ -501,38 +627,37 @@ function Connect-AzureEnvironment {
                 Write-Log "Disconnecting from existing Microsoft Graph session (different tenant)" -Level Info
                 Disconnect-MgGraph -ErrorAction SilentlyContinue
             }
-            
-            # Connect to Microsoft Graph - try to reuse Azure authentication first, fallback to device code
-            Write-Log "Connecting to Microsoft Graph..." -Level Info
-            
+
+            # Reuse the existing Azure token for Graph — avoids a second browser prompt
+            Write-Log "Connecting to Microsoft Graph via existing Azure token..." -Level Info
             try {
-                # Try to connect without device code first (will use existing Azure token if possible)
-                Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
-                    -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
-                    -ErrorAction Stop
-                Write-Log "Connected to Microsoft Graph using existing credentials" -Level Success
+                # Az.Accounts >= 2.17 returns .Token as a SecureString (mandatory in 5.x). Request it
+                # explicitly when supported; older versions still hand back a plain JWT string.
+                if ((Get-Command Get-AzAccessToken).Parameters.ContainsKey('AsSecureString')) {
+                    $graphToken = (Get-AzAccessToken -ResourceTypeName MSGraph -TenantId $script:ConfigData['TenantId'] -AsSecureString -ErrorAction Stop).Token
+                }
+                else {
+                    $graphToken = (Get-AzAccessToken -ResourceTypeName MSGraph -TenantId $script:ConfigData['TenantId'] -ErrorAction Stop).Token
+                }
+                # Microsoft.Graph 2.x requires -AccessToken as a SecureString. If Az already gave us one,
+                # pass it through — wrapping it again coerces it to the literal "System.Security.SecureString"
+                # and yields a garbage token (Graph 401 IDX14102 on the first call).
+                if ($graphToken -is [System.Security.SecureString]) {
+                    $secureGraphToken = $graphToken
+                }
+                else {
+                    $secureGraphToken = ConvertTo-SecureString -String $graphToken -AsPlainText -Force
+                }
+                Connect-MgGraph -AccessToken $secureGraphToken -ErrorAction Stop
+                Write-Log "Connected to Microsoft Graph using Azure session token" -Level Success
             }
             catch {
-                # Fallback to device code if automatic auth fails
-                Write-Log "Automatic authentication failed, using device code..." -Level Info
-                Write-Host ""
-                Write-Host "╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
-                Write-Host "║                                                               ║" -ForegroundColor Yellow
-                Write-Host "║               MICROSOFT GRAPH AUTHENTICATION                  ║" -ForegroundColor Yellow
-                Write-Host "║                                                               ║" -ForegroundColor Yellow
-                Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
-                Write-Host ""
-                Write-Host "A device code will be displayed below." -ForegroundColor Cyan
-                Write-Host "Please follow the instructions to authenticate with Microsoft Graph." -ForegroundColor Cyan
-                Write-Host ""
-                
+                Write-Log "Azure token insufficient for Graph (consent may be required) — falling back to interactive login: $_" -Level Warning
+                Write-Host "`nℹ️  A browser window will open for Microsoft Graph login.`n" -ForegroundColor Cyan
                 Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
                     -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
-                    -UseDeviceAuthentication `
                     -ErrorAction Stop
-                    
-                Write-Host ""
-                Write-Log "Connected to Microsoft Graph" -Level Success
+                Write-Log "Connected to Microsoft Graph via interactive login" -Level Success
             }
         }
 
@@ -629,23 +754,48 @@ function Test-RequiredPermissions {
 
         # Check Global Administrator role
         Write-Log "Checking Global Administrator role..." -Level Info
-        $userId = (Get-MgUser -UserId $script:ConfigData['UserAccount']).Id
-        $globalAdminRole = Get-MgDirectoryRole -Filter "displayName eq 'Global Administrator'"
-        
-        if (-not $globalAdminRole) {
-            # Activate the role template if not activated
-            $roleTemplate = Get-MgDirectoryRoleTemplate -Filter "displayName eq 'Global Administrator'"
-            $globalAdminRole = New-MgDirectoryRole -RoleTemplateId $roleTemplate.Id
-        }
 
-        $adminMembers = Get-MgDirectoryRoleMember -DirectoryRoleId $globalAdminRole.Id
-        $isGlobalAdmin = $adminMembers | Where-Object { $_.Id -eq $userId }
+        $isGlobalAdmin = $false
+        $globalAdminConfirmed = $true
+        try {
+            $userId = (Get-MgUser -UserId $script:ConfigData['UserAccount']).Id
+            $globalAdminRole = Get-MgDirectoryRole -Filter "displayName eq 'Global Administrator'"
+
+            if (-not $globalAdminRole) {
+                # Activate the role template if not activated
+                $roleTemplate = Get-MgDirectoryRoleTemplate -Filter "displayName eq 'Global Administrator'"
+                $globalAdminRole = New-MgDirectoryRole -RoleTemplateId $roleTemplate.Id
+            }
+
+            $adminMembers = Get-MgDirectoryRoleMember -DirectoryRoleId $globalAdminRole.Id
+            $isGlobalAdmin = [bool]($adminMembers | Where-Object { $_.Id -eq $userId })
+        }
+        catch {
+            # The check itself failed (e.g. a Graph token/permission issue such as IDX14102) —
+            # we cannot confirm the role either way, so treat it as unconfirmed rather than fatal.
+            $globalAdminConfirmed = $false
+            Write-Log "Unable to verify Global Administrator role: $_" -Level Warning
+        }
 
         if ($isGlobalAdmin) {
             Write-Log "User has Global Administrator role" -Level Success
         }
-        else {
+        elseif ($globalAdminConfirmed) {
+            # The check ran successfully and the user is definitively not a member — fail hard.
             throw "User does not have Global Administrator role. Global Administrator role is required."
+        }
+        else {
+            # The check could not complete (e.g. a Graph token/permission error such as IDX14102),
+            # so membership is genuinely unknown — let the operator decide whether to continue.
+            Write-Host ""
+            Write-Host "⚠️  Unable to verify the Global Administrator role for $userAccount (the check failed to run)." -ForegroundColor Yellow
+            Write-Host "    Global Administrator is required for app registration, admin consent, and guest invitations." -ForegroundColor Yellow
+            Write-Host "    Continuing without confirming it may cause later steps to fail." -ForegroundColor Yellow
+            $proceed = Read-Host "Proceed anyway? [Y/n]"
+            if ($proceed -match '^\s*(n|no)\s*$') {
+                throw "Global Administrator role could not be verified and the operator chose not to continue."
+            }
+            Write-Log "Operator chose to proceed without a verified Global Administrator role." -Level Warning
         }
 
         Write-Log "All required permissions validated successfully" -Level Success
@@ -655,6 +805,146 @@ function Test-RequiredPermissions {
         Write-Log "Permission validation failed: $_" -Level Error
         throw
     }
+}
+
+function Test-QuotaRequirements {
+    <#
+    .SYNOPSIS
+        Checks vCPU and Azure OpenAI gpt-5.4-mini quota availability for the target region.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Location,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SubscriptionId
+    )
+
+    Write-Host "`n╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "║                                                               ║" -ForegroundColor Cyan
+    Write-Host "║                  QUOTA PRE-FLIGHT CHECKS                      ║" -ForegroundColor Cyan
+    Write-Host "║                                                               ║" -ForegroundColor Cyan
+    Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Log "Checking quota requirements for region: $Location" -Level Info
+
+    $quotaIssues = @()
+
+    # vCPU quota — Standard D2ds v6 / Standard DC2ds v6
+    Write-Host "  Checking vCPU quota (Standard D2ds v6 / Standard DC2ds v6)..." -ForegroundColor Gray
+    try {
+        $vmUsages = Get-AzVMUsage -Location $Location -ErrorAction Stop
+
+        $ddsv6   = $vmUsages | Where-Object { $_.Name.Value -like '*DDSv6*'   -or $_.Name.LocalizedValue -like '*DDSv6*' }
+        $dcsdsv6 = $vmUsages | Where-Object { $_.Name.Value -like '*DCDSv6*'  -or $_.Name.LocalizedValue -like '*DCDSv6*' }
+
+        $checkedAny = $false
+        foreach ($quota in @($ddsv6, $dcsdsv6)) {
+            if (-not $quota) { continue }
+            $checkedAny = $true
+            $available  = $quota.Limit - $quota.CurrentValue
+            $label      = $quota.Name.LocalizedValue
+            if ($available -gt 0) {
+                Write-Host "  ✓ ${label}: $($quota.CurrentValue)/$($quota.Limit) vCPUs used ($available available)" -ForegroundColor Green
+                Write-Log "${label} quota: $($quota.CurrentValue)/$($quota.Limit) ($available available)" -Level Info
+            }
+            else {
+                Write-Host "  ✗ ${label}: $($quota.CurrentValue)/$($quota.Limit) vCPUs used (none available)" -ForegroundColor Red
+                Write-Log "${label} quota exhausted: $($quota.CurrentValue)/$($quota.Limit)" -Level Warning
+                $quotaIssues += "vCPU quota for ${label} is at its limit in ${Location} — a quota increase request is required"
+            }
+        }
+
+        if (-not $checkedAny) {
+            Write-Host "  ⚠ Standard DDSv6 / DCDSv6 quota not found in ${Location} — VM series may not be available here" -ForegroundColor Yellow
+            Write-Log "Standard DDSv6/DCDSv6 quota not found in region: $Location" -Level Warning
+            $quotaIssues += "Standard D2ds v6 / Standard DC2ds v6 quota was not found in ${Location} — confirm this VM series is available in this region"
+        }
+    }
+    catch {
+        Write-Host "  ⚠ Could not check vCPU quota: $_" -ForegroundColor Yellow
+        Write-Log "vCPU quota check failed: $_" -Level Warning
+    }
+
+    # Azure OpenAI quota — gpt-5.4-mini
+    Write-Host "  Checking Azure OpenAI gpt-5.4-mini quota..." -ForegroundColor Gray
+    try {
+        $uri      = "https://management.azure.com/subscriptions/$SubscriptionId/providers/Microsoft.CognitiveServices/locations/$Location/usages?api-version=2024-10-01"
+        $response = Invoke-AzRestMethod -Uri $uri -Method GET -ErrorAction Stop
+
+        if ($response.StatusCode -eq 200) {
+            $usages       = ($response.Content | ConvertFrom-Json).value
+            $openAiQuotas = $usages | Where-Object { $_.name.value -like '*gpt-5.4-mini*' }
+
+            if ($openAiQuotas) {
+                foreach ($q in $openAiQuotas) {
+                    $available = $q.limit - $q.currentValue
+                    $label     = $q.name.localizedValue
+                    if ($available -gt 0) {
+                        Write-Host "  ✓ ${label}: $($q.currentValue)/$($q.limit) TPM used ($available available)" -ForegroundColor Green
+                        Write-Log "OpenAI gpt-5.4-mini quota: $($q.currentValue)/$($q.limit) TPM used" -Level Info
+                    }
+                    else {
+                        Write-Host "  ✗ ${label}: $($q.currentValue)/$($q.limit) TPM used (none available)" -ForegroundColor Red
+                        Write-Log "OpenAI gpt-5.4-mini quota exhausted: $($q.currentValue)/$($q.limit)" -Level Warning
+                        $quotaIssues += "Azure OpenAI gpt-5.4-mini quota is exhausted in ${Location} — a quota increase request is required (https://aka.ms/oai/stuquotarequest)"
+                    }
+                }
+            }
+            else {
+                Write-Host "  ⚠ gpt-5.4-mini quota entry not found in ${Location}" -ForegroundColor Yellow
+                Write-Log "gpt-5.4-mini quota not found in region: $Location" -Level Warning
+                $quotaIssues += "Azure OpenAI gpt-5.4-mini quota was not found in ${Location} — confirm the model is available here (supported: East US2, Sweden Central, South Central US, Poland Central)"
+            }
+        }
+        else {
+            Write-Host "  ⚠ Could not retrieve OpenAI quota (HTTP $($response.StatusCode))" -ForegroundColor Yellow
+            Write-Log "OpenAI quota check returned HTTP $($response.StatusCode)" -Level Warning
+        }
+    }
+    catch {
+        Write-Host "  ⚠ Could not check Azure OpenAI quota: $_" -ForegroundColor Yellow
+        Write-Log "OpenAI quota check failed: $_" -Level Warning
+    }
+
+    Write-Host ""
+
+    if ($quotaIssues.Count -gt 0) {
+        Write-Host "╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
+        Write-Host "║                                                               ║" -ForegroundColor Yellow
+        Write-Host "║                    ⚠  QUOTA WARNING                          ║" -ForegroundColor Yellow
+        Write-Host "║                                                               ║" -ForegroundColor Yellow
+        Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  The following quota issues were detected:" -ForegroundColor Yellow
+        foreach ($issue in $quotaIssues) {
+            Write-Host "  • $issue" -ForegroundColor Yellow
+        }
+        Write-Host ""
+        Write-Host "  Deploying without sufficient quota may cause failures later." -ForegroundColor Gray
+        Write-Host "  See QUICK-REFERENCE.md → Prerequisites for how to request increases." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  Continue anyway? (Y/N, default: Y): " -NoNewline -ForegroundColor Yellow
+        $continueChoice = Read-Host
+
+        if ([string]::IsNullOrWhiteSpace($continueChoice) -or $continueChoice -eq 'Y' -or $continueChoice -eq 'y') {
+            Write-Host "  Continuing with quota warnings acknowledged..." -ForegroundColor Yellow
+            Write-Log "User chose to continue despite quota warnings: $($quotaIssues -join '; ')" -Level Warning
+        }
+        else {
+            Write-Host ""
+            Write-Host "  Installation cancelled. Please request the required quota increases and re-run the script." -ForegroundColor Red
+            Write-Log "Installation cancelled by user due to quota warnings" -Level Warning
+            exit 0
+        }
+    }
+    else {
+        Write-Host "  ✓ All quota checks passed." -ForegroundColor Green
+        Write-Log "All quota checks passed" -Level Success
+    }
+
+    Write-Host ""
 }
 
 function Register-RequiredResourceProvider {
@@ -838,6 +1128,17 @@ function New-NeologikResourceGroup {
         return $rg
     }
     catch {
+        # Detect Azure RBAC authorization failures and surface them with a clear message
+        if ($_.Exception.Message -match 'AuthorizationFailed|does not have authorization|does not have.*permission|Forbidden') {
+            Write-Host "`n❌ PERMISSION ERROR: Cannot create resource group '$ResourceGroupName'" -ForegroundColor Red
+            Write-Host "   The current account lacks permission to create resource groups in this subscription." -ForegroundColor Yellow
+            Write-Host "   Required role: 'Owner' or 'Contributor' at subscription scope." -ForegroundColor Yellow
+            Write-Host "   Subscription: $($script:ConfigData['SubscriptionId'])" -ForegroundColor Yellow
+            Write-Host "   Ask your Azure administrator to grant the Owner role on the subscription," -ForegroundColor Cyan
+            Write-Host "   then re-run the script and choose 'Y' to resume from the checkpoint." -ForegroundColor Cyan
+            Write-Log "Resource group creation blocked by Azure RBAC. User: $($script:ConfigData['UserAccount']). Subscription: $($script:ConfigData['SubscriptionId'])" -Level Error
+            throw "Insufficient permissions: Cannot create resource group '$ResourceGroupName' — Owner or Contributor role required at subscription scope"
+        }
         Write-Log "Failed to create/validate resource group: $_" -Level Error
         throw
     }
@@ -1623,27 +1924,29 @@ function New-NeologikKeyVault {
             }
         }
 
-        # Assign Key Vault Secrets Officer role to Neologik Admin User Group at Resource Group level
+        # Assign Key Vault data-plane roles to Neologik Admin User Group at Resource Group level
         $adminGroup = $SecurityGroups | Where-Object { $_.Name -like 'Neologik Admin User Group*' }
-        
+
         if ($adminGroup) {
-            Write-Log "Assigning Key Vault Secrets Officer role to $($adminGroup.Name) at Resource Group level..." -Level Info
-            
-            $existingAssignment = Get-AzRoleAssignment -ObjectId $adminGroup.Id `
-                -RoleDefinitionName 'Key Vault Secrets Officer' `
-                -Scope $rgScope `
-                -ErrorAction SilentlyContinue
+            foreach ($roleName in @('Key Vault Secrets Officer', 'Key Vault Certificates Officer')) {
+                Write-Log "Assigning $roleName role to $($adminGroup.Name) at Resource Group level..." -Level Info
 
-            if ($existingAssignment) {
-                Write-Log "Key Vault Secrets Officer role already assigned to $($adminGroup.Name) at Resource Group level" -Level Info
-            }
-            else {
-                New-AzRoleAssignment -ObjectId $adminGroup.Id `
-                    -RoleDefinitionName 'Key Vault Secrets Officer' `
+                $existingAssignment = Get-AzRoleAssignment -ObjectId $adminGroup.Id `
+                    -RoleDefinitionName $roleName `
                     -Scope $rgScope `
-                    -ErrorAction Stop | Out-Null
+                    -ErrorAction SilentlyContinue
 
-                Write-Log "Key Vault Secrets Officer role assigned to $($adminGroup.Name) at Resource Group level successfully" -Level Success
+                if ($existingAssignment) {
+                    Write-Log "$roleName role already assigned to $($adminGroup.Name) at Resource Group level" -Level Info
+                }
+                else {
+                    New-AzRoleAssignment -ObjectId $adminGroup.Id `
+                        -RoleDefinitionName $roleName `
+                        -Scope $rgScope `
+                        -ErrorAction Stop | Out-Null
+
+                    Write-Log "$roleName role assigned to $($adminGroup.Name) at Resource Group level successfully" -Level Success
+                }
             }
         }
 
@@ -1702,7 +2005,7 @@ function New-NeologikKeyVault {
 
 #region Resource Provider Registration
 
-function Register-ComputeResourceProvider {
+function Register-AllResourceProviders {
     <#
     .SYNOPSIS
         Registers Microsoft.Compute resource provider for the subscription.
@@ -1710,16 +2013,89 @@ function Register-ComputeResourceProvider {
     [CmdletBinding()]
     param()
 
-    Write-Log "Registering Microsoft.Compute resource provider..." -Level Info
-    
-    try {
-        Register-RequiredResourceProvider -ProviderNamespace 'Microsoft.Compute'
-        Write-Log "Microsoft.Compute resource provider registered successfully" -Level Success
-        return $true
+    $providers = @(
+        'Microsoft.Compute',
+        'Microsoft.KeyVault',
+        'Microsoft.ManagedIdentity',
+        'Microsoft.Resources',
+        'Microsoft.Storage'
+    )
+
+    Write-Log "Registering all required Azure resource providers..." -Level Info
+
+    foreach ($provider in $providers) {
+        # Skip providers already confirmed registered in a previous run (checkpoint)
+        if ($script:ProviderRegistrations[$provider] -eq 'Registered') {
+            Write-Log "Resource provider '$provider' already registered (from checkpoint)" -Level Info
+            continue
+        }
+
+        try {
+            Register-RequiredResourceProvider -ProviderNamespace $provider
+            $script:ProviderRegistrations[$provider] = 'Registered'
+            Save-Checkpoint -Label "Provider_$provider"
+        }
+        catch {
+            # Timeouts are normal for slow Azure regions — record and continue rather than aborting.
+            # The provider registration continues in the background; on the next run the real-time
+            # state check inside Register-RequiredResourceProvider will pick it up as Registered.
+            if ($_.Exception.Message -match 'timed out|Please try again') {
+                Write-Log "Resource provider '$provider' registration timed out - it may still be registering in Azure" -Level Warning
+                $script:ProviderRegistrations[$provider] = 'TimedOut'
+                Save-Checkpoint -Label "Provider_${provider}_TimedOut"
+            }
+            else {
+                Write-Log "Failed to register resource provider '$provider': $_" -Level Error
+                throw
+            }
+        }
     }
-    catch {
-        Write-Log "Failed to register Microsoft.Compute resource provider: $_" -Level Error
-        throw
+
+    # Report any providers that timed out so the user is aware
+    $timedOutProviders = @($script:ProviderRegistrations.GetEnumerator() | Where-Object { $_.Value -eq 'TimedOut' } | Select-Object -ExpandProperty Key)
+    if ($timedOutProviders.Count -gt 0) {
+        Write-Host "`n⚠️  The following resource providers timed out and may still be registering in Azure:" -ForegroundColor Yellow
+        $timedOutProviders | ForEach-Object { Write-Host "     - $_" -ForegroundColor Yellow }
+        Write-Host "   This is normal — Azure continues registering them in the background." -ForegroundColor Gray
+        Write-Host "   Re-run the script and choose 'Y' to resume; timed-out providers will be re-checked" -ForegroundColor Gray
+        Write-Host "   and skipped automatically once they reach the 'Registered' state." -ForegroundColor Gray
+        Write-Host ""
+        Write-Log "Resource provider registration timed out for: $($timedOutProviders -join ', ')" -Level Warning
+    }
+    else {
+        Write-Log "All resource providers registered successfully" -Level Success
+    }
+
+    # Register Microsoft.Compute/EncryptionAtHost feature (required for AKS encrypted node pools)
+    Write-Log "Checking Microsoft.Compute/EncryptionAtHost feature registration..." -Level Info
+    try {
+        $feature = Get-AzProviderFeature -ProviderNamespace 'Microsoft.Compute' -FeatureName 'EncryptionAtHost' -ErrorAction Stop
+        if ($feature.RegistrationState -eq 'Registered') {
+            Write-Log "Microsoft.Compute/EncryptionAtHost feature is already registered" -Level Info
+        } else {
+            Write-Log "Registering Microsoft.Compute/EncryptionAtHost feature..." -Level Info
+            Register-AzProviderFeature -ProviderNamespace 'Microsoft.Compute' -FeatureName 'EncryptionAtHost' -ErrorAction Stop | Out-Null
+
+            # Wait up to 10 minutes for feature registration
+            $maxRetries = 20
+            $waitSeconds = 30
+            for ($i = 0; $i -lt $maxRetries; $i++) {
+                Start-Sleep -Seconds $waitSeconds
+                $feature = Get-AzProviderFeature -ProviderNamespace 'Microsoft.Compute' -FeatureName 'EncryptionAtHost' -ErrorAction Stop
+                Write-Host "  ⏳ EncryptionAtHost: $($feature.RegistrationState) ($($i + 1)/$maxRetries)..." -ForegroundColor Gray
+                Write-Log "EncryptionAtHost feature status: $($feature.RegistrationState)" -Level Info
+                if ($feature.RegistrationState -eq 'Registered') {
+                    Register-AzResourceProvider -ProviderNamespace 'Microsoft.Compute' -ErrorAction Stop | Out-Null
+                    Write-Log "Microsoft.Compute/EncryptionAtHost feature registered successfully" -Level Success
+                    break
+                }
+            }
+            if ($feature.RegistrationState -ne 'Registered') {
+                Write-Log "Microsoft.Compute/EncryptionAtHost feature registration timed out — check Azure portal for status" -Level Warning
+            }
+        }
+    } catch {
+        Write-Log "Failed to register Microsoft.Compute/EncryptionAtHost feature: $_" -Level Warning
     }
 }
 
@@ -2308,11 +2684,12 @@ function Export-ConfigurationData {
         Write-Host "  1. Review the configuration file (available locally and in Storage Account)"
         Write-Host "  2. Service principal client secret is securely stored in Key Vault: $($script:ConfigData['KeyVault'].Name)"
         Write-Host "     Secret name: $($script:ConfigData['KeyVault'].SecretName)"
-        Write-Host "  3. Upload your TLS certificate (.pfx file) to Storage Account blob container:"
-        Write-Host "     Storage Account: $($script:ConfigData['StorageAccount'].Name)"
-        Write-Host "     Container: $($script:ConfigData['StorageAccount'].CertificateContainerName)"
-        Write-Host "  4. Store the certificate PFX password in Key Vault as a secret:"
-        Write-Host "     Secret name: 'neologik-deployment-certificate-pfx-secret'"
+        Write-Host "  3. Import your TLS certificate (.pfx file) into Key Vault as a certificate:"
+        Write-Host "     Key Vault:        $($script:ConfigData['KeyVault'].Name)"
+        Write-Host "     Certificate name: keyvault-neo-ingress"
+        Write-Host "     Command:"
+        Write-Host "       az keyvault certificate import --vault-name $($script:ConfigData['KeyVault'].Name) --name keyvault-neo-ingress --file certificate.pfx --password <PFX_PASSWORD>"
+        Write-Host "     (The PFX password is consumed at import time — it does not need to be stored separately.)"
         Write-Host ""
 
         return $script:OutputFile
@@ -2380,13 +2757,60 @@ function Start-NeologikOnboarding {
     param()
 
     try {
+        $resuming = $false
         Write-ScriptHeader
 
-        # Step 0: Show Terms and Conditions and get acceptance
-        $termsAccepted = Show-TermsAndConditions
-        if (-not $termsAccepted) {
-            Write-Log "Installation cancelled by user - terms not accepted" -Level Warning
-            exit 0
+        # Check for an existing checkpoint and offer to resume
+        $existingCheckpoint = Find-LatestCheckpoint
+        if ($existingCheckpoint) {
+            $age = (Get-Date) - $existingCheckpoint.LastWriteTime
+            $ageStr = if ($age.TotalDays -ge 1) { "$([int]$age.TotalDays) day(s) ago" }
+                      elseif ($age.TotalHours -ge 1) { "$([int]$age.TotalHours) hour(s) ago" }
+                      else { "$([int]$age.TotalMinutes) minute(s) ago" }
+
+            Write-Host "`n╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
+            Write-Host "║                                                               ║" -ForegroundColor Yellow
+            Write-Host "║                  RESUME PREVIOUS RUN?                         ║" -ForegroundColor Yellow
+            Write-Host "║                                                               ║" -ForegroundColor Yellow
+            Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "  A saved checkpoint was found ($ageStr):" -ForegroundColor Gray
+            Write-Host "  $($existingCheckpoint.Name)" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "  Resume from this checkpoint? (default: Y): " -NoNewline -ForegroundColor Yellow
+            $resumeChoice = Read-Host
+
+            if ([string]::IsNullOrWhiteSpace($resumeChoice) -or $resumeChoice -eq 'Y' -or $resumeChoice -eq 'y') {
+                $restored = Restore-Checkpoint -Path $existingCheckpoint.FullName
+                if ($restored -eq $false) { $resuming = $false }
+                else { $resuming = $true }
+
+                Write-Host "`n  ✓ Checkpoint loaded." -ForegroundColor Green
+                Write-Host "    Org: $($script:OrganizationCode)  |  Env: $($script:EnvironmentType)  |  Region: $($script:AzureRegion)" -ForegroundColor Cyan
+                Write-Host "    Resource Group: $($script:ResourceGroupName)" -ForegroundColor Cyan
+                $timedOut = @($script:ProviderRegistrations.GetEnumerator() | Where-Object { $_.Value -eq 'TimedOut' })
+                if ($timedOut.Count -gt 0) {
+                    Write-Host "    Provider registrations to retry: $($timedOut.Count)" -ForegroundColor Yellow
+                }
+                Write-Host ""
+                Write-Log "Resuming from checkpoint: $($existingCheckpoint.FullName)" -Level Info
+            }
+            else {
+                Write-Host "`n  Starting a fresh run..." -ForegroundColor Green
+                Write-Host ""
+            }
+        }
+
+        # Step 0: Show Terms and Conditions (skip when resuming — already accepted)
+        if (-not $resuming) {
+            $termsAccepted = Show-TermsAndConditions
+            if (-not $termsAccepted) {
+                Write-Log "Installation cancelled by user - terms not accepted" -Level Warning
+                exit 0
+            }
+        }
+        else {
+            Write-Log "Resuming from checkpoint — Terms and Conditions acceptance carried over" -Level Info
         }
 
         # Step 1: Check PowerShell version first
@@ -2476,6 +2900,12 @@ function Start-NeologikOnboarding {
         $null = Connect-AzureEnvironment -TenantId $TenantId
 
         # Step 5: Get current subscription from context
+        # On resume, switch to the subscription from the checkpoint before reading the context.
+        if ($resuming -and $script:ConfigData['SubscriptionId']) {
+            Set-AzContext -SubscriptionId $script:ConfigData['SubscriptionId'] -ErrorAction Stop | Out-Null
+            Write-Log "Restored Azure context to subscription: $($script:ConfigData['SubscriptionId'])" -Level Info
+        }
+
         $currentContext = Get-AzContext
         if (-not $currentContext -or -not $currentContext.Subscription) {
             throw "No active Azure subscription found. Please ensure you're logged in with access to a subscription."
@@ -2497,7 +2927,13 @@ function Start-NeologikOnboarding {
         
         Write-Log "Using subscription: $($currentContext.Subscription.Name) (ID: $($currentContext.Subscription.Id))" -Level Success
 
-        # Step 6: Collect remaining configuration inputs
+        # Step 5b: Validate required permissions before prompting for input
+        Write-Log "Validating required permissions..." -Level Info
+        $null = Test-RequiredPermissions -SubscriptionId $script:ConfigData['SubscriptionId']
+
+        # Step 6: Collect remaining configuration inputs (skipped when resuming from checkpoint)
+        if (-not $resuming) {
+
         Write-Host "`n╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Magenta
         Write-Host "║                                                               ║" -ForegroundColor Magenta
         Write-Host "║                   CONFIGURATION SETUP                         ║" -ForegroundColor Magenta
@@ -3150,6 +3586,24 @@ function Start-NeologikOnboarding {
         Write-Host "Press Enter to continue with these settings, or Ctrl+C to cancel..." -ForegroundColor Yellow
         Read-Host
 
+        # Save configuration to checkpoint now that it has been confirmed.
+        # This allows a resume if any subsequent step fails (e.g. permission errors or provider timeouts).
+        $script:CheckpointRegionAbbrev = $regionAbbrev
+        Complete-OnboardingStep 'ConfigGathered'
+
+        } else {
+            # Resume path: restore the region abbreviation local variable from checkpoint data.
+            $regionAbbrev = $script:CheckpointRegionAbbrev
+
+            Write-Host "`n  ⏩ Configuration restored from checkpoint — skipping input prompts" -ForegroundColor Gray
+            Write-Host "     Org: $($script:OrganizationCode)  |  Env: $($script:EnvironmentType)  |  Region: $($script:AzureRegion)" -ForegroundColor Cyan
+            Write-Host "     Resource Group: $($script:ResourceGroupName)  |  Bots: $($script:BotCount)" -ForegroundColor Cyan
+            Write-Host ""
+        }
+
+        # Step 6.5: Quota pre-flight checks
+        Test-QuotaRequirements -Location $script:AzureRegion -SubscriptionId $script:ConfigData['SubscriptionId']
+
         # Step 7: Create resource group
         $null = New-NeologikResourceGroup -ResourceGroupName $script:ResourceGroupName -Location $script:AzureRegion
 
@@ -3186,8 +3640,9 @@ function Start-NeologikOnboarding {
             -SecurityGroups $securityGroups `
             -SubscriptionId $script:ConfigData['SubscriptionId']
 
-        # Step 13: Register Microsoft.Compute Resource Provider
-        Register-ComputeResourceProvider
+        # Step 13: Register all required Azure resource providers
+        Register-AllResourceProviders
+        Complete-OnboardingStep 'ResourceProviders'
 
         # Step 14: Create Storage Account and blob container for certificates
         $storageAccountName = "stneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
@@ -3213,22 +3668,40 @@ function Start-NeologikOnboarding {
         # Step 16: Export configuration
         Export-ConfigurationData
 
+        # Remove checkpoint on successful completion — no longer needed
+        if ($script:CheckpointFile -and (Test-Path $script:CheckpointFile)) {
+            Remove-Item $script:CheckpointFile -ErrorAction SilentlyContinue
+            Write-Log "Checkpoint file removed after successful completion" -Level Info
+        }
+
         Write-Log "Neologik onboarding completed successfully!" -Level Success
     }
     catch {
         Write-Log "Onboarding failed: $_" -Level Error
         Write-Log "Stack Trace: $($_.ScriptStackTrace)" -Level Error
-        
-        # Check if this is a permission error to set appropriate exit code
+
         if ($_.Exception.Message -match "Insufficient permissions:|ERROR: Insufficient permissions") {
-            exit 2  # Exit code 2 = Permission error
+            Write-Host "`n❌ Onboarding stopped: insufficient permissions." -ForegroundColor Red
+            Write-Host "   See the error details above for the specific permission required." -ForegroundColor Yellow
+            if ($script:CheckpointFile -and (Test-Path $script:CheckpointFile)) {
+                Write-Host ""
+                Write-Host "  ✓ Your configuration has been saved as a checkpoint." -ForegroundColor Green
+                Write-Host "    Once permissions are granted, re-run the script and choose 'Y' to resume" -ForegroundColor Cyan
+                Write-Host "    from where you left off — no need to re-enter configuration." -ForegroundColor Cyan
+            }
+            Write-Host ""
+            exit 2
         }
         else {
             Write-Host "`n❌ Onboarding failed. Please check the log file for details:" -ForegroundColor Red
             Write-Host "   $script:LogFile" -ForegroundColor Yellow
+            if ($script:CheckpointFile -and (Test-Path $script:CheckpointFile)) {
+                Write-Host ""
+                Write-Host "  ✓ Your configuration has been saved as a checkpoint." -ForegroundColor Green
+                Write-Host "    Re-run the script and choose 'Y' to resume from where you left off." -ForegroundColor Cyan
+            }
             Write-Host ""
-            
-            exit 1  # Exit code 1 = General error
+            exit 1
         }
     }
 }
