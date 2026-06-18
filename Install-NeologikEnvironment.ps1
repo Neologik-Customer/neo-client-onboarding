@@ -2424,7 +2424,9 @@ function New-NeologikManagedIdentities {
                 DisplayName = "Neologik Script Runner Service Connection$displaySuffix"
                 Roles = @('Contributor')
                 RGRoles = @('Key Vault Secrets Officer', 'Azure Bot Service Contributor Role')
-                GraphAppRoles = @('Application.Read.All', 'Application.ReadWrite.OwnedBy')
+                # No GraphAppRoles: the Script Runner UAMI no longer manages app registrations
+                # — that work runs as the deploy service connection (ensure-app-regs.sh) — so
+                # Application.Read.All / ReadWrite.OwnedBy on the UAMI would be surplus.
             },
             @{
                 Name = "neologik-sql-managed-identity$nameSuffix"
