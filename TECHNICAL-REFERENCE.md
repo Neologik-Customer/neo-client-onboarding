@@ -392,7 +392,7 @@ The configuration file contains all necessary information to share with Neologik
     "ClientId": "...",
     "SecretExpiry": "...",
     "SubscriptionRoles": ["Contributor", "User Access Administrator"],
-    "EntraRole": "Application Administrator",
+    "GraphAppRoles": ["Application.Read.All", "Application.ReadWrite.OwnedBy"],
     "GroupMemberships": ["Neologik Admin User Group - abc-dev"]
   },
   "KeyVault": {
@@ -411,7 +411,7 @@ The configuration file contains all necessary information to share with Neologik
       "PrincipalId": "...",
       "ClientId": "...",
       "SubscriptionRoles": ["Contributor"],
-      "EntraRole": "Application Administrator",
+      "GraphAppRoles": ["Application.Read.All", "Application.ReadWrite.OwnedBy"],
       "GroupMemberships": []
     },
     {
