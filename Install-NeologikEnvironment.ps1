@@ -1237,6 +1237,9 @@ function New-NeologikSecurityGroups {
         [string]$EnvironmentType = "",
 
         [Parameter(Mandatory = $false)]
+        [string]$EnvironmentIndex = "",
+
+        [Parameter(Mandatory = $false)]
         [array]$BotNames = @("bot")
     )
 
@@ -1247,8 +1250,8 @@ function New-NeologikSecurityGroups {
 
         # Build group names with organization code and environment type (lowercase)
         $orgLower = $OrganizationCode.ToLower()
-        $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "-$($EnvironmentType.ToLower())" }
-        $groupSuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { " - $orgLower$envLower" }
+        $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "$($EnvironmentType.ToLower())" }
+        $groupSuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { " - $orgLower$envLower$EnvironmentIndex" }
 
         # Build groups array starting with bot-specific user groups
         $groups = @()
@@ -1499,7 +1502,10 @@ function New-NeologikAppRegistration {
         [string]$OrganizationCode = "",
 
         [Parameter(Mandatory = $false)]
-        [string]$EnvironmentType = ""
+        [string]$EnvironmentType = "",
+
+        [Parameter(Mandatory = $false)]
+        [string]$EnvironmentIndex = ""
     )
 
     Write-Log "Creating App Registration for GitHub service connection..." -Level Info
@@ -1512,8 +1518,8 @@ function New-NeologikAppRegistration {
             "Neologik GitHub Service Connection"
         } else {
             $orgLower = $OrganizationCode.ToLower()
-            $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "-$($EnvironmentType.ToLower())" }
-            "Neologik GitHub Service Connection - $orgLower$envLower"
+            $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "$($EnvironmentType.ToLower())" }
+            "Neologik GitHub Service Connection - $orgLower$envLower$EnvironmentIndex"
         }
 
         # Check if app registration exists
@@ -2404,7 +2410,10 @@ function New-NeologikManagedIdentities {
         [string]$OrganizationCode = "",
 
         [Parameter(Mandatory = $false)]
-        [string]$EnvironmentType = ""
+        [string]$EnvironmentType = "",
+
+        [Parameter(Mandatory = $false)]
+        [string]$EnvironmentIndex = ""
     )
 
     Write-Log "Creating Managed Identities..." -Level Info
@@ -2418,8 +2427,8 @@ function New-NeologikManagedIdentities {
         # Build names with organization code and environment type (lowercase)
         $orgLower = $OrganizationCode.ToLower()
         $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "$($EnvironmentType.ToLower())" }
-        $nameSuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { "-$orgLower$envLower" }
-        $displaySuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { " - $orgLower$envLower" }
+        $nameSuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { "-$orgLower$envLower$EnvironmentIndex" }
+        $displaySuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { " - $orgLower$envLower$EnvironmentIndex" }
 
         $managedIdentities = @(
             @{
@@ -3798,13 +3807,13 @@ function Start-NeologikOnboarding {
         # Step 9: Create security groups (includes logged-in user + guest users)
         # Extract agent names for group creation
         $agentNames = $script:BotConfigurations | ForEach-Object { $_.AgentName }
-        $securityGroups = New-NeologikSecurityGroups -GuestUsers $guestUsers -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType -BotNames $agentNames
+        $securityGroups = New-NeologikSecurityGroups -GuestUsers $guestUsers -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType -EnvironmentIndex $script:EnvironmentIndex -BotNames $agentNames
 
         # Step 10: Assign roles to security groups
         $null = Set-NeologikRoleAssignments -SecurityGroups $securityGroups -SubscriptionId $script:ConfigData['SubscriptionId'] -ResourceGroupName $script:ResourceGroupName
 
         # Step 11: Create App Registration
-        $appReg = New-NeologikAppRegistration -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType
+        $appReg = New-NeologikAppRegistration -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType -EnvironmentIndex $script:EnvironmentIndex
         $null = Set-AppRegistrationRoles -ServicePrincipalId $appReg.ServicePrincipal.Id `
             -SubscriptionId $script:ConfigData['SubscriptionId'] `
             -ResourceGroupName $script:ResourceGroupName `
@@ -3849,7 +3858,8 @@ function Start-NeologikOnboarding {
             -Location $script:AzureRegion `
             -SubscriptionId $script:ConfigData['SubscriptionId'] `
             -OrganizationCode $script:OrganizationCode `
-            -EnvironmentType $script:EnvironmentType
+            -EnvironmentType $script:EnvironmentType `
+            -EnvironmentIndex $script:EnvironmentIndex
 
         # Step 16: Export configuration
         Export-ConfigurationData
