@@ -2539,59 +2539,85 @@ function Export-ConfigurationData {
         Write-Log "Configuration exported to: $script:OutputFile" -Level Success
 
         # Copy JSON file to Storage Account blob container
-        try {
-            if ($script:ConfigData['StorageAccount']) {
-                Write-Log "Copying configuration file to Storage Account..." -Level Info
-                
-                $storageAccountName = $script:ConfigData['StorageAccount'].Name
-                $jsonContainerName = $script:ConfigData['StorageAccount'].JsonContainerName
-                $blobName = Split-Path -Leaf $script:OutputFile
-                
-                # Get storage context using Entra ID authentication
-                $ctx = New-AzStorageContext -StorageAccountName $storageAccountName -UseConnectedAccount
-                
-                # Upload the JSON file to the json blob container
-                Set-AzStorageBlobContent -File $script:OutputFile `
-                    -Container $jsonContainerName `
-                    -Blob $blobName `
-                    -Context $ctx `
-                    -Force `
-                    -ErrorAction Stop | Out-Null
-                
-                Write-Log "Configuration file uploaded to Storage Account: $storageAccountName/$jsonContainerName/$blobName" -Level Success
+        if ($script:ConfigData['StorageAccount']) {
+            Write-Log "Copying configuration file to Storage Account..." -Level Info
+
+            $storageAccountName = $script:ConfigData['StorageAccount'].Name
+            $jsonContainerName = $script:ConfigData['StorageAccount'].JsonContainerName
+            $blobName = Split-Path -Leaf $script:OutputFile
+
+            # Get storage context using Entra ID authentication
+            $ctx = New-AzStorageContext -StorageAccountName $storageAccountName -UseConnectedAccount
+
+            # Upload with retry: data-plane RBAC (Storage Blob Data Contributor) can take
+            # several minutes to propagate after assignment, so early attempts may 403.
+            $uploaded = $false
+            $retryCount = 0
+            $maxRetries = 12
+            while (-not $uploaded -and $retryCount -lt $maxRetries) {
+                try {
+                    Set-AzStorageBlobContent -File $script:OutputFile `
+                        -Container $jsonContainerName `
+                        -Blob $blobName `
+                        -Context $ctx `
+                        -Force `
+                        -ErrorAction Stop | Out-Null
+                    $uploaded = $true
+                    Write-Log "Configuration file uploaded to Storage Account: $storageAccountName/$jsonContainerName/$blobName" -Level Success
+                }
+                catch {
+                    $retryCount++
+                    if ($retryCount -lt $maxRetries) {
+                        Write-Log "Storage data-plane permission not yet propagated. Retrying in 20 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
+                        Start-Sleep -Seconds 20
+                    }
+                    else {
+                        Write-Log "Warning: Failed to copy configuration file to Storage Account after $maxRetries attempts: $_" -Level Warning
+                        Write-Log "The configuration file is still available locally at: $script:OutputFile" -Level Info
+                    }
+                }
             }
-        }
-        catch {
-            Write-Log "Warning: Failed to copy configuration file to Storage Account: $_" -Level Warning
-            Write-Log "The configuration file is still available locally at: $script:OutputFile" -Level Info
         }
 
         # Copy log file to Storage Account blob container
-        try {
-            if ($script:ConfigData['StorageAccount']) {
-                Write-Log "Copying log file to Storage Account..." -Level Info
-                
-                $storageAccountName = $script:ConfigData['StorageAccount'].Name
-                $logsContainerName = $script:ConfigData['StorageAccount'].LogsContainerName
-                $logBlobName = Split-Path -Leaf $script:LogFile
-                
-                # Get storage context using Entra ID authentication
-                $ctx = New-AzStorageContext -StorageAccountName $storageAccountName -UseConnectedAccount
-                
-                # Upload the log file to the logs blob container
-                Set-AzStorageBlobContent -File $script:LogFile `
-                    -Container $logsContainerName `
-                    -Blob $logBlobName `
-                    -Context $ctx `
-                    -Force `
-                    -ErrorAction Stop | Out-Null
-                
-                Write-Log "Log file uploaded to Storage Account: $storageAccountName/$logsContainerName/$logBlobName" -Level Success
+        if ($script:ConfigData['StorageAccount']) {
+            Write-Log "Copying log file to Storage Account..." -Level Info
+
+            $storageAccountName = $script:ConfigData['StorageAccount'].Name
+            $logsContainerName = $script:ConfigData['StorageAccount'].LogsContainerName
+            $logBlobName = Split-Path -Leaf $script:LogFile
+
+            # Get storage context using Entra ID authentication
+            $ctx = New-AzStorageContext -StorageAccountName $storageAccountName -UseConnectedAccount
+
+            # Upload with retry: data-plane RBAC (Storage Blob Data Contributor) can take
+            # several minutes to propagate after assignment, so early attempts may 403.
+            $uploaded = $false
+            $retryCount = 0
+            $maxRetries = 12
+            while (-not $uploaded -and $retryCount -lt $maxRetries) {
+                try {
+                    Set-AzStorageBlobContent -File $script:LogFile `
+                        -Container $logsContainerName `
+                        -Blob $logBlobName `
+                        -Context $ctx `
+                        -Force `
+                        -ErrorAction Stop | Out-Null
+                    $uploaded = $true
+                    Write-Log "Log file uploaded to Storage Account: $storageAccountName/$logsContainerName/$logBlobName" -Level Success
+                }
+                catch {
+                    $retryCount++
+                    if ($retryCount -lt $maxRetries) {
+                        Write-Log "Storage data-plane permission not yet propagated. Retrying in 20 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
+                        Start-Sleep -Seconds 20
+                    }
+                    else {
+                        Write-Log "Warning: Failed to copy log file to Storage Account after $maxRetries attempts: $_" -Level Warning
+                        Write-Log "The log file is still available locally at: $script:LogFile" -Level Info
+                    }
+                }
             }
-        }
-        catch {
-            Write-Log "Warning: Failed to copy log file to Storage Account: $_" -Level Warning
-            Write-Log "The log file is still available locally at: $script:LogFile" -Level Info
         }
 
         # Display summary
