@@ -32,6 +32,12 @@
 .PARAMETER SubscriptionName
     Name for the Azure subscription. Default: 'Neologik-Development-01'
 
+.PARAMETER KeyVaultName
+    Override the Key Vault name. If omitted, the standard name
+    'kvneo<org><env><index>' is generated automatically. Must be 3-24
+    characters, start with a letter, end with a letter or digit, and
+    contain only letters, digits and hyphens.
+
 .PARAMETER SkipPowerShellUpdate
     Skip PowerShell version check and update.
 
@@ -69,6 +75,11 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$SubscriptionName = "Neologik-Development-01",
+
+    [Parameter(Mandatory = $false)]
+    [ValidateLength(3, 24)]
+    [ValidatePattern('^[a-zA-Z][a-zA-Z0-9-]*[a-zA-Z0-9]$')]
+    [string]$KeyVaultName,
 
     [Parameter(Mandatory = $false)]
     [switch]$SkipPowerShellUpdate,
@@ -3820,8 +3831,15 @@ function Start-NeologikOnboarding {
             -SecurityGroups $securityGroups
 
         # Step 12: Create Key Vault and store client secret
-        $keyVaultName = "kvneo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$($script:EnvironmentIndex)"
-        
+        if (-not [string]::IsNullOrWhiteSpace($KeyVaultName)) {
+            # Operator supplied an explicit Key Vault name at the command line — use it as-is.
+            $keyVaultName = $KeyVaultName
+            Write-Log "Using operator-supplied Key Vault name: $keyVaultName" -Level Info
+        }
+        else {
+            $keyVaultName = "kvneo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$($script:EnvironmentIndex)"
+        }
+
         # Key Vault names must be 3-24 characters, only alphanumeric and hyphens
         if ($keyVaultName.Length -gt 24) {
             Write-Log "Key Vault name too long, truncating to 24 characters" -Level Warning
