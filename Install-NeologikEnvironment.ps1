@@ -64,7 +64,9 @@ param(
     [string]$OrganizationCode = "abc",
 
     [Parameter(Mandatory = $false)]
-    [ValidateSet('dev', 'prd')]
+    # 'dmo', 'test' and 'stg' are supported but intentionally undocumented — they are
+    # accepted when supplied but not advertised to the operator in prompts or help.
+    [ValidateSet('dev', 'prd', 'dmo', 'test', 'stg')]
     [string]$EnvironmentType = "dev",
 
     [Parameter(Mandatory = $false)]
@@ -3204,12 +3206,15 @@ function Start-NeologikOnboarding {
             Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
             $envInput = Read-Host
 
+            # 'dmo', 'test' and 'stg' are accepted but deliberately not listed above.
+            $allowedEnvTypes = @('dev', 'prd', 'dmo', 'test', 'stg')
+
             if ([string]::IsNullOrWhiteSpace($envInput)) {
                 $script:EnvironmentType = $EnvironmentType.ToLower()
                 $envTypeValid = $true
                 Write-Host "  ✓ Using default: $($script:EnvironmentType)" -ForegroundColor Green
             }
-            elseif ($envInput.ToLower() -eq 'dev' -or $envInput.ToLower() -eq 'prd') {
+            elseif ($allowedEnvTypes -contains $envInput.ToLower()) {
                 $script:EnvironmentType = $envInput.ToLower()
                 $envTypeValid = $true
                 Write-Host "  ✓ Using: $($script:EnvironmentType)" -ForegroundColor Green
