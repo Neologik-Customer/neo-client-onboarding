@@ -164,7 +164,7 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 
 | Property | Value |
 |----------|-------|
-| **Name** | `kvneo{org}{env}{index}` |
+| **Name** | `kvneo{org}{env}{index}` (override with `-KeyVaultName`) |
 | **Authorization** | Microsoft Entra ID RBAC (no access policies) |
 | **Public Access** | Enabled |
 | **Soft Delete** | Enabled (Azure default) |

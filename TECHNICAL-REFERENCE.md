@@ -130,6 +130,7 @@ Or specify all parameters:
 | `AzureRegion` | String | `"uksouth"` | Azure region for resource deployment | Must be a valid Azure region name |
 | `TenantId` | String | (current) | Azure Tenant ID (optional, uses current context) | - |
 | `SubscriptionName` | String | `"Neologik-Development-01"` | Name for the Azure subscription |
+| `KeyVaultName` | String | (auto: `kvneo<org><env><index>`) | Override the Key Vault name | 3-24 chars; start with a letter, end with a letter or digit; letters, digits and hyphens only |
 | `SkipPowerShellUpdate` | Switch | `false` | Skip PowerShell version check and update |
 | `SkipModuleInstall` | Switch | `false` | Skip Azure module installation check |
 
@@ -183,6 +184,16 @@ This pre-fills several values and prompts for the rest.
     -SkipModuleInstall
 ```
 
+### Example 5: Override the Key Vault Name
+
+```powershell
+.\Install-NeologikEnvironment.ps1 `
+    -OrganizationCode "ABC" `
+    -KeyVaultName "kv-abc-shared"
+```
+
+By default the Key Vault is named `kvneo<org><env><index>` (e.g. `kvneoabcdev01`). Supply `-KeyVaultName` to use a name of your choosing instead. Omit it to accept the standard name.
+
 ## Interactive Configuration Flow
 
 When you run the script, you'll see a configuration setup screen that prompts for each value:
@@ -232,7 +243,7 @@ All resources are named to include your organization code and environment type f
 - **Admin User Group**: `Neologik Admin User Group - abc-dev`
 - **App Registration**: `Neologik GitHub Service Connection - abc-dev`
 - **Managed Identities**: `neologik-[type]-abc-dev`
-- **Key Vault**: `kvneo<org><env><index>` (e.g., kvneoabcdev01)
+- **Key Vault**: `kvneo<org><env><index>` (e.g., kvneoabcdev01); overridable via `-KeyVaultName`
 - **Storage Account**: `stneodeploy<org><env><region><index>` (e.g., stneodeployabcdevuks01)
 
 This naming convention makes it easy to identify which customer and environment each resource belongs to.
@@ -302,7 +313,7 @@ Creates:
 ### 6. Key Vault
 
 Creates:
-- **Key Vault**: `kvneo<org><env><index>` (e.g., kvneoabcdev01)
+- **Key Vault**: `kvneo<org><env><index>` (e.g., kvneoabcdev01), or the name supplied via `-KeyVaultName`
 - **RBAC Authorization**: Enabled (no access policies)
 - **Secrets Stored**:
   - Service principal client secret (automatic)
