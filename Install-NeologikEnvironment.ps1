@@ -106,6 +106,12 @@ $script:ProviderRegistrations = @{}
 $script:CheckpointFile = Join-Path $PSScriptRoot "NeologikCheckpoint.json"
 $script:CheckpointRegionAbbrev = $null
 
+# Key Vault name override. Track whether the operator supplied -KeyVaultName on THIS
+# invocation so that, on resume, a value saved in the checkpoint is preferred unless the
+# operator explicitly overrides it again on the command line.
+$script:KeyVaultNameFromCli = $PSBoundParameters.ContainsKey('KeyVaultName')
+$script:KeyVaultNameOverride = if ($script:KeyVaultNameFromCli) { $KeyVaultName } else { $null }
+
 # Load Neologik guest user emails from file
 $script:GuestUsersFile = Join-Path $PSScriptRoot "NeologikGuestUsers.txt"
 if (Test-Path $script:GuestUsersFile) {
@@ -279,6 +285,7 @@ function Save-Checkpoint {
         BotCount              = $script:BotCount
         BotConfigurations     = $script:BotConfigurations
         OutputFile            = $script:OutputFile
+        KeyVaultNameOverride  = $script:KeyVaultNameOverride
     }
 
     try {
@@ -342,6 +349,12 @@ function Restore-Checkpoint {
     $script:BotConfigurations      = $data.BotConfigurations
     $script:CheckpointRegionAbbrev = $data.RegionAbbrev
     $script:OutputFile             = $data.OutputFile
+
+    # Prefer the Key Vault name saved in the checkpoint, unless the operator explicitly
+    # supplied -KeyVaultName on this resume invocation (in which case the CLI value wins).
+    if (-not $script:KeyVaultNameFromCli -and -not [string]::IsNullOrWhiteSpace($data.KeyVaultNameOverride)) {
+        $script:KeyVaultNameOverride = $data.KeyVaultNameOverride
+    }
 }
 
 function Complete-OnboardingStep {
@@ -3831,10 +3844,11 @@ function Start-NeologikOnboarding {
             -SecurityGroups $securityGroups
 
         # Step 12: Create Key Vault and store client secret
-        if (-not [string]::IsNullOrWhiteSpace($KeyVaultName)) {
-            # Operator supplied an explicit Key Vault name at the command line — use it as-is.
-            $keyVaultName = $KeyVaultName
-            Write-Log "Using operator-supplied Key Vault name: $keyVaultName" -Level Info
+        if (-not [string]::IsNullOrWhiteSpace($script:KeyVaultNameOverride)) {
+            # Explicit Key Vault name (from -KeyVaultName this run, or carried over from the
+            # checkpoint on resume) — use it as-is.
+            $keyVaultName = $script:KeyVaultNameOverride
+            Write-Log "Using Key Vault name override: $keyVaultName" -Level Info
         }
         else {
             $keyVaultName = "kvneo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$($script:EnvironmentIndex)"

@@ -194,6 +194,8 @@ This pre-fills several values and prompts for the rest.
 
 By default the Key Vault is named `kvneo<org><env><index>` (e.g. `kvneoabcdev01`). Supply `-KeyVaultName` to use a name of your choosing instead. Omit it to accept the standard name.
 
+The chosen name is saved to the checkpoint, so if a run fails and you resume it, the same name is reused automatically — you do **not** need to pass `-KeyVaultName` again. If you *do* pass `-KeyVaultName` on a resume, the command-line value takes precedence over the saved one.
+
 ## Interactive Configuration Flow
 
 When you run the script, you'll see a configuration setup screen that prompts for each value:
