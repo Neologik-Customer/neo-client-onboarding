@@ -9,6 +9,44 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Version 1.10.0
+**Built**: June 25, 2026  
+**Git Tag**: v1.10.0  
+**Ticket**: https://github.com/Neologik-AI/project/issues/847
+
+### Major Changes
+- **Reduce deployment & admin subscription-scoped permissions** — the deployment service
+  connection and the Admin User Group no longer receive subscription-scoped Contributor. The
+  subscription-scoped setup that required it is now performed here during onboarding (run as the
+  subscription Owner), removing the standing grant from the deployment pipeline.
+
+### Infrastructure Changes
+- **Deploy service connection / GitHub service connection**: removed subscription roles
+  (Contributor + Cost Management Contributor); added resource-group **Contributor**. Keeps the
+  resource-group roles incl. Role Based Access Control Administrator. All deployment operations are
+  now resource-group-scoped.
+- **Admin User Group**: removed subscription-scoped Contributor; added resource-group
+  **Contributor** + **Azure Kubernetes Service Cluster Admin Role** (admin kubeconfig) alongside
+  the existing resource-group data-plane roles. (AKS control-plane start/stop/scale + the MC_ node
+  resource group are covered by RG-scoped Contributor; the node RG is managed by AKS itself.)
+- **Resource provider + preview-feature registration** performed here. New Step-6 prompt asks
+  whether to register the full provider set now (**default: No** — registers a minimal set; the
+  full set is then registered via the new `Register-NeologikResourceProviders.ps1`). Features
+  registered: `Microsoft.Compute/EncryptionAtHost`, `Microsoft.ContainerService/AzureLinuxCVMPreview`.
+- **Cost Management scheduled email** (daily cost report) created here (subscription-scoped, run as
+  Owner) instead of by the infrastructure deployment. New Step-6 prompt collects recipient(s)
+  (default `support_budget_alerts@neologik.ai`, or `none` to disable).
+
+### New Files
+- `Register-NeologikResourceProviders.ps1` — standalone full resource-provider + preview-feature
+  registration, for use when the operator opts out of registering the full set during onboarding.
+
+### Companion Change
+- `neo-infrastructure` (v4.6.0): removes the subscription-scoped operations from the AKS
+  deployment workflow and Bicep so they match this reduced-permission model.
+
+---
+
 ## Version 1.9.1
 **Built**: June 18, 2026  
 **Git Tag**: v1.9.1

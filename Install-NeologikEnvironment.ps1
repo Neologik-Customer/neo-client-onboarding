@@ -1429,7 +1429,7 @@ function Set-NeologikRoleAssignments {
         try {
             $null = Get-AzRoleAssignment -ObjectId $adminGroup.Id `
                 -RoleDefinitionName 'Contributor' `
-                -Scope $subScope `
+                -Scope $rgScope `
                 -ErrorAction Stop
         }
         catch {
@@ -1439,13 +1439,16 @@ function Set-NeologikRoleAssignments {
             throw "Insufficient permissions: Cannot verify role assignments"
         }
 
-        # Roles to assign at subscription scope
-        $subRoles = @(
-            'Contributor'
-        )
+        # No subscription-scoped roles. AKS administration is covered at RG scope by
+        # 'Contributor' (control plane: start/stop/scale/upgrade) plus 'Azure Kubernetes
+        # Service Cluster Admin Role' (admin kubeconfig). The AKS node resource group (MC_*)
+        # is managed by AKS itself, so admins need no standing subscription-scoped grant.
+        $subRoles = @()
 
         # Roles to assign at resource-group scope
         $rgRoles = @(
+            'Contributor',
+            'Azure Kubernetes Service Cluster Admin Role',
             'Key Vault Administrator',
             'Storage Blob Data Owner',
             'Storage Table Data Contributor',
@@ -1602,8 +1605,8 @@ function New-NeologikAppRegistration {
             ObjectId = $app.Id
             ServicePrincipalId = $sp.Id
             SecretExpiry = $secretEndDate.ToString('yyyy-MM-dd')
-            SubscriptionRoles = @('Contributor', 'Cost Management Contributor')
-            RGRoles = @('Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
+            SubscriptionRoles = @()
+            RGRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
             GraphAppRoles = @('Application.Read.All', 'Application.ReadWrite.OwnedBy')
         }
 
@@ -1795,8 +1798,12 @@ function Set-AppRegistrationRoles {
             }
         }
 
-        # Assign subscription roles
-        $roles = @('Contributor', 'Cost Management Contributor')
+        # No subscription-scoped roles for the deployment SP. Every pipeline operation is now
+        # RG-scoped: the cost-management scheduled email and provider/feature registration moved
+        # to this onboarding script (run as Owner), the resource group is pre-created here, and
+        # the Cognitive Services soft-delete purge was removed. RG-scoped Contributor (below)
+        # plus 'Role Based Access Control Administrator' cover the deployment.
+        $roles = @()
 
         foreach ($roleName in $roles) {
             Write-Log "Assigning $roleName role..." -Level Info
@@ -1881,7 +1888,7 @@ function Set-AppRegistrationRoles {
         # (paramCrResourceGroup != this RG), the kubelet AcrPull/Push assignment lands there and needs
         # a separate RBAC Administrator grant on that shared RG (one-time shared-infra setup).
         $rgScope = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName"
-        $rgRoles = @('Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
+        $rgRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
 
         foreach ($roleName in $rgRoles) {
             Write-Log "Assigning $roleName role at resource group scope..." -Level Info
@@ -2145,12 +2152,28 @@ function New-NeologikKeyVault {
 function Register-AllResourceProviders {
     <#
     .SYNOPSIS
-        Registers Microsoft.Compute resource provider for the subscription.
+        Registers all Azure resource providers and preview features required by the platform
+        deployment for the subscription.
+    .DESCRIPTION
+        Provider and feature registration is a one-time, subscription-scoped operation. It is
+        performed here during onboarding (run as the subscription Owner) so the deployment
+        service connection no longer needs subscription-scoped permission to register providers
+        or read provider/feature state. The AKS infrastructure workflow previously did this in a
+        'register-providers' job; that job has been removed.
     #>
     [CmdletBinding()]
-    param()
+    param(
+        # When $true (default) register the full provider set the platform deployment needs.
+        # When $false register only the minimal set this script created previously (Key Vault,
+        # Storage, etc.); the remaining providers must then be registered separately via
+        # Register-NeologikResourceProviders.ps1 before the infrastructure deployment runs.
+        [Parameter(Mandatory = $false)]
+        [bool]$RegisterAll = $true
+    )
 
-    $providers = @(
+    # Minimal provider set (the resources this onboarding script creates directly). Used when the
+    # operator opts out of registering the full platform provider set here.
+    $minimalProviders = @(
         'Microsoft.Compute',
         'Microsoft.KeyVault',
         'Microsoft.ManagedIdentity',
@@ -2158,7 +2181,51 @@ function Register-AllResourceProviders {
         'Microsoft.Storage'
     )
 
-    Write-Log "Registering all required Azure resource providers..." -Level Info
+    # Full provider set required across the platform deployment (mirrors the list previously
+    # registered by neo-infrastructure's register-providers job).
+    $allProviders = @(
+        'Microsoft.Resources',
+        'Microsoft.App',
+        'Microsoft.Automation',
+        'Microsoft.ManagedIdentity',
+        'Microsoft.CognitiveServices',
+        'Microsoft.DocumentDB',
+        'Microsoft.Network',
+        'Microsoft.ContainerRegistry',
+        'Microsoft.OperationalInsights',
+        'Microsoft.KeyVault',
+        'Microsoft.Insights',
+        'Microsoft.Search',
+        'Microsoft.Storage',
+        'Microsoft.ContainerService',
+        'Microsoft.ContainerInstance',
+        'Microsoft.Web',
+        'Microsoft.MachineLearningServices',
+        'Microsoft.AlertsManagement',
+        'Microsoft.BotService',
+        'Microsoft.Compute',
+        'Microsoft.Monitor',
+        'Microsoft.Quota',
+        'Microsoft.Diagnostics',
+        'Microsoft.ChangeSafety',
+        'Microsoft.Fabric',
+        'Microsoft.Help',
+        'Microsoft.ResourceHealth',
+        'Microsoft.SaaS',
+        'Microsoft.ServiceLinker',
+        'Microsoft.Sql'
+    )
+
+    if ($RegisterAll) {
+        $providers = $allProviders
+        Write-Log "Registering ALL required Azure resource providers..." -Level Info
+    }
+    else {
+        $providers = $minimalProviders
+        Write-Log "Registering MINIMAL Azure resource providers only (operator opted out of full set)." -Level Info
+        Write-Host "  ⚠️  Only minimal providers will be registered. Before deploying the platform," -ForegroundColor Yellow
+        Write-Host "      register the full set with Register-NeologikResourceProviders.ps1." -ForegroundColor Yellow
+    }
 
     foreach ($provider in $providers) {
         # Skip providers already confirmed registered in a previous run (checkpoint)
@@ -2233,6 +2300,179 @@ function Register-AllResourceProviders {
         }
     } catch {
         Write-Log "Failed to register Microsoft.Compute/EncryptionAtHost feature: $_" -Level Warning
+    }
+
+    # AzureLinuxCVMPreview lives under Microsoft.ContainerService, which is only registered in the
+    # full provider set; skip it in minimal mode (it will be registered by
+    # Register-NeologikResourceProviders.ps1 alongside the full provider set).
+    if (-not $RegisterAll) {
+        Write-Log "Skipping AzureLinuxCVMPreview feature registration (minimal provider mode)" -Level Info
+        return
+    }
+
+    # Register Microsoft.ContainerService/AzureLinuxCVMPreview feature. Confidential (DC-series)
+    # node SKUs make AKS resolve osSKU=AzureLinux -> AzureLinuxV3+CVM, which is gated behind this
+    # preview flag. The node SKU is chosen later via the environment variables file (not known at
+    # onboarding time), so the feature is registered unconditionally here — registering an unused
+    # preview flag has no cost or effect, and avoids the deploy failing preflight with InvalidOSSKU.
+    Write-Log "Checking Microsoft.ContainerService/AzureLinuxCVMPreview feature registration..." -Level Info
+    try {
+        $feature = Get-AzProviderFeature -ProviderNamespace 'Microsoft.ContainerService' -FeatureName 'AzureLinuxCVMPreview' -ErrorAction Stop
+        if ($feature.RegistrationState -eq 'Registered') {
+            Write-Log "Microsoft.ContainerService/AzureLinuxCVMPreview feature is already registered" -Level Info
+        } else {
+            Write-Log "Registering Microsoft.ContainerService/AzureLinuxCVMPreview feature..." -Level Info
+            Register-AzProviderFeature -ProviderNamespace 'Microsoft.ContainerService' -FeatureName 'AzureLinuxCVMPreview' -ErrorAction Stop | Out-Null
+
+            # Wait up to 10 minutes for feature registration
+            $maxRetries = 20
+            $waitSeconds = 30
+            for ($i = 0; $i -lt $maxRetries; $i++) {
+                Start-Sleep -Seconds $waitSeconds
+                $feature = Get-AzProviderFeature -ProviderNamespace 'Microsoft.ContainerService' -FeatureName 'AzureLinuxCVMPreview' -ErrorAction Stop
+                Write-Host "  ⏳ AzureLinuxCVMPreview: $($feature.RegistrationState) ($($i + 1)/$maxRetries)..." -ForegroundColor Gray
+                Write-Log "AzureLinuxCVMPreview feature status: $($feature.RegistrationState)" -Level Info
+                if ($feature.RegistrationState -eq 'Registered') {
+                    Register-AzResourceProvider -ProviderNamespace 'Microsoft.ContainerService' -ErrorAction Stop | Out-Null
+                    Write-Log "Microsoft.ContainerService/AzureLinuxCVMPreview feature registered successfully" -Level Success
+                    break
+                }
+            }
+            if ($feature.RegistrationState -ne 'Registered') {
+                Write-Log "Microsoft.ContainerService/AzureLinuxCVMPreview feature registration timed out — check Azure portal for status" -Level Warning
+            }
+        }
+    } catch {
+        Write-Log "Failed to register Microsoft.ContainerService/AzureLinuxCVMPreview feature: $_" -Level Warning
+    }
+}
+
+function Set-NeologikCostManagementEmail {
+    <#
+    .SYNOPSIS
+        Creates the subscription-scoped Cost Management scheduled email (daily cost report) for
+        the environment, run as the subscription Owner during onboarding.
+    .DESCRIPTION
+        Previously provisioned by neo-infrastructure (modCostManagementScheduledEmail.bicep) as a
+        subscription-scoped Bicep module, which forced the deployment service connection to hold
+        subscription-scoped Contributor (Resources/deployments write at subscription scope).
+        Creating it here removes that requirement. Mirrors the Bicep: skips Sponsorship/Student
+        subscriptions, creates one private cost view plus one scheduled action per recipient.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]  [string]$SubscriptionId,
+        [Parameter(Mandatory = $true)]  [string]$SolutionName,
+        [Parameter(Mandatory = $false)] [string[]]$EmailAddresses = @(),
+        [Parameter(Mandatory = $false)] [string]$Frequency = 'Daily'
+    )
+
+    if (-not $EmailAddresses -or $EmailAddresses.Count -eq 0) {
+        Write-Log "No budget cost-report email addresses configured - skipping Cost Management scheduled email" -Level Info
+        return
+    }
+
+    # Cost Management scheduled actions are not supported on Sponsorship/Student subscriptions
+    $subName = (Get-AzContext).Subscription.Name
+    if ($subName -and ($subName.ToLower() -match 'sponsorship|student')) {
+        Write-Log "Subscription '$subName' is Sponsorship/Student - Cost Management schedules not supported, skipping" -Level Warning
+        return
+    }
+
+    Write-Log "Configuring Cost Management scheduled email report..." -Level Info
+
+    $subScope   = "/subscriptions/$SubscriptionId"
+    $apiVersion = '2023-11-01'
+
+    # Private cost view (names truncated to 25 chars to match the Bicep)
+    $viewName = "daily-costs-$SolutionName"
+    if ($viewName.Length -gt 25) { $viewName = $viewName.Substring(0, 25) }
+    $viewDisplay = "Costs - $SolutionName"
+    if ($viewDisplay.Length -gt 25) { $viewDisplay = $viewDisplay.Substring(0, 25) }
+
+    $viewBody = @{
+        properties = @{
+            displayName = $viewDisplay
+            scope       = $subScope
+            chart       = 'StackedColumn'
+            accumulated = 'false'
+            metric      = 'ActualCost'
+            kpis        = @()
+            pivots      = @(
+                @{ type = 'Dimension'; name = 'ServiceName' },
+                @{ type = 'Dimension'; name = 'ResourceGroupName' },
+                @{ type = 'Dimension'; name = 'ResourceLocation' }
+            )
+            dateRange   = 'MonthToDate'
+            query       = @{
+                type    = 'ActualCost'
+                dataSet = @{
+                    granularity = 'Daily'
+                    aggregation = @{ totalCost = @{ name = 'Cost'; function = 'Sum' } }
+                    grouping    = @(@{ type = 'Dimension'; name = 'ResourceId' })
+                }
+                timeframe = 'MonthToDate'
+            }
+        }
+    } | ConvertTo-Json -Depth 12
+
+    $viewPath = "$subScope/providers/Microsoft.CostManagement/views/$viewName`?api-version=$apiVersion"
+    try {
+        $resp = Invoke-AzRestMethod -Method PUT -Path $viewPath -Payload $viewBody -ErrorAction Stop
+        if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) {
+            Write-Log "Cost Management view '$viewName' created/updated" -Level Success
+        }
+        else {
+            Write-Log "Cost Management view creation returned HTTP $($resp.StatusCode): $($resp.Content)" -Level Warning
+            return
+        }
+    }
+    catch {
+        Write-Log "Failed to create Cost Management view: $_" -Level Warning
+        return
+    }
+
+    $viewId    = "$subScope/providers/Microsoft.CostManagement/views/$viewName"
+    $startDate = (Get-Date).ToString('yyyy-MM-dd')
+    $endDate   = (Get-Date).AddDays(364).ToString('yyyy-MM-dd')
+
+    $index = 0
+    foreach ($email in $EmailAddresses) {
+        $index++
+        $actionName = "schedule-cost-email-$SolutionName-$index"
+        $actionBody = @{
+            kind       = 'Email'
+            properties = @{
+                displayName       = "$Frequency Cost Report - $SolutionName ($index)"
+                status            = 'Enabled'
+                viewId            = $viewId
+                schedule          = @{
+                    frequency = $Frequency
+                    startDate = "${startDate}T00:00:00Z"
+                    endDate   = "${endDate}T23:59:59Z"
+                }
+                notificationEmail = $email
+                notification      = @{
+                    to      = @($email)
+                    subject = "Azure $Frequency Cost Report - $SolutionName"
+                }
+                scope             = $subScope
+            }
+        } | ConvertTo-Json -Depth 12
+
+        $actionPath = "$subScope/providers/Microsoft.CostManagement/scheduledActions/$actionName`?api-version=$apiVersion"
+        try {
+            $resp = Invoke-AzRestMethod -Method PUT -Path $actionPath -Payload $actionBody -ErrorAction Stop
+            if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) {
+                Write-Log "Cost report scheduled action '$actionName' created for $email" -Level Success
+            }
+            else {
+                Write-Log "Scheduled action creation returned HTTP $($resp.StatusCode): $($resp.Content)" -Level Warning
+            }
+        }
+        catch {
+            Write-Log "Failed to create scheduled action for ${email}: $_" -Level Warning
+        }
     }
 }
 
@@ -3779,6 +4019,72 @@ function Start-NeologikOnboarding {
         $script:ConfigData['BotCount'] = $script:BotCount
         $script:ConfigData['Bots'] = $script:BotConfigurations
 
+        # Get Budget Cost-Report Email Recipient(s)
+        # A daily Azure Cost Management report is emailed to these addresses. This used to be
+        # provisioned by the infrastructure deployment as a subscription-scoped Bicep module; it
+        # is now created here (run as Owner) so the deployment service connection needs no
+        # subscription-scoped role. Leave blank / 'none' to disable.
+        $defaultBudgetEmail = 'support_budget_alerts@neologik.ai'
+        $budgetEmailsValid = $false
+        $budgetEmails = @()
+        while (-not $budgetEmailsValid) {
+            Write-Host ""
+            Write-Host "Budget Cost-Report Email Recipient(s):" -ForegroundColor Cyan
+            Write-Host "  A daily Azure cost report is emailed to these address(es)." -ForegroundColor Gray
+            Write-Host "  Enter one or more email addresses separated by commas, or 'none' to disable." -ForegroundColor Gray
+            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+            Write-Host $defaultBudgetEmail -ForegroundColor Yellow
+            Write-Host "  Press Enter for default, type address(es), or 'none' to disable: " -NoNewline -ForegroundColor Gray
+            $budgetEmailInput = Read-Host
+
+            if ([string]::IsNullOrWhiteSpace($budgetEmailInput)) {
+                $budgetEmails = @($defaultBudgetEmail)
+            }
+            elseif ($budgetEmailInput.Trim().ToLower() -eq 'none') {
+                $budgetEmails = @()
+            }
+            else {
+                $budgetEmails = @($budgetEmailInput -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            }
+
+            $invalidEmails = @($budgetEmails | Where-Object { $_ -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$' })
+            if ($invalidEmails.Count -gt 0) {
+                Write-Host "  ✗ Invalid email address(es): $($invalidEmails -join ', '). Please try again." -ForegroundColor Red
+                continue
+            }
+
+            $budgetEmailsValid = $true
+            if ($budgetEmails.Count -eq 0) {
+                Write-Host "  ✓ Cost-report email disabled" -ForegroundColor Green
+            }
+            else {
+                Write-Host "  ✓ Using: $($budgetEmails -join ', ')" -ForegroundColor Green
+            }
+        }
+        $script:ConfigData['BudgetEmailAddresses'] = $budgetEmails
+        $script:ConfigData['BudgetEmailFrequency'] = 'Daily'
+
+        # Ask whether to register the full Azure resource provider set now.
+        # Default: No — register only the minimal providers this script needs; the full platform
+        # provider set is registered separately via Register-NeologikResourceProviders.ps1 before
+        # the infrastructure deployment runs.
+        Write-Host ""
+        Write-Host "Register ALL Azure resource providers now?" -ForegroundColor Cyan
+        Write-Host "  The full platform deployment needs ~30 resource providers registered on the" -ForegroundColor Gray
+        Write-Host "  subscription. You can register them now, or skip and run" -ForegroundColor Gray
+        Write-Host "  Register-NeologikResourceProviders.ps1 separately before deploying." -ForegroundColor Gray
+        Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+        Write-Host "N (register the minimal set only)" -ForegroundColor Yellow
+        Write-Host "  Register all now? (y/N): " -NoNewline -ForegroundColor Gray
+        $registerAllInput = Read-Host
+        $script:ConfigData['RegisterAllProviders'] = ($registerAllInput -match '^[Yy]')
+        if ($script:ConfigData['RegisterAllProviders']) {
+            Write-Host "  ✓ Will register the full provider set" -ForegroundColor Green
+        }
+        else {
+            Write-Host "  ✓ Will register the minimal set only — run Register-NeologikResourceProviders.ps1 before deploying" -ForegroundColor Green
+        }
+
         # Calculate solution names based on configuration
         $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
         $script:ConfigData['SolutionShortName'] = "neo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
@@ -3805,6 +4111,10 @@ function Start-NeologikOnboarding {
         foreach ($bot in $script:BotConfigurations) {
             Write-Host "  Bot:                  " -NoNewline; Write-Host "$($bot.AgentName) (short: $($bot.ShortName))" -ForegroundColor Yellow
         }
+        $budgetEmailSummary = if ($script:ConfigData['BudgetEmailAddresses'].Count -gt 0) { $script:ConfigData['BudgetEmailAddresses'] -join ', ' } else { '(disabled)' }
+        Write-Host "  Cost-Report Email:    " -NoNewline; Write-Host $budgetEmailSummary -ForegroundColor Yellow
+        $providerSummary = if ($script:ConfigData['RegisterAllProviders']) { 'All providers' } else { 'Minimal set (run Register-NeologikResourceProviders.ps1 before deploying)' }
+        Write-Host "  Provider Registration:" -NoNewline; Write-Host " $providerSummary" -ForegroundColor Yellow
         Write-Host ""
         Write-Host "Press Enter to continue with these settings, or Ctrl+C to cancel..." -ForegroundColor Yellow
         Read-Host
@@ -3872,9 +4182,18 @@ function Start-NeologikOnboarding {
             -SecurityGroups $securityGroups `
             -SubscriptionId $script:ConfigData['SubscriptionId']
 
-        # Step 13: Register all required Azure resource providers
-        Register-AllResourceProviders
+        # Step 13: Register required Azure resource providers (full set unless the operator
+        # opted out, in which case only the minimal set is registered here and the rest must be
+        # registered separately via Register-NeologikResourceProviders.ps1).
+        Register-AllResourceProviders -RegisterAll:$script:ConfigData['RegisterAllProviders']
         Complete-OnboardingStep 'ResourceProviders'
+
+        # Step 13b: Configure subscription-scoped Cost Management scheduled email (run as Owner)
+        Set-NeologikCostManagementEmail -SubscriptionId $script:ConfigData['SubscriptionId'] `
+            -SolutionName $script:ConfigData['SolutionName'] `
+            -EmailAddresses $script:ConfigData['BudgetEmailAddresses'] `
+            -Frequency $script:ConfigData['BudgetEmailFrequency']
+        Complete-OnboardingStep 'CostManagementEmail'
 
         # Step 14: Create Storage Account and blob container for certificates
         $storageAccountName = "stneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
