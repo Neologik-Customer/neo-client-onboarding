@@ -1654,6 +1654,13 @@ function Grant-GraphAppRolePermissions {
     $knownGraphAppRoleIds = @{
         'Application.Read.All'          = '9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30'
         'Application.ReadWrite.OwnedBy' = '18a4783c-866b-4cc7-a460-3d5e5662c884'
+        # Microsoft Entra Agent ID (GA) — let the deployment SP provision agent identity
+        # blueprints (+ principal + FIC) for autonomous agents, scoped to agent-id only
+        # rather than the broad 'Agent ID Administrator' directory role.
+        'AgentIdentityBlueprint.Create'                  = 'ea4b2453-ad2d-4d94-9155-10d5d9493ce9'
+        'AgentIdentityBlueprint.AddRemoveCreds.All'      = '0510736e-bdfb-4b37-9a1f-89b4a074763a'
+        'AgentIdentityBlueprint.UpdateAuthProperties.All' = '19202363-278e-49c2-bf00-391e2ba00881'
+        'AgentIdentityBlueprintPrincipal.Create'         = '8959696d-d07e-4916-9b1e-3ba9ce459161'
     }
 
     Write-Log "Granting Microsoft Graph app permissions ($($AppRoles -join ', ')) to $PrincipalDescription..." -Level Info
@@ -1939,7 +1946,18 @@ function Set-AppRegistrationRoles {
         # Grant lower-scoped Microsoft Graph application permissions to the service principal.
         # Replaces the tenant-wide 'Application Administrator' Entra directory role with
         # Application.Read.All + Application.ReadWrite.OwnedBy (manage owned apps only).
-        Grant-GraphAppRolePermissions -PrincipalId $ServicePrincipalId -PrincipalDescription 'App Registration service principal'
+        # Also grants the granular Microsoft Entra Agent ID permissions so the deployment SP
+        # can provision agent identity blueprints (+ principal + FIC) for autonomous agents,
+        # without the broad 'Agent ID Administrator' directory role (keeps the reduced model).
+        Grant-GraphAppRolePermissions -PrincipalId $ServicePrincipalId -PrincipalDescription 'App Registration service principal' `
+            -AppRoles @(
+                'Application.Read.All',
+                'Application.ReadWrite.OwnedBy',
+                'AgentIdentityBlueprint.Create',
+                'AgentIdentityBlueprint.AddRemoveCreds.All',
+                'AgentIdentityBlueprint.UpdateAuthProperties.All',
+                'AgentIdentityBlueprintPrincipal.Create'
+            )
 
         # Update ConfigData with group membership
         if ($script:ConfigData['AppRegistration'] -and $adminGroup) {

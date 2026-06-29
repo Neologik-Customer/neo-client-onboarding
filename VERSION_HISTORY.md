@@ -9,6 +9,26 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Version NEXT
+**Branch**: `feature/ideas-agent`
+**Status**: Pending
+
+### Features
+- **Microsoft Entra Agent ID permissions for the deployment SP** — the deployment service
+  principal is now granted the granular Graph application permissions
+  `AgentIdentityBlueprint.Create`, `AgentIdentityBlueprint.AddRemoveCreds.All`,
+  `AgentIdentityBlueprint.UpdateAuthProperties.All`, and `AgentIdentityBlueprintPrincipal.Create`,
+  so it can provision agent identity blueprints (+ principal + FIC) for autonomous agents
+  (e.g. the ideas agent). Chosen over the broad `Agent ID Administrator` directory role to stay
+  consistent with the reduced-permission model (granular app perms, not directory roles).
+
+### Files Changed
+- Modified: [Install-NeologikEnvironment.ps1](Install-NeologikEnvironment.ps1) — added the four
+  `AgentIdentityBlueprint*` app role IDs to `Grant-GraphAppRolePermissions` and granted them to
+  the deployment SP.
+
+---
+
 ## Version 1.10.1
 **Built**: June 29, 2026  
 **Git Tag**: v1.10.1
