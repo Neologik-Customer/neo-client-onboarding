@@ -127,6 +127,7 @@ if (Test-Path $script:GuestUsersFile) {
 $script:RequiredModules = @(
     @{ Name = 'Az.Accounts'; MinVersion = '3.0.0' },
     @{ Name = 'Az.Resources'; MinVersion = '7.0.0' },
+    @{ Name = 'Az.Compute'; MinVersion = '7.0.0' },
     @{ Name = 'Az.KeyVault'; MinVersion = '5.0.0' },
     @{ Name = 'Az.Storage'; MinVersion = '6.0.0' },
     @{ Name = 'Az.ManagedServiceIdentity'; MinVersion = '1.0.0' },

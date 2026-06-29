@@ -9,6 +9,22 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Version 1.10.1
+**Built**: June 29, 2026  
+**Git Tag**: v1.10.1
+
+### Fixes
+- **vCPU quota pre-flight check** — added `Az.Compute` to the required modules list so `Get-AzVMUsage` resolves. Previously the cmdlet was unavailable (its module was never installed), so the quota check silently degraded to a warning and never actually ran.
+
+### Files Changed
+- Modified: [Install-NeologikEnvironment.ps1](Install-NeologikEnvironment.ps1) — added `Az.Compute` (min 7.0.0) to `$script:RequiredModules`
+- Modified: [VERSION_HISTORY.md](VERSION_HISTORY.md) — this entry
+
+### Breaking Changes
+- None
+
+---
+
 ## Version 1.10.0
 **Built**: June 25, 2026  
 **Git Tag**: v1.10.0  
