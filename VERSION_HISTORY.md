@@ -17,15 +17,16 @@ This document tracks the version history of the Neologik customer onboarding scr
 - **Microsoft Entra Agent ID permissions for the deployment SP** — the deployment service
   principal is now granted the granular Graph application permissions
   `AgentIdentityBlueprint.Create`, `AgentIdentityBlueprint.AddRemoveCreds.All`,
-  `AgentIdentityBlueprint.UpdateAuthProperties.All`, and `AgentIdentityBlueprintPrincipal.Create`,
-  so it can provision agent identity blueprints (+ principal + FIC) for autonomous agents
-  (e.g. the ideas agent). Chosen over the broad `Agent ID Administrator` directory role to stay
-  consistent with the reduced-permission model (granular app perms, not directory roles).
+  `AgentIdentityBlueprint.UpdateAuthProperties.All`, `AgentIdentityBlueprintPrincipal.Create`,
+  and `AgentIdUser.ReadWrite.All`, so it can provision agent identity blueprints (+ principal +
+  FIC) **and mint each autonomous bot's agent identity + agent user** (e.g. the ideas agent).
+  Chosen over the broad `Agent ID Administrator` directory role to stay consistent with the
+  reduced-permission model (granular app perms, not directory roles).
 
 ### Files Changed
 - Modified: [Install-NeologikEnvironment.ps1](Install-NeologikEnvironment.ps1) — added the four
-  `AgentIdentityBlueprint*` app role IDs to `Grant-GraphAppRolePermissions` and granted them to
-  the deployment SP.
+  `AgentIdentityBlueprint*` app role IDs plus `AgentIdUser.ReadWrite.All` to
+  `Grant-GraphAppRolePermissions` and granted them to the deployment SP.
 
 ---
 

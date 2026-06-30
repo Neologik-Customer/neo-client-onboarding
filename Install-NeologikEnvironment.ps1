@@ -1661,6 +1661,9 @@ function Grant-GraphAppRolePermissions {
         'AgentIdentityBlueprint.AddRemoveCreds.All'      = '0510736e-bdfb-4b37-9a1f-89b4a074763a'
         'AgentIdentityBlueprint.UpdateAuthProperties.All' = '19202363-278e-49c2-bf00-391e2ba00881'
         'AgentIdentityBlueprintPrincipal.Create'         = '8959696d-d07e-4916-9b1e-3ba9ce459161'
+        # Create the agent USER (directory user) hung off an agent identity. The SP creates agent
+        # identities as blueprint owner without a role, but agent-user creation needs this.
+        'AgentIdUser.ReadWrite.All'                      = 'b782c9ad-6f2b-4894-a21b-72bf22417f0a'
     }
 
     Write-Log "Granting Microsoft Graph app permissions ($($AppRoles -join ', ')) to $PrincipalDescription..." -Level Info
@@ -1956,7 +1959,8 @@ function Set-AppRegistrationRoles {
                 'AgentIdentityBlueprint.Create',
                 'AgentIdentityBlueprint.AddRemoveCreds.All',
                 'AgentIdentityBlueprint.UpdateAuthProperties.All',
-                'AgentIdentityBlueprintPrincipal.Create'
+                'AgentIdentityBlueprintPrincipal.Create',
+                'AgentIdUser.ReadWrite.All'
             )
 
         # Update ConfigData with group membership
