@@ -28,6 +28,14 @@ This document tracks the version history of the Neologik customer onboarding scr
   `AgentIdentityBlueprint*` app role IDs plus `AgentIdUser.ReadWrite.All` to
   `Grant-GraphAppRolePermissions` and granted them to the deployment SP.
 
+### ⚠️ Migration — already-onboarded environments
+This grant only runs for **newly-onboarded** environments. Environments onboarded **before** this
+change have a reduced deploy SP without these roles, and cannot self-grant. Before enabling an
+autonomous bot (`BOT<N>_AUTONOMOUS=true`) on such an env, a Global Admin must perform a **one-off
+backfill** of the Agent ID roles, or the first autonomous deploy fails. See
+`neo-infrastructure/docs/agent-identity-blueprint.md` → *Backfilling an already-onboarded environment*.
+dev03 was backfilled 2026-06-30.
+
 ---
 
 ## Version 1.10.1
