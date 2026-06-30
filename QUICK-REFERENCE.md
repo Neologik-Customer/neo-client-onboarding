@@ -155,6 +155,15 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 | **Role Based Access Control Administrator** | Resource Group | Service Principal |
 | **Application.Read.All** | Microsoft Graph (app role) | Service Principal |
 | **Application.ReadWrite.OwnedBy** | Microsoft Graph (app role) | Service Principal |
+| **AgentIdentityBlueprint.Create** | Microsoft Graph (app role) | Service Principal |
+| **AgentIdentityBlueprint.AddRemoveCreds.All** | Microsoft Graph (app role) | Service Principal |
+| **AgentIdentityBlueprint.UpdateAuthProperties.All** | Microsoft Graph (app role) | Service Principal |
+| **AgentIdentityBlueprintPrincipal.Create** | Microsoft Graph (app role) | Service Principal |
+| **AgentIdUser.ReadWrite.All** | Microsoft Graph (app role) | Service Principal |
+
+> The five **AgentIdentity\*/AgentIdUser** roles let the deployment service principal provision **Microsoft
+> Entra Agent ID** blueprints, principals, and agent users for autonomous bots — scoped to agent-id only,
+> rather than granting the broad "Agent ID Administrator" directory role.
 
 ---
 
@@ -263,6 +272,11 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 |-----------|------|
 | Service Principal (GitHub) | Application.Read.All |
 | Service Principal (GitHub) | Application.ReadWrite.OwnedBy |
+| Service Principal (GitHub) | AgentIdentityBlueprint.Create |
+| Service Principal (GitHub) | AgentIdentityBlueprint.AddRemoveCreds.All |
+| Service Principal (GitHub) | AgentIdentityBlueprint.UpdateAuthProperties.All |
+| Service Principal (GitHub) | AgentIdentityBlueprintPrincipal.Create |
+| Service Principal (GitHub) | AgentIdUser.ReadWrite.All |
 
 ### Entra ID (Directory Roles)
 | Principal | Role |
