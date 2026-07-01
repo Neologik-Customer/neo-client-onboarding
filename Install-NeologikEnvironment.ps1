@@ -495,6 +495,36 @@ function Install-RequiredModules {
 
 #region Azure Authentication
 
+function Invoke-AzConnect {
+    <#
+    .SYNOPSIS
+        Connects to Azure using interactive browser authentication, falling back
+        to device code authentication when a browser is unavailable (e.g. headless
+        or SSH sessions).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$TenantId
+    )
+
+    $connectParams = @{ ErrorAction = 'Stop' }
+    if ($TenantId) {
+        $connectParams['TenantId'] = $TenantId
+    }
+
+    try {
+        Write-Host "`nℹ️  A browser window will open for Azure login.`n" -ForegroundColor Cyan
+        return Connect-AzAccount @connectParams
+    }
+    catch {
+        Write-Log "Interactive browser authentication failed: $($_.Exception.Message)" -Level Warning
+        Write-Log "Falling back to device code authentication" -Level Info
+        Write-Host "`nℹ️  A code will be displayed. Visit the URL and enter the code to authenticate.`n" -ForegroundColor Cyan
+        return Connect-AzAccount @connectParams -UseDeviceAuthentication
+    }
+}
+
 function Connect-AzureEnvironment {
     <#
     .SYNOPSIS
@@ -523,17 +553,9 @@ function Connect-AzureEnvironment {
                 Write-Log "Force re-authentication requested" -Level Info
             }
             
-            # Connect to Azure using device code authentication
+            # Connect to Azure (interactive browser, falling back to device code)
             Write-Log "Authenticating to Azure..." -Level Info
-            Write-Host "`nℹ️  Using device code authentication for Azure login." -ForegroundColor Cyan
-            Write-Host "A code will be displayed. Visit the URL and enter the code to authenticate.`n" -ForegroundColor Cyan
-            
-            if ($TenantId) {
-                $azContext = Connect-AzAccount -TenantId $TenantId -UseDeviceAuthentication -ErrorAction Stop
-            }
-            else {
-                $azContext = Connect-AzAccount -UseDeviceAuthentication -ErrorAction Stop
-            }
+            $azContext = Invoke-AzConnect -TenantId $TenantId
             Write-Log "Connected to Azure as $($azContext.Context.Account.Id)" -Level Success
         }
         elseif ($currentContext -and $currentContext.Account) {
@@ -542,7 +564,7 @@ function Connect-AzureEnvironment {
             # If TenantId is specified and different, reconnect
             if ($TenantId -and $currentContext.Tenant.Id -ne $TenantId) {
                 Write-Log "Switching to specified tenant: $TenantId" -Level Info
-                $azContext = Connect-AzAccount -TenantId $TenantId -UseDeviceAuthentication -ErrorAction Stop
+                $azContext = Invoke-AzConnect -TenantId $TenantId
             }
             else {
                 $azContext = [PSCustomObject]@{
@@ -3483,7 +3505,7 @@ function Start-NeologikOnboarding {
         # Get Bot Names (Agent Name and Short Name for each bot)
         $script:BotConfigurations = @()
         for ($i = 1; $i -le $script:BotCount; $i++) {
-            $defaultAgentName = if ($i -eq 1) { "bot" } else { "bot$i" }
+            $defaultAgentName = if ($i -eq 1) { "Neologik" } else { "Neologik $i" }
             $agentNameValid = $false
             $agentName = ""
             
