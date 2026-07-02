@@ -2845,6 +2845,176 @@ function Get-PromptLabel {
     return "Default: "
 }
 
+function Test-AnswerFileComplete {
+    <#
+    .SYNOPSIS
+        True when the answer file supplies every value that has no built-in default, so the
+        configuration can be shown as a summary up front without prompting field-by-field.
+    #>
+    [CmdletBinding()]
+    param()
+
+    if ($null -eq $script:Answers -or $script:Answers.Count -eq 0) { return $false }
+
+    # Fields with no built-in default must be present.
+    foreach ($key in @('organizationCode', 'organizationName', 'fqdn')) {
+        if (-not (Get-Answer $key)) { return $false }
+    }
+
+    # Every bot the script will ask about must have both names (no built-in defaults).
+    $bots = @(Get-Answer 'bots')
+    if ($bots.Count -eq 0) { return $false }
+    $botCountAns = Get-Answer 'botCount'
+    if ($botCountAns -and "$botCountAns" -match '^\d+$' -and [int]"$botCountAns" -ge 1 -and [int]"$botCountAns" -le 10) {
+        $needed = [int]"$botCountAns"
+    } else {
+        $needed = 1
+    }
+    if ($bots.Count -lt $needed) { return $false }
+    for ($j = 0; $j -lt $needed; $j++) {
+        if (-not $bots[$j]) { return $false }
+        if ([string]::IsNullOrWhiteSpace([string]$bots[$j].agentName)) { return $false }
+        if ([string]::IsNullOrWhiteSpace([string]$bots[$j].shortName)) { return $false }
+    }
+    return $true
+}
+
+function Get-CafRegionCodes {
+    <#
+    .SYNOPSIS
+        Microsoft Cloud Adoption Framework (CAF) region -> abbreviation map. Static; no Azure call.
+        Reference: https://learn.microsoft.com/azure/cloud-adoption-framework/ready/azure-best-practices/resource-abbreviations
+    #>
+    return @{
+        # Americas
+        'eastus' = 'eus'; 'eastus2' = 'eus2'; 'westus' = 'wus'; 'westus2' = 'wus2'; 'westus3' = 'wus3'
+        'centralus' = 'cus'; 'northcentralus' = 'ncus'; 'southcentralus' = 'scus'; 'westcentralus' = 'wcus'
+        'canadacentral' = 'cac'; 'canadaeast' = 'cae'; 'brazilsouth' = 'brs'; 'brazilsoutheast' = 'brse'
+        'brazilus' = 'bru'; 'mexicocentral' = 'mxc'; 'chilecentral' = 'clc'
+        # Europe
+        'northeurope' = 'neu'; 'westeurope' = 'weu'; 'uksouth' = 'uks'; 'ukwest' = 'ukw'
+        'francecentral' = 'frc'; 'francesouth' = 'frs'; 'germanywestcentral' = 'gwc'; 'germanynorth' = 'gno'
+        'norwayeast' = 'noe'; 'norwaywest' = 'now'; 'swedencentral' = 'sdc'; 'swedensouth' = 'sds'
+        'switzerlandnorth' = 'szn'; 'switzerlandwest' = 'szw'; 'italynorth' = 'itn'; 'polandcentral' = 'plc'
+        'spaincentral' = 'spc'; 'austriaeast' = 'ate'; 'belgiumcentral' = 'bec'
+        # Asia Pacific
+        'eastasia' = 'eas'; 'southeastasia' = 'seas'; 'australiaeast' = 'aue'; 'australiasoutheast' = 'ause'
+        'australiacentral' = 'auc'; 'australiacentral2' = 'auc2'; 'japaneast' = 'jpe'; 'japanwest' = 'jpw'
+        'koreacentral' = 'krc'; 'koreasouth' = 'krs'; 'centralindia' = 'inc'; 'southindia' = 'ins'
+        'westindia' = 'inw'; 'jioindiawest' = 'jiw'; 'jioindiacentral' = 'jic'; 'indonesiacentral' = 'idc'
+        'malaysiawest' = 'myw'; 'newzealandnorth' = 'nzn'
+        # Middle East & Africa
+        'southafricanorth' = 'san'; 'southafricawest' = 'saw'; 'uaenorth' = 'uan'; 'uaecentral' = 'uac'
+        'qatarcentral' = 'qac'; 'israelcentral' = 'ilc'
+        # China (special subscription)
+        'chinanorth' = 'cnn'; 'chinanorth2' = 'cnn2'; 'chinanorth3' = 'cnn3'
+        'chinaeast' = 'cne'; 'chinaeast2' = 'cne2'; 'chinaeast3' = 'cne3'
+        # Government (special subscription)
+        'usgovvirginia' = 'ugv'; 'usgovarizona' = 'uga'; 'usgovtexas' = 'ugt'; 'usdodeast' = 'ude'; 'usdodcentral' = 'udc'
+        # EUAP
+        'centraluseuap' = 'cuse'; 'eastus2euap' = 'eus2e'
+        # Geographic groups (returned by Azure API, not for deployment)
+        'asia' = 'asia'; 'asiapacific' = 'apac'; 'australia' = 'au'; 'brazil' = 'br'; 'canada' = 'ca'
+        'europe' = 'eu'; 'france' = 'fr'; 'germany' = 'de'; 'global' = 'global'; 'india' = 'in'
+        'indonesia' = 'id'; 'israel' = 'il'; 'italy' = 'it'; 'japan' = 'jp'; 'korea' = 'kr'
+        'malaysia' = 'my'; 'mexico' = 'mx'; 'newzealand' = 'nz'; 'norway' = 'no'; 'poland' = 'pl'
+        'qatar' = 'qa'; 'singapore' = 'sg'; 'southafrica' = 'za'; 'spain' = 'es'; 'sweden' = 'se'
+        'switzerland' = 'ch'; 'taiwan' = 'tw'; 'unitedstates' = 'us'
+    }
+}
+
+function Set-ConfigFromAnswerFile {
+    <#
+    .SYNOPSIS
+        Populates and validates all configuration from inputs.json WITHOUT prompting, deriving
+        names from the static CAF region map (no Azure region retrieval). Throws on any invalid
+        value so the caller can fall back to interactive entry. Returns the region abbreviation.
+    #>
+    [CmdletBinding()]
+    param()
+
+    # Organization code (no default)
+    $oc = ([string](Get-Answer 'organizationCode')).Trim().ToLower()
+    if ($oc -notmatch '^[a-z0-9]{3}$') { throw "organizationCode '$oc' must be exactly 3 lowercase alphanumeric characters." }
+    $script:OrganizationCode = $oc
+
+    # Environment type (default from -EnvironmentType, 'dev')
+    $et = [string](Get-Answer 'environmentType')
+    if ([string]::IsNullOrWhiteSpace($et)) { $et = $EnvironmentType }
+    $et = $et.ToLower()
+    if (@('dev', 'prd') -notcontains $et) { throw "environmentType '$et' must be 'dev' or 'prd'." }
+    $script:EnvironmentType = $et
+
+    Initialize-ConfigurationFile
+
+    # Organization name (no default)
+    $on = ([string](Get-Answer 'organizationName')).Trim()
+    if ([string]::IsNullOrWhiteSpace($on)) { throw "organizationName is required." }
+    $script:OrganizationName = $on
+
+    # Hostname / FQDN (no default)
+    $fq = ([string](Get-Answer 'fqdn')).Trim().ToLower()
+    $fq = $fq -replace '^[a-z]+://', ''
+    $fq = ($fq -split '/')[0]
+    $fq = $fq.Trim('.')
+    if ($fq -notmatch '\.' -or $fq -notmatch '^[a-z0-9]([a-z0-9\-\.]*[a-z0-9])?$') { throw "fqdn '$fq' is not a valid fully-qualified domain name." }
+    $script:HostName = $fq
+    $script:ConfigData['HostName'] = $script:HostName
+
+    # Azure region (default from -AzureRegion, 'uksouth'); abbrev from CAF map — no Azure call
+    $script:MicrosoftCAFRegionCodes = Get-CafRegionCodes
+    $script:AzureRegionCodes = $script:MicrosoftCAFRegionCodes
+    $rg = [string](Get-Answer 'azureRegion')
+    if ([string]::IsNullOrWhiteSpace($rg)) { $rg = $AzureRegion }
+    $rg = $rg.ToLower()
+    if (-not $script:MicrosoftCAFRegionCodes.ContainsKey($rg)) {
+        throw "azureRegion '$rg' is not a recognized region — run interactively to validate it against Azure."
+    }
+    $script:AzureRegion = $rg
+    $regionAbbrev = ([string]$script:MicrosoftCAFRegionCodes[$rg]).ToLower()
+
+    # Environment index (default '01')
+    $ei = [string](Get-Answer 'environmentIndex')
+    if ([string]::IsNullOrWhiteSpace($ei)) { $ei = '01' }
+    if ($ei -notmatch '^\d+$' -or [int]$ei -lt 1 -or [int]$ei -gt 99) { throw "environmentIndex '$ei' must be between 01 and 99." }
+    $script:EnvironmentIndex = ([int]$ei).ToString('00')
+
+    # Resource group name (computed default; the answer file has no override field)
+    $script:ResourceGroupName = "rg-neo-$($script:OrganizationCode)$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
+
+    # Bots (no defaults)
+    $bots = @(Get-Answer 'bots')
+    $bcAns = Get-Answer 'botCount'
+    if ($bcAns -and "$bcAns" -match '^\d+$' -and [int]"$bcAns" -ge 1 -and [int]"$bcAns" -le 10) {
+        $script:BotCount = [int]"$bcAns"
+    }
+    else {
+        $script:BotCount = $bots.Count
+    }
+    if ($script:BotCount -lt 1 -or $script:BotCount -gt 10) { throw "botCount must be between 1 and 10." }
+    if ($bots.Count -lt $script:BotCount) { throw "inputs.json defines $($bots.Count) bot(s) but botCount is $($script:BotCount)." }
+
+    $script:BotConfigurations = @()
+    for ($i = 0; $i -lt $script:BotCount; $i++) {
+        $an = ([string]$bots[$i].agentName).Trim()
+        $sn = ([string]$bots[$i].shortName).Trim().ToLower()
+        if ([string]::IsNullOrWhiteSpace($an)) { throw "bot $($i + 1) agentName is required." }
+        if ($an -notmatch '^[A-Za-z0-9 \-_]+$') { throw "bot $($i + 1) agentName '$an' may only contain letters, numbers, spaces, dashes and underscores." }
+        if ($sn -notmatch '^[a-z][a-z\-]*$' -or $sn.Length -lt 1 -or $sn.Length -gt 4) { throw "bot $($i + 1) shortName '$sn' must be lowercase, 1-4 chars, letters/dashes, starting with a letter." }
+        if ($script:BotConfigurations | Where-Object { $_.AgentName -eq $an }) { throw "duplicate agent name '$an'." }
+        if ($script:BotConfigurations | Where-Object { $_.ShortName -eq $sn }) { throw "duplicate short name '$sn'." }
+        $script:BotConfigurations += @{ AgentName = $an; ShortName = $sn }
+    }
+    $script:ConfigData['BotCount'] = $script:BotCount
+    $script:ConfigData['Bots'] = $script:BotConfigurations
+
+    # Solution names
+    $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode)$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
+    $script:ConfigData['SolutionShortName'] = "neo$($script:OrganizationCode)$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+
+    return $regionAbbrev
+}
+
 function Get-UserInput {
     <#
     .SYNOPSIS
@@ -3086,6 +3256,28 @@ function Start-NeologikOnboarding {
         Write-Host "║                                                               ║" -ForegroundColor Magenta
         Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Magenta
 
+        # When inputs.json supplies every no-default value, gather config non-interactively and
+        # jump straight to the summary; otherwise prompt for each value. On "edit" (N) we re-run
+        # this same block interactively.
+        $answerComplete = Test-AnswerFileComplete
+        $editing = $false
+        while ($true) {
+            if ($answerComplete -and -not $editing) {
+                # inputs.json is complete — apply it directly and go straight to the summary
+                # (no field-by-field prompts, and no Azure region retrieval).
+                try {
+                    $regionAbbrev = Set-ConfigFromAnswerFile
+                }
+                catch {
+                    Write-Host ""
+                    Write-Host "  ⚠ inputs.json: $($_.Exception.Message)" -ForegroundColor Yellow
+                    Write-Host "  Entering configuration interactively..." -ForegroundColor Yellow
+                    $editing = $true
+                    continue
+                }
+            }
+            else {
+
         # Get Organization Code with validation (FIRST QUESTION)
         # No built-in default - the org code is client-specific. Pre-fill from the answer file
         # (or a -OrganizationCode passed on the command line) when available.
@@ -3260,125 +3452,8 @@ function Start-NeologikOnboarding {
         Write-Host ""
         Write-Host "Retrieving available Azure regions..." -ForegroundColor Gray
         
-        # Microsoft Cloud Adoption Framework (CAF) recommended region abbreviations
-        # Reference: https://learn.microsoft.com/azure/cloud-adoption-framework/ready/azure-best-practices/resource-abbreviations
-        $script:MicrosoftCAFRegionCodes = @{
-            # Americas
-            'eastus' = 'eus'
-            'eastus2' = 'eus2'
-            'westus' = 'wus'
-            'westus2' = 'wus2'
-            'westus3' = 'wus3'
-            'centralus' = 'cus'
-            'northcentralus' = 'ncus'
-            'southcentralus' = 'scus'
-            'westcentralus' = 'wcus'
-            'canadacentral' = 'cac'
-            'canadaeast' = 'cae'
-            'brazilsouth' = 'brs'
-            'brazilsoutheast' = 'brse'
-            'brazilus' = 'bru'
-            'mexicocentral' = 'mxc'
-            'chilecentral' = 'clc'
-            
-            # Europe
-            'northeurope' = 'neu'
-            'westeurope' = 'weu'
-            'uksouth' = 'uks'
-            'ukwest' = 'ukw'
-            'francecentral' = 'frc'
-            'francesouth' = 'frs'
-            'germanywestcentral' = 'gwc'
-            'germanynorth' = 'gno'
-            'norwayeast' = 'noe'
-            'norwaywest' = 'now'
-            'swedencentral' = 'sdc'
-            'swedensouth' = 'sds'
-            'switzerlandnorth' = 'szn'
-            'switzerlandwest' = 'szw'
-            'italynorth' = 'itn'
-            'polandcentral' = 'plc'
-            'spaincentral' = 'spc'
-            'austriaeast' = 'ate'
-            'belgiumcentral' = 'bec'
-            
-            # Asia Pacific
-            'eastasia' = 'eas'
-            'southeastasia' = 'seas'
-            'australiaeast' = 'aue'
-            'australiasoutheast' = 'ause'
-            'australiacentral' = 'auc'
-            'australiacentral2' = 'auc2'
-            'japaneast' = 'jpe'
-            'japanwest' = 'jpw'
-            'koreacentral' = 'krc'
-            'koreasouth' = 'krs'
-            'centralindia' = 'inc'
-            'southindia' = 'ins'
-            'westindia' = 'inw'
-            'jioindiawest' = 'jiw'
-            'jioindiacentral' = 'jic'
-            'indonesiacentral' = 'idc'
-            'malaysiawest' = 'myw'
-            'newzealandnorth' = 'nzn'
-            
-            # Middle East & Africa
-            'southafricanorth' = 'san'
-            'southafricawest' = 'saw'
-            'uaenorth' = 'uan'
-            'uaecentral' = 'uac'
-            'qatarcentral' = 'qac'
-            'israelcentral' = 'ilc'
-            
-            # China (requires special subscription)
-            'chinanorth' = 'cnn'
-            'chinanorth2' = 'cnn2'
-            'chinanorth3' = 'cnn3'
-            'chinaeast' = 'cne'
-            'chinaeast2' = 'cne2'
-            'chinaeast3' = 'cne3'
-            
-            # Government (requires special subscription)
-            'usgovvirginia' = 'ugv'
-            'usgovarizona' = 'uga'
-            'usgovtexas' = 'ugt'
-            'usdodeast' = 'ude'
-            'usdodcentral' = 'udc'
-            
-            # EUAP (Early Update Access Program) regions
-            'centraluseuap' = 'cuse'
-            'eastus2euap' = 'eus2e'
-            
-            # Geographic groups (not for deployment, but returned by Azure API)
-            'asia' = 'asia'
-            'asiapacific' = 'apac'
-            'australia' = 'au'
-            'brazil' = 'br'
-            'canada' = 'ca'
-            'europe' = 'eu'
-            'france' = 'fr'
-            'germany' = 'de'
-            'global' = 'global'
-            'india' = 'in'
-            'indonesia' = 'id'
-            'israel' = 'il'
-            'italy' = 'it'
-            'japan' = 'jp'
-            'korea' = 'kr'
-            'malaysia' = 'my'
-            'mexico' = 'mx'
-            'newzealand' = 'nz'
-            'norway' = 'no'
-            'poland' = 'pl'
-            'qatar' = 'qa'
-            'singapore' = 'sg'
-            'southafrica' = 'za'
-            'spain' = 'es'
-            'sweden' = 'se'
-            'switzerland' = 'ch'
-            'taiwan' = 'tw'
-            'unitedstates' = 'us'
-        }
+        # Region abbreviations from the shared CAF map (single source of truth — see Get-CafRegionCodes).
+        $script:MicrosoftCAFRegionCodes = Get-CafRegionCodes
         
         try {
             $azureLocations = Get-AzLocation | Sort-Object Location
@@ -3691,37 +3766,44 @@ function Start-NeologikOnboarding {
         $botsAnswer = @(Get-Answer 'bots')
         $script:BotConfigurations = @()
         for ($i = 1; $i -le $script:BotCount; $i++) {
-            $agentNameBuiltin = if ($i -eq 1) { "Neologik" } else { "Neologik $i" }
-            $defaultAgentName = $agentNameBuiltin
-            # Pre-fill this bot's agent name from the answer file when present (still validated below).
+            # No built-in default — the agent name is client-specific. Pre-fill from the answer
+            # file when present, otherwise require input.
+            $agentNamePrefill = $null
             if ($botsAnswer.Count -ge $i -and $botsAnswer[$i - 1] -and $botsAnswer[$i - 1].agentName) {
-                $an = ([string]$botsAnswer[$i - 1].agentName).Trim()
-                if (-not [string]::IsNullOrWhiteSpace($an)) { $defaultAgentName = $an }
+                $anp = ([string]$botsAnswer[$i - 1].agentName).Trim()
+                if (-not [string]::IsNullOrWhiteSpace($anp)) { $agentNamePrefill = $anp }
             }
-            $agentNameLabel = Get-PromptLabel $defaultAgentName $agentNameBuiltin
             $agentNameValid = $false
             $agentName = ""
-            
+
             # Get Agent Name
             while (-not $agentNameValid) {
                 Write-Host ""
                 Write-Host "Full Agent Name for Bot $i`:" -ForegroundColor Cyan
-                Write-Host "  $agentNameLabel" -NoNewline -ForegroundColor Gray
-                Write-Host $defaultAgentName -ForegroundColor Yellow
+                if ($agentNamePrefill) {
+                    Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
+                    Write-Host $agentNamePrefill -ForegroundColor Yellow
+                }
                 Write-Host "  Requirements: letters, numbers, spaces, dashes, and underscores allowed" -ForegroundColor Gray
-                Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
+                if ($agentNamePrefill) {
+                    Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
+                }
+                else {
+                    Write-Host "  Enter agent name: " -NoNewline -ForegroundColor Gray
+                }
                 $agentNameInput = Read-Host
 
-                $agentName = if ([string]::IsNullOrWhiteSpace($agentNameInput)) {
-                    $defaultAgentName
-                } else {
-                    $agentNameInput.Trim()
+                if ([string]::IsNullOrWhiteSpace($agentNameInput)) {
+                    if ($agentNamePrefill) {
+                        $agentName = $agentNamePrefill
+                    }
+                    else {
+                        Write-Host "  ✗ Agent name is required. Please enter a value." -ForegroundColor Red
+                        continue
+                    }
                 }
-
-                # Validate not empty
-                if ([string]::IsNullOrWhiteSpace($agentName)) {
-                    Write-Host "  ✗ Agent name cannot be empty. Please try again." -ForegroundColor Red
-                    continue
+                else {
+                    $agentName = $agentNameInput.Trim()
                 }
 
                 # Validate characters (letters, numbers, spaces, dashes, and underscores)
@@ -3741,29 +3823,41 @@ function Start-NeologikOnboarding {
             }
 
             # Get Bot Short Name
-            $botShortNameBuiltin = if ($i -eq 1) { "bot" } else { "bot$i" }
-            $defaultBotShortName = $botShortNameBuiltin
-            # Pre-fill this bot's short name from the answer file when present (still validated below).
+            # No built-in default — pre-fill from the answer file when present, otherwise require input.
+            $botShortNamePrefill = $null
             if ($botsAnswer.Count -ge $i -and $botsAnswer[$i - 1] -and $botsAnswer[$i - 1].shortName) {
-                $sn = ([string]$botsAnswer[$i - 1].shortName).Trim()
-                if (-not [string]::IsNullOrWhiteSpace($sn)) { $defaultBotShortName = $sn }
+                $snp = ([string]$botsAnswer[$i - 1].shortName).Trim()
+                if (-not [string]::IsNullOrWhiteSpace($snp)) { $botShortNamePrefill = $snp }
             }
-            $botShortNameLabel = Get-PromptLabel $defaultBotShortName $botShortNameBuiltin
             $botShortNameValid = $false
-            
+
             while (-not $botShortNameValid) {
                 Write-Host ""
                 Write-Host "Bot $i Short Name:" -ForegroundColor Cyan
-                Write-Host "  $botShortNameLabel" -NoNewline -ForegroundColor Gray
-                Write-Host $defaultBotShortName -ForegroundColor Yellow
+                if ($botShortNamePrefill) {
+                    Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
+                    Write-Host $botShortNamePrefill -ForegroundColor Yellow
+                }
                 Write-Host "  Requirements: lowercase, max 4 characters, letters and dashes only" -ForegroundColor Gray
-                Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
+                if ($botShortNamePrefill) {
+                    Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
+                }
+                else {
+                    Write-Host "  Enter short name: " -NoNewline -ForegroundColor Gray
+                }
                 $botShortNameInput = Read-Host
 
-                $botShortName = if ([string]::IsNullOrWhiteSpace($botShortNameInput)) {
-                    $defaultBotShortName
-                } else {
-                    $botShortNameInput.Trim()
+                if ([string]::IsNullOrWhiteSpace($botShortNameInput)) {
+                    if ($botShortNamePrefill) {
+                        $botShortName = $botShortNamePrefill
+                    }
+                    else {
+                        Write-Host "  ✗ Short name is required. Please enter a value." -ForegroundColor Red
+                        continue
+                    }
+                }
+                else {
+                    $botShortName = $botShortNameInput.Trim()
                 }
 
                 # Validate lowercase
@@ -3807,6 +3901,7 @@ function Start-NeologikOnboarding {
         # Calculate solution names based on configuration
         $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
         $script:ConfigData['SolutionShortName'] = "neo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+            }
 
         # Display summary
         Write-Host "`n╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
@@ -3830,8 +3925,27 @@ function Start-NeologikOnboarding {
             Write-Host "  Bot:                  " -NoNewline; Write-Host "$($bot.AgentName) (short: $($bot.ShortName))" -ForegroundColor Yellow
         }
         Write-Host ""
-        Write-Host "Press Enter to continue with these settings, or Ctrl+C to cancel..." -ForegroundColor Yellow
-        Read-Host
+        if ($answerComplete) {
+            # Required confirmation — no default; the user must type Y (continue) or N (edit).
+            $confirmChoice = ''
+            while ($confirmChoice -notmatch '^[YyNn]$') {
+                Write-Host ""
+                Write-Host "Continue with these settings? Type Y to continue, or N to edit: " -NoNewline -ForegroundColor Yellow
+                $confirmChoice = (Read-Host).Trim()
+            }
+            if ($confirmChoice -match '^[Nn]$') {
+                Write-Host "`n  Editing — you'll be prompted for each value (pre-filled from your inputs)..." -ForegroundColor Cyan
+                $editing = $true
+                continue
+            }
+            break
+        }
+        else {
+            Write-Host "Press Enter to continue with these settings, or Ctrl+C to cancel..." -ForegroundColor Yellow
+            Read-Host
+            break
+        }
+        }
 
         # Save configuration to checkpoint now that it has been confirmed.
         # This allows a resume if any subsequent step fails (e.g. permission errors or provider timeouts).
