@@ -208,8 +208,7 @@ Organization Code (3 characters max):
 The script includes comprehensive validation for all inputs:
 
 - **Organization Name**: Required, cannot be empty
-- **Hostname**: Required, cannot be empty, automatically converted to lowercase
-- **Domain Name**: Required, cannot be empty, automatically converted to lowercase
+- **Bot Hostname (FQDN)**: Required, must be a valid fully-qualified domain name; any scheme/path is stripped and it is converted to lowercase
 - **Organization Code**: Must be exactly 3 alphanumeric characters, automatically converted to lowercase
 - **Environment Type**: Must be either 'dev' or 'prd', automatically converted to lowercase
 - **Azure Region**: Must be a valid Azure region name (e.g., uksouth, eastus, westus), automatically converted to lowercase
@@ -371,8 +370,7 @@ The configuration file contains all necessary information to share with Neologik
   "ScriptVersion": "v1.7.5",
   "UserAccount": "user@domain.com",
   "OrganizationName": "Contoso Ltd",
-  "Hostname": "server01",
-  "DomainName": "contoso.com",
+  "HostName": "neologik.contoso.com",
   "OrganizationCode": "abc",
   "EnvironmentType": "dev",
   "BotCount": 2,

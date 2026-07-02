@@ -3,8 +3,7 @@
 
   "organizationCode": "REPLACE_ME — client 3-letter code, lowercase, e.g. abc",
   "organizationName": "REPLACE_ME — full company name, e.g. Contoso Ltd",
-  "hostname": "REPLACE_ME — bot DNS hostname, e.g. neologik",
-  "domainName": "REPLACE_ME — bot DNS domain, e.g. contoso.com",
+  "fqdn": "REPLACE_ME — bot's full hostname (FQDN), e.g. neologik.contoso.com",
 
   "environmentType": "dev",
   "azureRegion": "uksouth",

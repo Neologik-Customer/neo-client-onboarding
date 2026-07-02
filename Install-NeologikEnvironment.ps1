@@ -265,8 +265,7 @@ function Save-Checkpoint {
         EnvironmentType       = $script:EnvironmentType
         AzureRegion           = $script:AzureRegion
         OrganizationName      = $script:OrganizationName
-        Hostname              = $script:Hostname
-        DomainName            = $script:DomainName
+        HostName              = $script:HostName
         ResourceGroupName     = $script:ResourceGroupName
         EnvironmentIndex      = $script:EnvironmentIndex
         BotCount              = $script:BotCount
@@ -327,8 +326,10 @@ function Restore-Checkpoint {
     $script:EnvironmentType        = $data.EnvironmentType
     $script:AzureRegion            = $data.AzureRegion
     $script:OrganizationName       = $data.OrganizationName
-    $script:Hostname               = $data.Hostname
-    $script:DomainName             = $data.DomainName
+    # Back-compat: an in-flight checkpoint from an older run stored separate Hostname/DomainName.
+    $script:HostName               = if ($data.HostName) { $data.HostName }
+                                     elseif ($data.Hostname -and $data.DomainName) { "$($data.Hostname).$($data.DomainName)" }
+                                     else { $data.HostName }
     $script:ResourceGroupName      = $data.ResourceGroupName
     $script:EnvironmentIndex       = $data.EnvironmentIndex
     $script:BotCount               = [int]$data.BotCount
@@ -2547,8 +2548,7 @@ function Export-ConfigurationData {
             'SolutionShortName' = $script:ConfigData['SolutionShortName']
             'UserAccount' = $script:ConfigData['UserAccount']
             'AzureRegion' = $script:ConfigData['AzureRegion']
-            'Hostname' = $script:ConfigData['Hostname']
-            'DomainName' = $script:ConfigData['DomainName']
+            'HostName' = $script:ConfigData['HostName']
             'BotCount' = $script:ConfigData['BotCount']
             'Bots' = $script:ConfigData['Bots']
             'InvitedGuestUsers' = $script:ConfigData['InvitedGuestUsers']
@@ -3207,61 +3207,53 @@ function Start-NeologikOnboarding {
         Write-Host "  ✓ Using: " -NoNewline -ForegroundColor Green
         Write-Host $script:OrganizationName -ForegroundColor White
 
-        # Get Hostname
-        $hostnamePrefill = Get-Answer 'hostname'
+        # Get the bot's hostname (full FQDN).
+        # This is the complete public host, e.g. neologik.contoso.com. It is stored and consumed
+        # downstream as a single value (hostName); it is never split into separate host/domain parts.
+        $fqdnPrefill = Get-Answer 'fqdn'
         Write-Host ""
-        Write-Host "Bot DNS Hostname:" -ForegroundColor Cyan
-        if ($hostnamePrefill) {
+        Write-Host "Bot Hostname (full FQDN):" -ForegroundColor Cyan
+        if ($fqdnPrefill) {
             Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
-            Write-Host $hostnamePrefill -ForegroundColor Yellow
+            Write-Host $fqdnPrefill -ForegroundColor Yellow
             Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
         }
         else {
-            Write-Host "  Example: neologik, neologik-dev" -ForegroundColor Gray
-            Write-Host "  Enter DNS hostname: " -NoNewline -ForegroundColor Gray
+            Write-Host "  Example: neologik.contoso.com, xyzprd.neologik.ai" -ForegroundColor Gray
+            Write-Host "  Enter full hostname: " -NoNewline -ForegroundColor Gray
         }
-        $hostnameInput = Read-Host
-        if ([string]::IsNullOrWhiteSpace($hostnameInput) -and $hostnamePrefill) {
-            $hostnameInput = [string]$hostnamePrefill
-        }
-
-        while ([string]::IsNullOrWhiteSpace($hostnameInput)) {
-            Write-Host "  DNS hostname is required. Please enter a DNS hostname: " -NoNewline -ForegroundColor Yellow
-            $hostnameInput = Read-Host
+        $fqdnInput = Read-Host
+        if ([string]::IsNullOrWhiteSpace($fqdnInput) -and $fqdnPrefill) {
+            $fqdnInput = [string]$fqdnPrefill
         }
 
-        $script:Hostname = $hostnameInput.Trim().ToLower()
-        $script:ConfigData['Hostname'] = $script:Hostname
+        $fqdnValid = $false
+        while (-not $fqdnValid) {
+            while ([string]::IsNullOrWhiteSpace($fqdnInput)) {
+                Write-Host "  Hostname is required. Please enter the full FQDN: " -NoNewline -ForegroundColor Yellow
+                $fqdnInput = Read-Host
+            }
+
+            # Normalize: strip any scheme/path, lowercase, trim stray dots.
+            $normalizedFqdn = $fqdnInput.Trim().ToLower()
+            $normalizedFqdn = $normalizedFqdn -replace '^[a-z]+://', ''
+            $normalizedFqdn = ($normalizedFqdn -split '/')[0]
+            $normalizedFqdn = $normalizedFqdn.Trim('.')
+
+            # Require a dotted, DNS-valid fully-qualified name (host.domain).
+            if ($normalizedFqdn -notmatch '\.' -or $normalizedFqdn -notmatch '^[a-z0-9]([a-z0-9\-\.]*[a-z0-9])?$') {
+                Write-Host "  ✗ Enter a valid fully-qualified hostname, e.g. neologik.contoso.com" -ForegroundColor Red
+                $fqdnInput = ""
+                continue
+            }
+
+            $script:HostName = $normalizedFqdn
+            $fqdnValid = $true
+        }
+
+        $script:ConfigData['HostName'] = $script:HostName
         Write-Host "  ✓ Using: " -NoNewline -ForegroundColor Green
-        Write-Host $script:Hostname -ForegroundColor White
-
-        # Get Domain Name
-        $domainPrefill = Get-Answer 'domainName'
-        Write-Host ""
-        Write-Host "Bot DNS Domain Name:" -ForegroundColor Cyan
-        if ($domainPrefill) {
-            Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
-            Write-Host $domainPrefill -ForegroundColor Yellow
-            Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
-        }
-        else {
-            Write-Host "  Example: contoso.com, example.co.uk" -ForegroundColor Gray
-            Write-Host "  Enter DNS domain name: " -NoNewline -ForegroundColor Gray
-        }
-        $domainInput = Read-Host
-        if ([string]::IsNullOrWhiteSpace($domainInput) -and $domainPrefill) {
-            $domainInput = [string]$domainPrefill
-        }
-
-        while ([string]::IsNullOrWhiteSpace($domainInput)) {
-            Write-Host "  DNS domain name is required. Please enter a DNS domain name: " -NoNewline -ForegroundColor Yellow
-            $domainInput = Read-Host
-        }
-
-        $script:DomainName = $domainInput.Trim().ToLower()
-        $script:ConfigData['DomainName'] = $script:DomainName
-        Write-Host "  ✓ Using: " -NoNewline -ForegroundColor Green
-        Write-Host $script:DomainName -ForegroundColor White
+        Write-Host $script:HostName -ForegroundColor White
 
         # Get Azure Region with real-time validation
         # Query Azure for available locations
@@ -3827,8 +3819,7 @@ function Start-NeologikOnboarding {
         Write-Host "  Tenant ID:            " -NoNewline; Write-Host $script:ConfigData['TenantId'] -ForegroundColor Yellow
         Write-Host "  Subscription Name:    " -NoNewline; Write-Host $script:ConfigData['SubscriptionName'] -ForegroundColor Yellow
         Write-Host "  Organization Name:    " -NoNewline; Write-Host $script:OrganizationName -ForegroundColor Yellow
-        Write-Host "  Bot DNS Hostname:     " -NoNewline; Write-Host $script:Hostname -ForegroundColor Yellow
-        Write-Host "  Bot DNS Domain Name:  " -NoNewline; Write-Host $script:DomainName -ForegroundColor Yellow
+        Write-Host "  Bot Hostname (FQDN):  " -NoNewline; Write-Host $script:HostName -ForegroundColor Yellow
         Write-Host "  Organization Code:    " -NoNewline; Write-Host $script:OrganizationCode -ForegroundColor Yellow
         Write-Host "  Environment Type:     " -NoNewline; Write-Host $script:EnvironmentType -ForegroundColor Yellow
         Write-Host "  Environment Index:    " -NoNewline; Write-Host $script:EnvironmentIndex -ForegroundColor Yellow

@@ -44,14 +44,9 @@ Before running the script, prepare the following information. You will be prompt
 
 ### 4. Network Information
 
-- [ ] **Hostname** (server/computer name)
-  - Example: "server01", "web-server", "app-host"
-  - Will be automatically converted to lowercase
-  - **Required** - cannot be empty
-
-- [ ] **Domain Name**
-  - Example: "contoso.com", "example.local", "yourcompany.com"
-  - Will be automatically converted to lowercase
+- [ ] **Bot Hostname (full FQDN)**
+  - Example: "neologik.contoso.com", "xyzprd.neologik.ai"
+  - Enter the complete public hostname; any `https://` prefix or trailing path is stripped and it is converted to lowercase
   - **Required** - cannot be empty
 
 ### 5. Azure Configuration
