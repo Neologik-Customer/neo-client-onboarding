@@ -1,0 +1,17 @@
+{
+  "_readme": "Predefined inputs for Install-NeologikEnvironment.ps1. Copy this file to 'inputs.json' (auto-detected next to the script) or pass its path with -AnswerFile. Every value here pre-fills the matching prompt: press Enter to accept, or type to override. This file contains ONLY configuration inputs that end up in the exported config; runtime decisions (Terms acceptance, PowerShell/module install, re-auth, quota/permission warnings) are always asked interactively and are never read from here. Replace every REPLACE_ME / example value below before use. Remove any field to fall back to its built-in default (for default fields) or to be prompted with no pre-fill (for per-client fields).",
+
+  "organizationCode": "REPLACE_ME — client 3-letter code, lowercase, e.g. abc",
+  "organizationName": "REPLACE_ME — full company name, e.g. Contoso Ltd",
+  "hostname": "REPLACE_ME — bot DNS hostname, e.g. neologik",
+  "domainName": "REPLACE_ME — bot DNS domain, e.g. contoso.com",
+
+  "environmentType": "dev",
+  "azureRegion": "uksouth",
+  "environmentIndex": "01",
+
+  "botCount": 1,
+  "bots": [
+    { "agentName": "REPLACE_ME — full agent name, e.g. Neologik", "shortName": "REPLACE_ME — lowercase, max 4 chars, e.g. bot" }
+  ]
+}

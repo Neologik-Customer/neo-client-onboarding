@@ -54,8 +54,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [ValidateLength(1, 3)]
-    [string]$OrganizationCode = "abc",
+    [string]$OrganizationCode = "",
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'prd')]
@@ -74,7 +73,12 @@ param(
     [switch]$SkipPowerShellUpdate,
 
     [Parameter(Mandatory = $false)]
-    [switch]$SkipModuleInstall
+    [switch]$SkipModuleInstall,
+
+    # Path to a JSON file of predefined inputs that pre-fill the interactive prompts.
+    # When omitted, an 'inputs.json' next to the script is auto-detected.
+    [Parameter(Mandatory = $false)]
+    [string]$AnswerFile = ""
 )
 
 # Script variables
@@ -2752,6 +2756,95 @@ function Export-ConfigurationData {
 
 #region Main Execution
 
+function Import-AnswerFile {
+    <#
+    .SYNOPSIS
+        Loads a predefined-answers JSON file whose values pre-fill the interactive prompts.
+    .DESCRIPTION
+        Reads the file given by -AnswerFile, or auto-detects 'inputs.json' next to the script.
+        Values populate $script:Answers and become the default for the matching
+        prompt (Enter accepts, typing overrides). Only configuration inputs are read here; runtime
+        decisions (terms acceptance, module install, re-auth, quota/permission warnings) are always
+        asked interactively and are never read from the file.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$Path
+    )
+
+    $script:Answers = @{}
+    $script:AnswerFilePath = $null
+
+    $candidate = $null
+    if (-not [string]::IsNullOrWhiteSpace($Path)) {
+        if (-not (Test-Path -Path $Path)) {
+            throw "Answer file not found: $Path"
+        }
+        $candidate = (Resolve-Path -Path $Path).Path
+    }
+    else {
+        $p = Join-Path $PSScriptRoot 'inputs.json'
+        if (Test-Path -Path $p) { $candidate = $p }
+    }
+
+    if (-not $candidate) {
+        Write-Log "No answer file found - running fully interactive." -Level Info
+        return
+    }
+
+    try {
+        $json = Get-Content -Path $candidate -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "Failed to parse answer file '$candidate': $_"
+    }
+
+    foreach ($prop in $json.PSObject.Properties) {
+        if ($prop.Name -eq '_readme') { continue }
+        $script:Answers[$prop.Name] = $prop.Value
+    }
+    $script:AnswerFilePath = $candidate
+
+    Write-Host ""
+    Write-Host "  ✓ Loaded predefined inputs: $([System.IO.Path]::GetFileName($candidate))" -ForegroundColor Green
+    Write-Host "    These pre-fill the prompts below - press Enter to accept, or type to override." -ForegroundColor Gray
+    Write-Log "Loaded answer file: $candidate" -Level Info
+}
+
+function Get-Answer {
+    <#
+    .SYNOPSIS
+        Returns the predefined answer for a key, or $null when absent or blank.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Key
+    )
+
+    if ($null -eq $script:Answers -or -not $script:Answers.ContainsKey($Key)) { return $null }
+    $val = $script:Answers[$Key]
+    if ($val -is [string] -and [string]::IsNullOrWhiteSpace($val)) { return $null }
+    return $val
+}
+
+function Get-PromptLabel {
+    <#
+    .SYNOPSIS
+        Chooses the prompt's value label: "Pre-filled: " when the effective value came from the
+        answer file and differs from the built-in default; otherwise "Default: ".
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]$Effective,
+        [Parameter(Mandatory = $false)]$Builtin
+    )
+
+    if ("$Effective" -ne "$Builtin") { return "Pre-filled: " }
+    return "Default: "
+}
+
 function Get-UserInput {
     <#
     .SYNOPSIS
@@ -2807,6 +2900,10 @@ function Start-NeologikOnboarding {
     try {
         $resuming = $false
         Write-ScriptHeader
+
+        # Load predefined inputs (from -AnswerFile, or an auto-detected inputs.json).
+        # Values pre-fill the configuration prompts below; runtime decisions stay interactive.
+        Import-AnswerFile -Path $AnswerFile
 
         # Check for an existing checkpoint and offer to resume
         $existingCheckpoint = Find-LatestCheckpoint
@@ -2990,18 +3087,37 @@ function Start-NeologikOnboarding {
         Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Magenta
 
         # Get Organization Code with validation (FIRST QUESTION)
+        # No built-in default - the org code is client-specific. Pre-fill from the answer file
+        # (or a -OrganizationCode passed on the command line) when available.
+        $orgCodePrefill = Get-Answer 'organizationCode'
+        if (-not $orgCodePrefill -and -not [string]::IsNullOrWhiteSpace($OrganizationCode)) {
+            $orgCodePrefill = $OrganizationCode
+        }
         $orgCodeValid = $false
         while (-not $orgCodeValid) {
             Write-Host ""
             Write-Host "Organization Code (exactly 3 characters):" -ForegroundColor Cyan
-            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-            Write-Host $OrganizationCode -ForegroundColor Yellow
+            if ($orgCodePrefill) {
+                Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
+                Write-Host $orgCodePrefill -ForegroundColor Yellow
+            }
             Write-Host "  Requirements: lowercase, exactly 3 characters, letters and numbers only" -ForegroundColor Gray
-            Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
+            if ($orgCodePrefill) {
+                Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
+            }
+            else {
+                Write-Host "  Enter organization code: " -NoNewline -ForegroundColor Gray
+            }
             $orgInput = Read-Host
 
             if ([string]::IsNullOrWhiteSpace($orgInput)) {
-                $script:OrganizationCode = $OrganizationCode.ToLower()
+                if ($orgCodePrefill) {
+                    $script:OrganizationCode = ([string]$orgCodePrefill).Trim().ToLower()
+                }
+                else {
+                    Write-Host "  ✗ Organization code is required. Please enter a value." -ForegroundColor Red
+                    continue
+                }
             }
             else {
                 $script:OrganizationCode = $orgInput.Trim().ToLower()
@@ -3024,11 +3140,23 @@ function Start-NeologikOnboarding {
         }
 
         # Get Environment Type with validation (SECOND QUESTION)
+        # A valid environmentType in the answer file pre-fills (and overrides) the built-in default.
+        $envBuiltin = $EnvironmentType
+        $envAnswer = Get-Answer 'environmentType'
+        if ($envAnswer) {
+            if (@('dev', 'prd') -contains ([string]$envAnswer).ToLower()) {
+                $EnvironmentType = ([string]$envAnswer).ToLower()
+            }
+            else {
+                Write-Host "  ⚠ Ignoring invalid environmentType '$envAnswer' from answer file (must be dev or prd)." -ForegroundColor Yellow
+            }
+        }
+        $envLabel = Get-PromptLabel $EnvironmentType $envBuiltin
         $envTypeValid = $false
         while (-not $envTypeValid) {
             Write-Host ""
             Write-Host "Environment Type:" -ForegroundColor Cyan
-            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+            Write-Host "  $envLabel" -NoNewline -ForegroundColor Gray
             Write-Host $EnvironmentType -ForegroundColor Yellow
             Write-Host "  Valid options: dev, prd" -ForegroundColor Gray
             Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
@@ -3053,11 +3181,22 @@ function Start-NeologikOnboarding {
         Initialize-ConfigurationFile
 
         # Get Organization Name
+        $orgNamePrefill = Get-Answer 'organizationName'
         Write-Host ""
         Write-Host "Organization Name (full company name):" -ForegroundColor Cyan
-        Write-Host "  Example: Contoso Ltd, Acme Corporation" -ForegroundColor Gray
-        Write-Host "  Enter organization name: " -NoNewline -ForegroundColor Gray
+        if ($orgNamePrefill) {
+            Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
+            Write-Host $orgNamePrefill -ForegroundColor Yellow
+            Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
+        }
+        else {
+            Write-Host "  Example: Contoso Ltd, Acme Corporation" -ForegroundColor Gray
+            Write-Host "  Enter organization name: " -NoNewline -ForegroundColor Gray
+        }
         $orgNameInput = Read-Host
+        if ([string]::IsNullOrWhiteSpace($orgNameInput) -and $orgNamePrefill) {
+            $orgNameInput = [string]$orgNamePrefill
+        }
 
         while ([string]::IsNullOrWhiteSpace($orgNameInput)) {
             Write-Host "  Organization name is required. Please enter a name: " -NoNewline -ForegroundColor Yellow
@@ -3069,11 +3208,22 @@ function Start-NeologikOnboarding {
         Write-Host $script:OrganizationName -ForegroundColor White
 
         # Get Hostname
+        $hostnamePrefill = Get-Answer 'hostname'
         Write-Host ""
         Write-Host "Bot DNS Hostname:" -ForegroundColor Cyan
-        Write-Host "  Example: neologik, neologik-dev" -ForegroundColor Gray
-        Write-Host "  Enter DNS hostname: " -NoNewline -ForegroundColor Gray
+        if ($hostnamePrefill) {
+            Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
+            Write-Host $hostnamePrefill -ForegroundColor Yellow
+            Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
+        }
+        else {
+            Write-Host "  Example: neologik, neologik-dev" -ForegroundColor Gray
+            Write-Host "  Enter DNS hostname: " -NoNewline -ForegroundColor Gray
+        }
         $hostnameInput = Read-Host
+        if ([string]::IsNullOrWhiteSpace($hostnameInput) -and $hostnamePrefill) {
+            $hostnameInput = [string]$hostnamePrefill
+        }
 
         while ([string]::IsNullOrWhiteSpace($hostnameInput)) {
             Write-Host "  DNS hostname is required. Please enter a DNS hostname: " -NoNewline -ForegroundColor Yellow
@@ -3086,11 +3236,22 @@ function Start-NeologikOnboarding {
         Write-Host $script:Hostname -ForegroundColor White
 
         # Get Domain Name
+        $domainPrefill = Get-Answer 'domainName'
         Write-Host ""
         Write-Host "Bot DNS Domain Name:" -ForegroundColor Cyan
-        Write-Host "  Example: contoso.com, example.co.uk" -ForegroundColor Gray
-        Write-Host "  Enter DNS domain name: " -NoNewline -ForegroundColor Gray
+        if ($domainPrefill) {
+            Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
+            Write-Host $domainPrefill -ForegroundColor Yellow
+            Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
+        }
+        else {
+            Write-Host "  Example: contoso.com, example.co.uk" -ForegroundColor Gray
+            Write-Host "  Enter DNS domain name: " -NoNewline -ForegroundColor Gray
+        }
         $domainInput = Read-Host
+        if ([string]::IsNullOrWhiteSpace($domainInput) -and $domainPrefill) {
+            $domainInput = [string]$domainPrefill
+        }
 
         while ([string]::IsNullOrWhiteSpace($domainInput)) {
             Write-Host "  DNS domain name is required. Please enter a DNS domain name: " -NoNewline -ForegroundColor Yellow
@@ -3269,12 +3430,18 @@ function Start-NeologikOnboarding {
             $script:AzureRegionCodes = $script:MicrosoftCAFRegionCodes
         }
         
+        # Pre-fill (and override) the default region from the answer file when provided (still validated below).
+        $regionBuiltin = $AzureRegion
+        $regionAnswer = Get-Answer 'azureRegion'
+        if ($regionAnswer) { $AzureRegion = ([string]$regionAnswer).ToLower() }
+        $regionLabel = Get-PromptLabel $AzureRegion $regionBuiltin
+
         $regionValid = $false
-        
+
         while (-not $regionValid) {
             Write-Host ""
             Write-Host "Azure Region:" -ForegroundColor Cyan
-            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+            Write-Host "  $regionLabel" -NoNewline -ForegroundColor Gray
             Write-Host $AzureRegion -ForegroundColor Yellow
             
             if ($azureLocations) {
@@ -3372,20 +3539,33 @@ function Start-NeologikOnboarding {
         }
 
         # Get Environment Index with validation
+        # Source the default from the answer file when it holds a valid 1-99 value.
+        $indexDefault = Get-Answer 'environmentIndex'
+        if ($indexDefault -and "$indexDefault" -match '^\d+$' -and [int]"$indexDefault" -ge 1 -and [int]"$indexDefault" -le 99) {
+            $indexDefault = ([int]"$indexDefault").ToString("00")
+        }
+        elseif ($indexDefault) {
+            Write-Host "  ⚠ Ignoring invalid environmentIndex '$indexDefault' from answer file (must be 01-99)." -ForegroundColor Yellow
+            $indexDefault = "01"
+        }
+        else {
+            $indexDefault = "01"
+        }
+        $indexLabel = Get-PromptLabel $indexDefault "01"
         $indexValid = $false
         while (-not $indexValid) {
             Write-Host ""
             Write-Host "Environment Index Number:" -ForegroundColor Cyan
-            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-            Write-Host "01" -ForegroundColor Yellow
+            Write-Host "  $indexLabel" -NoNewline -ForegroundColor Gray
+            Write-Host $indexDefault -ForegroundColor Yellow
             Write-Host "  (Use for multiple environments: 01, 02, 03, etc.)" -ForegroundColor Gray
             Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
             $indexInput = Read-Host
 
             if ([string]::IsNullOrWhiteSpace($indexInput)) {
-                $script:EnvironmentIndex = "01"
+                $script:EnvironmentIndex = $indexDefault
                 $indexValid = $true
-                Write-Host "  ✓ Using default: 01" -ForegroundColor Green
+                Write-Host "  ✓ Using default: $($script:EnvironmentIndex)" -ForegroundColor Green
             }
             else {
                 # Validate it's a number
@@ -3467,19 +3647,32 @@ function Start-NeologikOnboarding {
         }
 
         # Get Number of Bots with validation
+        # Source the default from the answer file when it holds a valid 1-10 value.
+        $botCountDefault = Get-Answer 'botCount'
+        if ($botCountDefault -and "$botCountDefault" -match '^\d+$' -and [int]"$botCountDefault" -ge 1 -and [int]"$botCountDefault" -le 10) {
+            $botCountDefault = [int]"$botCountDefault"
+        }
+        elseif ($botCountDefault) {
+            Write-Host "  ⚠ Ignoring invalid botCount '$botCountDefault' from answer file (must be 1-10)." -ForegroundColor Yellow
+            $botCountDefault = 1
+        }
+        else {
+            $botCountDefault = 1
+        }
+        $botCountLabel = Get-PromptLabel $botCountDefault 1
         $botCountValid = $false
         while (-not $botCountValid) {
             Write-Host ""
             Write-Host "How many bots will there be?" -ForegroundColor Cyan
-            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-            Write-Host "1" -ForegroundColor Yellow
+            Write-Host "  $botCountLabel" -NoNewline -ForegroundColor Gray
+            Write-Host $botCountDefault -ForegroundColor Yellow
             Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
             $botCountInput = Read-Host
 
             if ([string]::IsNullOrWhiteSpace($botCountInput)) {
-                $script:BotCount = 1
+                $script:BotCount = $botCountDefault
                 $botCountValid = $true
-                Write-Host "  ✓ Using default: 1" -ForegroundColor Green
+                Write-Host "  ✓ Using default: $($script:BotCount)" -ForegroundColor Green
             }
             else {
                 # Validate it's a number
@@ -3503,9 +3696,17 @@ function Start-NeologikOnboarding {
         }
 
         # Get Bot Names (Agent Name and Short Name for each bot)
+        $botsAnswer = @(Get-Answer 'bots')
         $script:BotConfigurations = @()
         for ($i = 1; $i -le $script:BotCount; $i++) {
-            $defaultAgentName = if ($i -eq 1) { "Neologik" } else { "Neologik $i" }
+            $agentNameBuiltin = if ($i -eq 1) { "Neologik" } else { "Neologik $i" }
+            $defaultAgentName = $agentNameBuiltin
+            # Pre-fill this bot's agent name from the answer file when present (still validated below).
+            if ($botsAnswer.Count -ge $i -and $botsAnswer[$i - 1] -and $botsAnswer[$i - 1].agentName) {
+                $an = ([string]$botsAnswer[$i - 1].agentName).Trim()
+                if (-not [string]::IsNullOrWhiteSpace($an)) { $defaultAgentName = $an }
+            }
+            $agentNameLabel = Get-PromptLabel $defaultAgentName $agentNameBuiltin
             $agentNameValid = $false
             $agentName = ""
             
@@ -3513,7 +3714,7 @@ function Start-NeologikOnboarding {
             while (-not $agentNameValid) {
                 Write-Host ""
                 Write-Host "Full Agent Name for Bot $i`:" -ForegroundColor Cyan
-                Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+                Write-Host "  $agentNameLabel" -NoNewline -ForegroundColor Gray
                 Write-Host $defaultAgentName -ForegroundColor Yellow
                 Write-Host "  Requirements: letters, numbers, spaces, dashes, and underscores allowed" -ForegroundColor Gray
                 Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
@@ -3548,13 +3749,20 @@ function Start-NeologikOnboarding {
             }
 
             # Get Bot Short Name
-            $defaultBotShortName = if ($i -eq 1) { "bot" } else { "bot$i" }
+            $botShortNameBuiltin = if ($i -eq 1) { "bot" } else { "bot$i" }
+            $defaultBotShortName = $botShortNameBuiltin
+            # Pre-fill this bot's short name from the answer file when present (still validated below).
+            if ($botsAnswer.Count -ge $i -and $botsAnswer[$i - 1] -and $botsAnswer[$i - 1].shortName) {
+                $sn = ([string]$botsAnswer[$i - 1].shortName).Trim()
+                if (-not [string]::IsNullOrWhiteSpace($sn)) { $defaultBotShortName = $sn }
+            }
+            $botShortNameLabel = Get-PromptLabel $defaultBotShortName $botShortNameBuiltin
             $botShortNameValid = $false
             
             while (-not $botShortNameValid) {
                 Write-Host ""
                 Write-Host "Bot $i Short Name:" -ForegroundColor Cyan
-                Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+                Write-Host "  $botShortNameLabel" -NoNewline -ForegroundColor Gray
                 Write-Host $defaultBotShortName -ForegroundColor Yellow
                 Write-Host "  Requirements: lowercase, max 4 characters, letters and dashes only" -ForegroundColor Gray
                 Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
