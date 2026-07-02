@@ -1,28 +1,71 @@
 name: Prepare Onboarding Zip
-run-name: "[${{ inputs.organizationCode }}] Prepare Onboarding Zip"
+run-name: "${{ inputs.organizationCode != '' && inputs.organizationCode || '(Empty)' }} Prepare Onboarding Zip"
 
-# STUB: skeleton only. Fleshes out later into the job that assembles the
-# onboarding kit (script + inputs-example.json + docs, and any per-client
-# inputs.json) into a single distributable zip.
+# Assembles a distributable onboarding kit: this repo zipped up with a generated
+# inputs.json (built from the dispatch inputs below), uploaded to the central dev
+# storage account, and surfaced as a time-limited public download link.
+#
+# Every input mirrors a field of inputs.json and defaults to an empty string; empty
+# fields are omitted from inputs.json so the onboarding script falls back to its own
+# defaults / prompts for them.
 
 on:
   workflow_dispatch:
     inputs:
       organizationCode:
-        description: "3-letter organization code (used to label the zip)"
-        required: true
+        description: "Organization code (3 letters, e.g. xyz)"
+        required: false
+        default: ""
+        type: string
+      organizationName:
+        description: "Organization name (e.g. XYZ Inc)"
+        required: false
+        default: ""
+        type: string
+      fqdn:
+        description: "Bot hostname / full FQDN (e.g. xyz.neologik.ai)"
+        required: false
+        default: ""
         type: string
       environmentType:
-        description: "Environment type"
+        description: "Environment type (dev or prd)"
         required: false
-        default: dev
-        type: choice
-        options:
-          - dev
-          - prd
+        default: ""
+        type: string
+      azureRegion:
+        description: "Azure region (e.g. uksouth)"
+        required: false
+        default: ""
+        type: string
+      environmentIndex:
+        description: "Environment index (01-99)"
+        required: false
+        default: ""
+        type: string
+      botCount:
+        description: "Number of bots (1-10) — used only when no bot names are given below"
+        required: false
+        default: ""
+        type: string
+      agentNames:
+        description: "Bot agent name(s), comma-separated, max 3 (e.g. Finance Bot, HR Bot)"
+        required: false
+        default: ""
+        type: string
+      shortNames:
+        description: "Bot short code(s), comma-separated, same count as agent names (e.g. fin, hr)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
+
+env:
+  # Central dev-tenant storage account (neologik.dev)
+  STORAGE_ACCOUNT: stmasterdevuks01
+  STORAGE_CONTAINER: onboarding-zips
+  SAS_EXPIRY_HOURS: "24"
 
 jobs:
   prepare-zip:
@@ -32,15 +75,153 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # TODO: assemble the onboarding kit (Install-NeologikEnvironment.ps1,
-      # inputs-example.json, NeologikGuestUsers.txt, docs, and any per-client
-      # inputs.json) into a single zip for distribution.
-      - name: Assemble onboarding zip (stub)
+      - name: Validate and parse bot inputs
+        env:
+          IN_AGENT_NAMES: ${{ inputs.agentNames }}
+          IN_SHORT_NAMES: ${{ inputs.shortNames }}
         run: |
-          echo "TODO: package onboarding kit for '${{ inputs.organizationCode }}' (${{ inputs.environmentType }})"
-          echo "TODO: produce onboarding-${{ inputs.organizationCode }}-${{ inputs.environmentType }}.zip"
+          set -euo pipefail
 
-      # TODO: publish the assembled zip (upload-artifact and/or another target).
-      - name: Publish onboarding zip (stub)
+          parse_csv() {
+            # "" / whitespace -> []; otherwise split on comma and trim each element.
+            local s="$1"
+            if [ -z "$(printf '%s' "$s" | tr -d '[:space:]')" ]; then
+              printf '[]'
+            else
+              jq -cn --arg s "$s" '$s | split(",") | map(gsub("^\\s+|\\s+$"; ""))'
+            fi
+          }
+
+          AGENTS=$(parse_csv "$IN_AGENT_NAMES")
+          CODES=$(parse_csv "$IN_SHORT_NAMES")
+          NA=$(jq 'length' <<<"$AGENTS")
+          NC=$(jq 'length' <<<"$CODES")
+
+          # No empty entries within a provided list (catches "a,,b").
+          if jq -e 'any(.[]; . == "")' <<<"$AGENTS" >/dev/null || jq -e 'any(.[]; . == "")' <<<"$CODES" >/dev/null; then
+            echo "::error::Bot name/code lists must not contain empty comma-separated entries."
+            exit 1
+          fi
+
+          # Same count in each list.
+          if [ "$NA" -ne "$NC" ]; then
+            echo "::error::agentNames and shortNames must have the same number of comma-separated values (got $NA name(s) vs $NC code(s))."
+            exit 1
+          fi
+
+          # At most 3 bots.
+          if [ "$NA" -gt 3 ]; then
+            echo "::error::At most 3 bots are supported (got $NA)."
+            exit 1
+          fi
+
+          BOTS=$(jq -cn --argjson a "$AGENTS" --argjson c "$CODES" \
+            '[range(0; ($a | length)) | {agentName: $a[.], shortName: $c[.]}]')
+          echo "BOTS_JSON=$BOTS" >> "$GITHUB_ENV"
+          echo "PARSED_BOT_COUNT=$NA" >> "$GITHUB_ENV"
+          echo "Parsed $NA bot(s): $BOTS"
+
+      - name: Build inputs.json and assemble zip
+        env:
+          IN_ORG_CODE: ${{ inputs.organizationCode }}
+          IN_ORG_NAME: ${{ inputs.organizationName }}
+          IN_FQDN: ${{ inputs.fqdn }}
+          IN_ENV_TYPE: ${{ inputs.environmentType }}
+          IN_REGION: ${{ inputs.azureRegion }}
+          IN_ENV_INDEX: ${{ inputs.environmentIndex }}
+          IN_BOT_COUNT: ${{ inputs.botCount }}
         run: |
-          echo "TODO: upload the produced zip as a workflow artifact"
+          set -euo pipefail
+
+          # botCount: derive from the named bots when any were given, else use the input.
+          if [ "${PARSED_BOT_COUNT:-0}" -gt 0 ]; then
+            EFFECTIVE_BOT_COUNT="$PARSED_BOT_COUNT"
+          else
+            EFFECTIVE_BOT_COUNT="$IN_BOT_COUNT"
+          fi
+
+          # Build inputs.json from the provided (non-empty) values.
+          jq -n \
+            --arg organizationCode "$IN_ORG_CODE" \
+            --arg organizationName "$IN_ORG_NAME" \
+            --arg fqdn "$IN_FQDN" \
+            --arg environmentType "$IN_ENV_TYPE" \
+            --arg azureRegion "$IN_REGION" \
+            --arg environmentIndex "$IN_ENV_INDEX" \
+            --arg botCount "$EFFECTIVE_BOT_COUNT" \
+            --argjson bots "${BOTS_JSON:-[]}" \
+            '
+            {
+              organizationCode: $organizationCode,
+              organizationName: $organizationName,
+              fqdn: $fqdn,
+              environmentType: $environmentType,
+              azureRegion: $azureRegion,
+              environmentIndex: $environmentIndex,
+              botCount: (if $botCount == "" then null
+                         elif ($botCount | test("^[0-9]+$")) then ($botCount | tonumber)
+                         else $botCount end),
+              bots: (if ($bots | length) == 0 then null else $bots end)
+            }
+            | with_entries(select(.value != null and .value != ""))
+            ' > inputs.json
+
+          echo "Generated inputs.json:"
+          cat inputs.json
+
+          # Zip name: onboarding-script[-<orgcode>].zip
+          if [ -n "$IN_ORG_CODE" ]; then
+            ZIP_NAME="onboarding-script-${IN_ORG_CODE}.zip"
+          else
+            ZIP_NAME="onboarding-script.zip"
+          fi
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+
+          # Zip the repo (with the generated inputs.json) excluding VCS metadata.
+          zip -r "../$ZIP_NAME" . -x '.git/*' >/dev/null
+          mv "../$ZIP_NAME" "./$ZIP_NAME"
+          echo "Created $ZIP_NAME ($(du -h "$ZIP_NAME" | cut -f1))"
+
+      - name: Azure login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDS_NEO_DEV }}
+
+      - name: Upload zip and generate download link
+        id: upload
+        run: |
+          set -euo pipefail
+
+          # Upload the zip to the central storage account.
+          az storage blob upload \
+            --account-name "$STORAGE_ACCOUNT" \
+            --container-name "$STORAGE_CONTAINER" \
+            --name "$ZIP_NAME" \
+            --file "$ZIP_NAME" \
+            --auth-mode login \
+            --overwrite true
+
+          # Generate a user-delegation SAS download URL that expires in SAS_EXPIRY_HOURS.
+          EXPIRY=$(date -u -d "+${SAS_EXPIRY_HOURS} hours" '+%Y-%m-%dT%H:%MZ')
+          DOWNLOAD_URL=$(az storage blob generate-sas \
+            --account-name "$STORAGE_ACCOUNT" \
+            --container-name "$STORAGE_CONTAINER" \
+            --name "$ZIP_NAME" \
+            --permissions r \
+            --expiry "$EXPIRY" \
+            --auth-mode login \
+            --as-user \
+            --https-only \
+            --full-uri \
+            --output tsv)
+
+          echo "download-url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### 📦 Onboarding zip ready"
+            echo ""
+            echo "- **File:** \`$ZIP_NAME\`"
+            echo "- **Expires:** $EXPIRY (24h)"
+            echo ""
+            echo "[⬇️ Download $ZIP_NAME]($DOWNLOAD_URL)"
+          } >> "$GITHUB_STEP_SUMMARY"
