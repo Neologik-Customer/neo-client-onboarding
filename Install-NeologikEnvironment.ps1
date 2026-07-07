@@ -7,7 +7,7 @@
     - PowerShell version validation and updates
     - Azure authentication with required permissions
     - Role validation (Subscription Owner and Global Administrator)
-    - Quota pre-flight checks (vCPU and Azure OpenAI gpt-5.4-mini)
+    - Quota pre-flight checks (Azure OpenAI gpt-5.4-mini)
     - Guest user invitations
     - Subscription, resource group, and security group creation
     - App registration and managed identity setup
@@ -181,13 +181,14 @@ function Write-Log {
 function Initialize-ConfigurationFile {
     <#
     .SYNOPSIS
-        Initializes the configuration JSON file name with organization code and environment type.
+        Initializes the configuration JSON file name with organization code, environment type, and
+        environment index. Call after the environment index has been set.
     #>
     [CmdletBinding()]
     param()
-    
-    # Generate configuration file name with org code and env type
-    $configFileName = "Neologik_$($script:OrganizationCode)$($script:EnvironmentType)_Configuration_$($script:FileTimestamp).json"
+
+    # Generate configuration file name with org code, env type, and env index (e.g. xyzdev01)
+    $configFileName = "Neologik_$($script:OrganizationCode)$($script:EnvironmentType)$($script:EnvironmentIndex)_Configuration_$($script:FileTimestamp).json"
     $script:OutputFile = Join-Path $PSScriptRoot $configFileName
     
     Write-Host "  ✓ Configuration file initialized: $configFileName" -ForegroundColor Green
@@ -848,7 +849,7 @@ function Test-RequiredPermissions {
             Write-Host "⚠️  Unable to verify the Global Administrator role for $userAccount (the check failed to run)." -ForegroundColor Yellow
             Write-Host "    Global Administrator is required for app registration, admin consent, and guest invitations." -ForegroundColor Yellow
             Write-Host "    Continuing without confirming it may cause later steps to fail." -ForegroundColor Yellow
-            $proceed = Read-Host "Proceed anyway? [Y/n]"
+            $proceed = Read-Host "Proceed anyway? [Y/N]"
             if ($proceed -match '^\s*(n|no)\s*$') {
                 throw "Global Administrator role could not be verified and the operator chose not to continue."
             }
@@ -867,7 +868,7 @@ function Test-RequiredPermissions {
 function Test-QuotaRequirements {
     <#
     .SYNOPSIS
-        Checks vCPU and Azure OpenAI gpt-5.4-mini quota availability for the target region.
+        Checks Azure OpenAI gpt-5.4-mini quota availability for the target region.
     #>
     [CmdletBinding()]
     param(
@@ -887,42 +888,6 @@ function Test-QuotaRequirements {
     Write-Log "Checking quota requirements for region: $Location" -Level Info
 
     $quotaIssues = @()
-
-    # vCPU quota — Standard D2ds v6 / Standard DC2ds v6
-    Write-Host "  Checking vCPU quota (Standard D2ds v6 / Standard DC2ds v6)..." -ForegroundColor Gray
-    try {
-        $vmUsages = Get-AzVMUsage -Location $Location -ErrorAction Stop
-
-        $ddsv6   = $vmUsages | Where-Object { $_.Name.Value -like '*DDSv6*'   -or $_.Name.LocalizedValue -like '*DDSv6*' }
-        $dcsdsv6 = $vmUsages | Where-Object { $_.Name.Value -like '*DCDSv6*'  -or $_.Name.LocalizedValue -like '*DCDSv6*' }
-
-        $checkedAny = $false
-        foreach ($quota in @($ddsv6, $dcsdsv6)) {
-            if (-not $quota) { continue }
-            $checkedAny = $true
-            $available  = $quota.Limit - $quota.CurrentValue
-            $label      = $quota.Name.LocalizedValue
-            if ($available -gt 0) {
-                Write-Host "  ✓ ${label}: $($quota.CurrentValue)/$($quota.Limit) vCPUs used ($available available)" -ForegroundColor Green
-                Write-Log "${label} quota: $($quota.CurrentValue)/$($quota.Limit) ($available available)" -Level Info
-            }
-            else {
-                Write-Host "  ✗ ${label}: $($quota.CurrentValue)/$($quota.Limit) vCPUs used (none available)" -ForegroundColor Red
-                Write-Log "${label} quota exhausted: $($quota.CurrentValue)/$($quota.Limit)" -Level Warning
-                $quotaIssues += "vCPU quota for ${label} is at its limit in ${Location} — a quota increase request is required"
-            }
-        }
-
-        if (-not $checkedAny) {
-            Write-Host "  ⚠ Standard DDSv6 / DCDSv6 quota not found in ${Location} — VM series may not be available here" -ForegroundColor Yellow
-            Write-Log "Standard DDSv6/DCDSv6 quota not found in region: $Location" -Level Warning
-            $quotaIssues += "Standard D2ds v6 / Standard DC2ds v6 quota was not found in ${Location} — confirm this VM series is available in this region"
-        }
-    }
-    catch {
-        Write-Host "  ⚠ Could not check vCPU quota: $_" -ForegroundColor Yellow
-        Write-Log "vCPU quota check failed: $_" -Level Warning
-    }
 
     # Azure OpenAI quota — gpt-5.4-mini
     Write-Host "  Checking Azure OpenAI gpt-5.4-mini quota..." -ForegroundColor Gray
@@ -3286,35 +3251,6 @@ function Get-PromptLabel {
     return "Default: "
 }
 
-function Resolve-BudgetEmailRecipients {
-    <#
-    .SYNOPSIS
-        Normalizes budget / cost-report recipients into a validated, de-duplicated email list.
-    .DESCRIPTION
-        Accepts either an array (from an answer-file JSON list) or a single string with addresses
-        separated by commas or semicolons (from interactive input). Trims each entry, drops blanks
-        and duplicates, and throws on the first malformed address so callers can surface a clear
-        error and fall back to interactive entry.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $false)]$Value
-    )
-
-    if ($null -eq $Value) { return @() }
-
-    $items = if ($Value -is [System.Array]) { $Value } else { ([string]$Value) -split '[,;]' }
-
-    $result = @()
-    foreach ($item in $items) {
-        $e = ([string]$item).Trim()
-        if ([string]::IsNullOrWhiteSpace($e)) { continue }
-        if ($e -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') { throw "'$e' is not a valid email address." }
-        if ($result -notcontains $e) { $result += $e }
-    }
-    return @($result)
-}
-
 function Test-AnswerFileComplete {
     <#
     .SYNOPSIS
@@ -3415,8 +3351,6 @@ function Set-ConfigFromAnswerFile {
     if (@('dev', 'prd') -notcontains $et) { throw "environmentType '$et' must be 'dev' or 'prd'." }
     $script:EnvironmentType = $et
 
-    Initialize-ConfigurationFile
-
     # Organization name (no default)
     $on = ([string](Get-Answer 'organizationName')).Trim()
     if ([string]::IsNullOrWhiteSpace($on)) { throw "organizationName is required." }
@@ -3448,6 +3382,9 @@ function Set-ConfigFromAnswerFile {
     if ([string]::IsNullOrWhiteSpace($ei)) { $ei = '01' }
     if ($ei -notmatch '^\d+$' -or [int]$ei -lt 1 -or [int]$ei -gt 99) { throw "environmentIndex '$ei' must be between 01 and 99." }
     $script:EnvironmentIndex = ([int]$ei).ToString('00')
+
+    # Config file name now that org code, env type, and env index are known
+    Initialize-ConfigurationFile
 
     # Resource group name (computed default; the answer file has no override field)
     $script:ResourceGroupName = "rg-neo-$($script:OrganizationCode)$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
@@ -3583,7 +3520,7 @@ function Start-NeologikOnboarding {
             Write-Host "  A saved checkpoint was found ($ageStr):" -ForegroundColor Gray
             Write-Host "  $($existingCheckpoint.Name)" -ForegroundColor Cyan
             Write-Host ""
-            Write-Host "  Resume from this checkpoint? (default: Y): " -NoNewline -ForegroundColor Yellow
+            Write-Host "  Resume from this checkpoint? (Y/N, default: Y): " -NoNewline -ForegroundColor Yellow
             $resumeChoice = Read-Host
 
             if ([string]::IsNullOrWhiteSpace($resumeChoice) -or $resumeChoice -eq 'Y' -or $resumeChoice -eq 'y') {
@@ -3779,17 +3716,22 @@ function Start-NeologikOnboarding {
         $orgCodeValid = $false
         while (-not $orgCodeValid) {
             Write-Host ""
-            Write-Host "Organization Code (exactly 3 characters):" -ForegroundColor Cyan
+            Write-Host "Organization Code:" -ForegroundColor Cyan
             if ($orgCodePrefill) {
                 Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
                 Write-Host $orgCodePrefill -ForegroundColor Yellow
-            }
-            Write-Host "  Requirements: lowercase, exactly 3 characters, letters and numbers only" -ForegroundColor Gray
-            if ($orgCodePrefill) {
                 Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
             }
-            else {
+            else
+            {
+                Write-Host "  Example: " -NoNewLine -ForegroundColor Gray
+                Write-Host "abc" -ForegroundColor Yellow
+                Write-Host "  Requirements: lowercase, exactly 3 characters, letters and numbers only" -ForegroundColor Gray
                 Write-Host "  Enter organization code: " -NoNewline -ForegroundColor Gray
+            }
+            if ($orgCodePrefill) {
+            }
+            else {
             }
             $orgInput = Read-Host
 
@@ -3863,9 +3805,6 @@ function Start-NeologikOnboarding {
             }
         }
 
-        # Initialize configuration file now that we have org code and environment type
-        Initialize-ConfigurationFile
-
         # Get Organization Name
         $orgNamePrefill = Get-Answer 'organizationName'
         Write-Host ""
@@ -3876,7 +3815,8 @@ function Start-NeologikOnboarding {
             Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
         }
         else {
-            Write-Host "  Example: Contoso Ltd, Acme Corporation" -ForegroundColor Gray
+            Write-Host "  Example: " -NoNewLine -ForegroundColor Gray
+            Write-Host "Contoso Ltd" -ForegroundColor Yellow
             Write-Host "  Enter organization name: " -NoNewline -ForegroundColor Gray
         }
         $orgNameInput = Read-Host
@@ -3905,7 +3845,8 @@ function Start-NeologikOnboarding {
             Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
         }
         else {
-            Write-Host "  Example: neologik.contoso.com, xyzprd.neologik.ai" -ForegroundColor Gray
+            Write-Host "  Example: " -NoNewLine -ForegroundColor Gray
+            Write-Host "neologik.contoso.com, abcprd.neologik.ai" -ForegroundColor Yellow
             Write-Host "  Enter full hostname: " -NoNewline -ForegroundColor Gray
         }
         $fqdnInput = Read-Host
@@ -4017,7 +3958,8 @@ function Start-NeologikOnboarding {
                 }
                 Write-Host "  Type 'list' to see all available regions" -ForegroundColor Gray
             } else {
-                Write-Host "  Examples: uksouth, ukwest, eastus, westus, northeurope, westeurope" -ForegroundColor Gray
+                Write-Host "  Example: " -NoNewLine -ForegroundColor Gray
+                Write-Host "uksouth, ukwest, eastus, westus, northeurope, westeurope" -ForegroundColor Yellow
             }
             
             Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
@@ -4149,6 +4091,9 @@ function Start-NeologikOnboarding {
             }
         }
 
+        # Config file name now that org code, env type, and env index are known
+        Initialize-ConfigurationFile
+
         # Calculate resource group name based on inputs
         # Use Azure region codes from real-time lookup
         $regionAbbrev = if ($script:AzureRegionCodes -and $script:AzureRegionCodes.ContainsKey($script:AzureRegion.ToLower())) {
@@ -4258,15 +4203,24 @@ function Start-NeologikOnboarding {
 
         # Get Bot Names (Agent Name and Short Name for each bot)
         $botsAnswer = @(Get-Answer 'bots')
+        # Built-in suggested agent name (the product name), offered as the prompt default when the
+        # answer file has no value for this bot.
+        $agentNameBuiltinDefault = 'Neologik'
         $script:BotConfigurations = @()
         for ($i = 1; $i -le $script:BotCount; $i++) {
-            # No built-in default — the agent name is client-specific. Pre-fill from the answer
-            # file when present, otherwise require input.
+            # Agent-name suggestion: prefer the answer-file value; otherwise fall back to the
+            # built-in default, but only while it is still free (so a second bot is not offered a
+            # name an earlier bot already took).
             $agentNamePrefill = $null
+            $agentNameFromAnswer = $false
             if ($botsAnswer.Count -ge $i -and $botsAnswer[$i - 1] -and $botsAnswer[$i - 1].agentName) {
                 $anp = ([string]$botsAnswer[$i - 1].agentName).Trim()
-                if (-not [string]::IsNullOrWhiteSpace($anp)) { $agentNamePrefill = $anp }
+                if (-not [string]::IsNullOrWhiteSpace($anp)) { $agentNamePrefill = $anp; $agentNameFromAnswer = $true }
             }
+            if (-not $agentNamePrefill -and -not ($script:BotConfigurations | Where-Object { $_.AgentName -eq $agentNameBuiltinDefault })) {
+                $agentNamePrefill = $agentNameBuiltinDefault
+            }
+            $agentNameLabel = if ($agentNameFromAnswer) { 'Pre-filled: ' } else { 'Default: ' }
             $agentNameValid = $false
             $agentName = ""
 
@@ -4275,12 +4229,12 @@ function Start-NeologikOnboarding {
                 Write-Host ""
                 Write-Host "Full Agent Name for Bot $i`:" -ForegroundColor Cyan
                 if ($agentNamePrefill) {
-                    Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
+                    Write-Host "  $agentNameLabel" -NoNewline -ForegroundColor Gray
                     Write-Host $agentNamePrefill -ForegroundColor Yellow
                 }
                 Write-Host "  Requirements: letters, numbers, spaces, dashes, and underscores allowed" -ForegroundColor Gray
                 if ($agentNamePrefill) {
-                    Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
+                    Write-Host "  Press Enter to accept, or type a new value: " -NoNewline -ForegroundColor Gray
                 }
                 else {
                     Write-Host "  Enter agent name: " -NoNewline -ForegroundColor Gray
@@ -4331,12 +4285,12 @@ function Start-NeologikOnboarding {
                 if ($botShortNamePrefill) {
                     Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
                     Write-Host $botShortNamePrefill -ForegroundColor Yellow
-                }
-                Write-Host "  Requirements: lowercase, max 4 characters, letters and dashes only" -ForegroundColor Gray
-                if ($botShortNamePrefill) {
                     Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
                 }
                 else {
+                    Write-Host "  Example: " -NoNewLine -ForegroundColor Gray
+                    Write-Host "bot" -ForegroundColor Yellow
+                    Write-Host "  Requirements: lowercase, max 4 characters, letters and dashes only" -ForegroundColor Gray
                     Write-Host "  Enter short name: " -NoNewline -ForegroundColor Gray
                 }
                 $botShortNameInput = Read-Host

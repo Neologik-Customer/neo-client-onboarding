@@ -1,5 +1,5 @@
 name: Prepare Onboarding Zip
-run-name: "${{ inputs.organizationCode != '' && inputs.organizationCode || '(Empty)' }} Prepare Onboarding Zip"
+run-name: "${{ inputs.organizationCode != '' && inputs.organizationCode || '(Empty)' }} Prepare Onboarding Zip (${{ inputs.ref }})"
 
 # Assembles a distributable onboarding kit: this repo zipped up with a generated
 # inputs.json (built from the dispatch inputs below), uploaded to the central dev
@@ -12,6 +12,11 @@ run-name: "${{ inputs.organizationCode != '' && inputs.organizationCode || '(Emp
 on:
   workflow_dispatch:
     inputs:
+      ref:
+        description: "Branch (or ref) to build the onboarding kit from"
+        required: false
+        default: main
+        type: string
       organizationCode:
         description: "Organization code — exactly 3 lowercase alphanumeric chars (e.g. xyz)"
         required: false
@@ -82,6 +87,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Validate and normalize inputs
         env:
@@ -90,7 +97,6 @@ jobs:
           IN_FQDN: ${{ inputs.fqdn }}
           IN_REGION: ${{ inputs.azureRegion }}
           IN_ENV_INDEX: ${{ inputs.environmentIndex }}
-          IN_BUDGET_EMAILS: ${{ inputs.budgetCostReportEmailRecipients }}
           IN_AGENT_NAMES: ${{ inputs.agentNames }}
           IN_SHORT_NAMES: ${{ inputs.shortNames }}
         run: |
@@ -139,21 +145,6 @@ jobs:
             EI=$(printf '%02d' "$n")
           fi
 
-          # --- budgetCostReportEmailRecipients: comma-separated emails (blank -> script default) ---
-          BUDGET_JSON='[]'
-          if [ -n "$(printf '%s' "$IN_BUDGET_EMAILS" | tr -d '[:space:]')" ]; then
-            BUDGET_JSON=$(jq -cn --arg s "$IN_BUDGET_EMAILS" \
-              '$s | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
-            NB=$(jq 'length' <<<"$BUDGET_JSON")
-            if [ "$NB" -gt 0 ]; then
-              for i in $(seq 0 $((NB - 1))); do
-                EM=$(jq -r ".[$i]" <<<"$BUDGET_JSON")
-                printf '%s' "$EM" | grep -Eq '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' \
-                  || fail "budgetCostReportEmailRecipients: '$EM' is not a valid email address."
-              done
-            fi
-          fi
-
           # --- bots: comma-separated agentNames / shortNames ---
           parse_csv() {
             local s="$1"
@@ -191,7 +182,6 @@ jobs:
             echo "NORM_FQDN=$FQ"
             echo "NORM_REGION=$RG"
             echo "NORM_ENV_INDEX=$EI"
-            echo "BUDGET_JSON=$BUDGET_JSON"
             echo "BOTS_JSON=$BOTS"
             echo "PARSED_BOT_COUNT=$NA"
           } >> "$GITHUB_ENV"
@@ -200,7 +190,6 @@ jobs:
       - name: Build inputs.json and assemble zip
         env:
           IN_ENV_TYPE: ${{ inputs.environmentType }}
-          IN_REGISTER_RPS: ${{ inputs.registerResourceProviders }}
         run: |
           set -euo pipefail
 
@@ -221,8 +210,6 @@ jobs:
             --arg azureRegion "$NORM_REGION" \
             --arg environmentIndex "$NORM_ENV_INDEX" \
             --arg botCount "$EFFECTIVE_BOT_COUNT" \
-            --arg registerRPs "$IN_REGISTER_RPS" \
-            --argjson budgetRecipients "${BUDGET_JSON:-[]}" \
             --argjson bots "${BOTS_JSON:-[]}" \
             '
             {
