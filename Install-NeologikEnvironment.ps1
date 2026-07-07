@@ -99,6 +99,9 @@ $script:ProviderRegistrations = @{}
 $script:CheckpointFile = Join-Path $PSScriptRoot "NeologikCheckpoint.json"
 $script:CheckpointRegionAbbrev = $null
 
+# Built-in default recipients for the budget / cost-report emails (used when inputs.json omits the field)
+$script:DefaultBudgetCostReportEmailRecipients = @('support_budget_alerts@neologik.ai')
+
 # Load Neologik guest user emails from file
 $script:GuestUsersFile = Join-Path $PSScriptRoot "NeologikGuestUsers.txt"
 if (Test-Path $script:GuestUsersFile) {
@@ -2551,6 +2554,8 @@ function Export-ConfigurationData {
             'HostName' = $script:ConfigData['HostName']
             'BotCount' = $script:ConfigData['BotCount']
             'Bots' = $script:ConfigData['Bots']
+            'BudgetCostReportEmailRecipients' = $script:ConfigData['BudgetCostReportEmailRecipients']
+            'RegisterResourceProviders' = $script:ConfigData['RegisterResourceProviders']
             'InvitedGuestUsers' = $script:ConfigData['InvitedGuestUsers']
             'SecurityGroups' = $script:ConfigData['SecurityGroups']
             'AppRegistration' = $script:ConfigData['AppRegistration']
@@ -2736,7 +2741,7 @@ function Export-ConfigurationData {
         Write-Host "  1. Review the configuration file (available locally and in Storage Account)"
         Write-Host "  2. Service principal client secret is securely stored in Key Vault: $($script:ConfigData['KeyVault'].Name)"
         Write-Host "     Secret name: $($script:ConfigData['KeyVault'].SecretName)"
-        Write-Host "  3. Import your TLS certificate (.pfx file) into Key Vault as a certificate:"
+        Write-Host "  3. Import your TLS certificate (.pfx file) into Key Vault as a certificate (if using own hostname):"
         Write-Host "     Key Vault:        $($script:ConfigData['KeyVault'].Name)"
         Write-Host "     Certificate name: keyvault-neo-ingress"
         Write-Host "     Command:"
@@ -2843,6 +2848,35 @@ function Get-PromptLabel {
 
     if ("$Effective" -ne "$Builtin") { return "Pre-filled: " }
     return "Default: "
+}
+
+function Resolve-BudgetEmailRecipients {
+    <#
+    .SYNOPSIS
+        Normalizes budget / cost-report recipients into a validated, de-duplicated email list.
+    .DESCRIPTION
+        Accepts either an array (from an answer-file JSON list) or a single string with addresses
+        separated by commas or semicolons (from interactive input). Trims each entry, drops blanks
+        and duplicates, and throws on the first malformed address so callers can surface a clear
+        error and fall back to interactive entry.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]$Value
+    )
+
+    if ($null -eq $Value) { return @() }
+
+    $items = if ($Value -is [System.Array]) { $Value } else { ([string]$Value) -split '[,;]' }
+
+    $result = @()
+    foreach ($item in $items) {
+        $e = ([string]$item).Trim()
+        if ([string]::IsNullOrWhiteSpace($e)) { continue }
+        if ($e -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') { throw "'$e' is not a valid email address." }
+        if ($result -notcontains $e) { $result += $e }
+    }
+    return @($result)
 }
 
 function Test-AnswerFileComplete {
@@ -3007,6 +3041,25 @@ function Set-ConfigFromAnswerFile {
     }
     $script:ConfigData['BotCount'] = $script:BotCount
     $script:ConfigData['Bots'] = $script:BotConfigurations
+
+    # Budget / cost-report email recipients (optional list; falls back to the built-in default)
+    $bcrAns = Get-Answer 'budgetCostReportEmailRecipients'
+    if ($null -ne $bcrAns) {
+        $recipients = @(Resolve-BudgetEmailRecipients $bcrAns)
+        if ($recipients.Count -eq 0) { throw "budgetCostReportEmailRecipients was provided but contains no valid email address." }
+    }
+    else {
+        $recipients = @($script:DefaultBudgetCostReportEmailRecipients)
+    }
+    $script:ConfigData['BudgetCostReportEmailRecipients'] = $recipients
+
+    # Register-all-resource-providers step (optional boolean; defaults to enabled)
+    $rrpAns = Get-Answer 'registerResourceProviders'
+    if ($null -eq $rrpAns) { $script:ConfigData['RegisterResourceProviders'] = $true }
+    elseif ($rrpAns -is [bool]) { $script:ConfigData['RegisterResourceProviders'] = [bool]$rrpAns }
+    elseif ("$rrpAns" -match '^(true|yes|y|1)$') { $script:ConfigData['RegisterResourceProviders'] = $true }
+    elseif ("$rrpAns" -match '^(false|no|n|0)$') { $script:ConfigData['RegisterResourceProviders'] = $false }
+    else { throw "registerResourceProviders '$rrpAns' must be true or false." }
 
     # Solution names
     $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode)$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
@@ -3898,6 +3951,84 @@ function Start-NeologikOnboarding {
         $script:ConfigData['BotCount'] = $script:BotCount
         $script:ConfigData['Bots'] = $script:BotConfigurations
 
+        # Get Budget / Cost-Report Email Recipients (optional list; falls back to the built-in default)
+        $budgetDefaultList = @()
+        $budgetAns = Get-Answer 'budgetCostReportEmailRecipients'
+        if ($null -ne $budgetAns) {
+            try { $budgetDefaultList = @(Resolve-BudgetEmailRecipients $budgetAns) }
+            catch { Write-Host "  ⚠ Ignoring invalid budgetCostReportEmailRecipients from answer file: $($_.Exception.Message)" -ForegroundColor Yellow }
+        }
+        if ($budgetDefaultList.Count -eq 0) { $budgetDefaultList = @($script:DefaultBudgetCostReportEmailRecipients) }
+        $budgetDefault = $budgetDefaultList -join ', '
+        $budgetLabel = Get-PromptLabel $budgetDefault ($script:DefaultBudgetCostReportEmailRecipients -join ', ')
+        $budgetValid = $false
+        while (-not $budgetValid) {
+            Write-Host ""
+            Write-Host "Budget / Cost-Report Email Recipients:" -ForegroundColor Cyan
+            Write-Host "  $budgetLabel" -NoNewline -ForegroundColor Gray
+            Write-Host $budgetDefault -ForegroundColor Yellow
+            Write-Host "  Recipients of the monthly budget alert and scheduled cost report. Separate multiple with commas." -ForegroundColor Gray
+            Write-Host "  Press Enter to use default, or type new value(s): " -NoNewline -ForegroundColor Gray
+            $budgetInput = Read-Host
+
+            if ([string]::IsNullOrWhiteSpace($budgetInput)) {
+                $script:ConfigData['BudgetCostReportEmailRecipients'] = @($budgetDefaultList)
+                $budgetValid = $true
+                Write-Host "  ✓ Using default: $budgetDefault" -ForegroundColor Green
+            }
+            else {
+                try {
+                    $parsedRecipients = @(Resolve-BudgetEmailRecipients $budgetInput)
+                    if ($parsedRecipients.Count -eq 0) { throw "No valid email address entered." }
+                    $script:ConfigData['BudgetCostReportEmailRecipients'] = $parsedRecipients
+                    $budgetValid = $true
+                    Write-Host "  ✓ Using: $($parsedRecipients -join ', ')" -ForegroundColor Green
+                }
+                catch {
+                    Write-Host "  ✗ $($_.Exception.Message) Please try again." -ForegroundColor Red
+                }
+            }
+        }
+
+        # Register all required Azure resource providers? (optional; defaults to enabled)
+        $rpDefault = $true
+        $rpAns = Get-Answer 'registerResourceProviders'
+        if ($rpAns -is [bool]) { $rpDefault = [bool]$rpAns }
+        elseif ($rpAns -and "$rpAns" -match '^(true|yes|y|1)$') { $rpDefault = $true }
+        elseif ($rpAns -and "$rpAns" -match '^(false|no|n|0)$') { $rpDefault = $false }
+        elseif ($rpAns) { Write-Host "  ⚠ Ignoring invalid registerResourceProviders '$rpAns' from answer file (must be true/false)." -ForegroundColor Yellow }
+        $rpDefaultText = if ($rpDefault) { 'Y' } else { 'N' }
+        $rpLabel = Get-PromptLabel $rpDefaultText 'Y'
+        $rpValid = $false
+        while (-not $rpValid) {
+            Write-Host ""
+            Write-Host "Register all required Azure resource providers?" -ForegroundColor Cyan
+            Write-Host "  $rpLabel" -NoNewline -ForegroundColor Gray
+            Write-Host $rpDefaultText -ForegroundColor Yellow
+            Write-Host "  (Choose N only if the subscription's providers are already registered or the deploying identity lacks the /register permission.)" -ForegroundColor Gray
+            Write-Host "  Press Enter to use default, or type Y/N: " -NoNewline -ForegroundColor Gray
+            $rpInput = (Read-Host).Trim()
+
+            if ([string]::IsNullOrWhiteSpace($rpInput)) {
+                $script:ConfigData['RegisterResourceProviders'] = $rpDefault
+                $rpValid = $true
+                Write-Host "  ✓ Using default: $rpDefaultText" -ForegroundColor Green
+            }
+            elseif ($rpInput -match '^(y|yes)$') {
+                $script:ConfigData['RegisterResourceProviders'] = $true
+                $rpValid = $true
+                Write-Host "  ✓ Using: Y" -ForegroundColor Green
+            }
+            elseif ($rpInput -match '^(n|no)$') {
+                $script:ConfigData['RegisterResourceProviders'] = $false
+                $rpValid = $true
+                Write-Host "  ✓ Using: N" -ForegroundColor Green
+            }
+            else {
+                Write-Host "  ✗ Please enter Y or N." -ForegroundColor Red
+            }
+        }
+
         # Calculate solution names based on configuration
         $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
         $script:ConfigData['SolutionShortName'] = "neo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
@@ -3924,6 +4055,8 @@ function Start-NeologikOnboarding {
         foreach ($bot in $script:BotConfigurations) {
             Write-Host "  Bot:                  " -NoNewline; Write-Host "$($bot.AgentName) (short: $($bot.ShortName))" -ForegroundColor Yellow
         }
+        Write-Host "  Budget Report Emails: " -NoNewline; Write-Host (@($script:ConfigData['BudgetCostReportEmailRecipients']) -join ', ') -ForegroundColor Yellow
+        Write-Host "  Register Providers:   " -NoNewline; Write-Host $(if ($script:ConfigData['RegisterResourceProviders']) { 'Yes' } else { 'No' }) -ForegroundColor Yellow
         Write-Host ""
         if ($answerComplete) {
             # Required confirmation — no default; the user must type Y (continue) or N (edit).
@@ -3955,6 +4088,14 @@ function Start-NeologikOnboarding {
         } else {
             # Resume path: restore the region abbreviation local variable from checkpoint data.
             $regionAbbrev = $script:CheckpointRegionAbbrev
+
+            # Back-compat: checkpoints written before these inputs existed lack the keys — default them.
+            if (-not $script:ConfigData.ContainsKey('BudgetCostReportEmailRecipients')) {
+                $script:ConfigData['BudgetCostReportEmailRecipients'] = @($script:DefaultBudgetCostReportEmailRecipients)
+            }
+            if (-not $script:ConfigData.ContainsKey('RegisterResourceProviders')) {
+                $script:ConfigData['RegisterResourceProviders'] = $true
+            }
 
             Write-Host "`n  ⏩ Configuration restored from checkpoint — skipping input prompts" -ForegroundColor Gray
             Write-Host "     Org: $($script:OrganizationCode)  |  Env: $($script:EnvironmentType)  |  Region: $($script:AzureRegion)" -ForegroundColor Cyan
@@ -4001,8 +4142,15 @@ function Start-NeologikOnboarding {
             -SecurityGroups $securityGroups `
             -SubscriptionId $script:ConfigData['SubscriptionId']
 
-        # Step 13: Register all required Azure resource providers
-        Register-AllResourceProviders
+        # Step 13: Register all required Azure resource providers (optional — controlled by the
+        # registerResourceProviders input; a missing value defaults to registering).
+        if ($script:ConfigData['RegisterResourceProviders'] -ne $false) {
+            Register-AllResourceProviders
+        }
+        else {
+            Write-Log "Skipping resource provider registration (registerResourceProviders = false)" -Level Info
+            Write-Host "`n  ⏩ Skipping resource provider registration (disabled via input)" -ForegroundColor Gray
+        }
         Complete-OnboardingStep 'ResourceProviders'
 
         # Step 14: Create Storage Account and blob container for certificates

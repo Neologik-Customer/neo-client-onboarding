@@ -8,6 +8,8 @@
   "environmentType": "dev",
   "azureRegion": "uksouth",
   "environmentIndex": "01",
+  "budgetCostReportEmailRecipients": ["support_budget_alerts@neologik.ai"],
+  "registerResourceProviders": true,
 
   "botCount": 1,
   "bots": [
