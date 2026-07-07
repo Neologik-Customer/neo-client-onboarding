@@ -50,16 +50,6 @@ on:
         required: false
         default: ""
         type: string
-      budgetCostReportEmailRecipients:
-        description: "Budget / cost-report email recipient(s), comma-separated (blank = default support_budget_alerts@neologik.ai)"
-        required: false
-        default: ""
-        type: string
-      registerResourceProviders:
-        description: "Run the register-all-resource-providers step (uncheck if providers are already registered or the identity lacks /register)"
-        required: false
-        default: false
-        type: boolean
       agentNames:
         description: "Bot agent name(s), comma-separated, max 3 (e.g. Finance Bot, HR Bot)"
         required: false
@@ -97,7 +87,6 @@ jobs:
           IN_FQDN: ${{ inputs.fqdn }}
           IN_REGION: ${{ inputs.azureRegion }}
           IN_ENV_INDEX: ${{ inputs.environmentIndex }}
-          IN_BUDGET_EMAILS: ${{ inputs.budgetCostReportEmailRecipients }}
           IN_AGENT_NAMES: ${{ inputs.agentNames }}
           IN_SHORT_NAMES: ${{ inputs.shortNames }}
         run: |
@@ -146,21 +135,6 @@ jobs:
             EI=$(printf '%02d' "$n")
           fi
 
-          # --- budgetCostReportEmailRecipients: comma-separated emails (blank -> script default) ---
-          BUDGET_JSON='[]'
-          if [ -n "$(printf '%s' "$IN_BUDGET_EMAILS" | tr -d '[:space:]')" ]; then
-            BUDGET_JSON=$(jq -cn --arg s "$IN_BUDGET_EMAILS" \
-              '$s | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
-            NB=$(jq 'length' <<<"$BUDGET_JSON")
-            if [ "$NB" -gt 0 ]; then
-              for i in $(seq 0 $((NB - 1))); do
-                EM=$(jq -r ".[$i]" <<<"$BUDGET_JSON")
-                printf '%s' "$EM" | grep -Eq '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' \
-                  || fail "budgetCostReportEmailRecipients: '$EM' is not a valid email address."
-              done
-            fi
-          fi
-
           # --- bots: comma-separated agentNames / shortNames ---
           parse_csv() {
             local s="$1"
@@ -198,7 +172,6 @@ jobs:
             echo "NORM_FQDN=$FQ"
             echo "NORM_REGION=$RG"
             echo "NORM_ENV_INDEX=$EI"
-            echo "BUDGET_JSON=$BUDGET_JSON"
             echo "BOTS_JSON=$BOTS"
             echo "PARSED_BOT_COUNT=$NA"
           } >> "$GITHUB_ENV"
@@ -207,7 +180,6 @@ jobs:
       - name: Build inputs.json and assemble zip
         env:
           IN_ENV_TYPE: ${{ inputs.environmentType }}
-          IN_REGISTER_RPS: ${{ inputs.registerResourceProviders }}
         run: |
           set -euo pipefail
 
@@ -228,8 +200,6 @@ jobs:
             --arg azureRegion "$NORM_REGION" \
             --arg environmentIndex "$NORM_ENV_INDEX" \
             --arg botCount "$EFFECTIVE_BOT_COUNT" \
-            --arg registerRPs "$IN_REGISTER_RPS" \
-            --argjson budgetRecipients "${BUDGET_JSON:-[]}" \
             --argjson bots "${BOTS_JSON:-[]}" \
             '
             {
@@ -239,9 +209,6 @@ jobs:
               environmentType: $environmentType,
               azureRegion: $azureRegion,
               environmentIndex: $environmentIndex,
-              budgetCostReportEmailRecipients: (if ($budgetRecipients | length) == 0 then null else $budgetRecipients end),
-              # Only emitted when disabling; left out (true) so the script keeps its built-in default.
-              registerResourceProviders: (if $registerRPs == "false" then false else null end),
               botCount: (if $botCount == "" then null else ($botCount | tonumber) end),
               bots: (if ($bots | length) == 0 then null else $bots end)
             }
