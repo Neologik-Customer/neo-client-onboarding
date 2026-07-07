@@ -6,6 +6,9 @@
 # Configuration output files
 *Configuration*.json
 
+# Real predefined-input file (client-specific values)
+inputs.json
+
 # PowerShell temporary files
 *.tmp
 *.temp
