@@ -1,5 +1,5 @@
 name: Prepare Onboarding Zip
-run-name: "${{ inputs.organizationCode != '' && inputs.organizationCode || '(Empty)' }} Prepare Onboarding Zip"
+run-name: "${{ inputs.organizationCode != '' && inputs.organizationCode || '(Empty)' }} Prepare Onboarding Zip (${{ inputs.ref }})"
 
 # Assembles a distributable onboarding kit: this repo zipped up with a generated
 # inputs.json (built from the dispatch inputs below), uploaded to the central dev
@@ -12,6 +12,11 @@ run-name: "${{ inputs.organizationCode != '' && inputs.organizationCode || '(Emp
 on:
   workflow_dispatch:
     inputs:
+      ref:
+        description: "Branch (or ref) to build the onboarding kit from"
+        required: false
+        default: main
+        type: string
       organizationCode:
         description: "Organization code — exactly 3 lowercase alphanumeric chars (e.g. xyz)"
         required: false
@@ -82,6 +87,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Validate and normalize inputs
         env:

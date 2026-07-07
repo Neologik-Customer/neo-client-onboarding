@@ -38,3 +38,4 @@ secrets/
 *.bak
 *.backup
 *~
+NeologikCheckpoint.json
