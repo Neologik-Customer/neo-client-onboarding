@@ -1,0 +1,46 @@
+name: Prepare Onboarding Zip
+run-name: "[${{ inputs.organizationCode }}] Prepare Onboarding Zip"
+
+# STUB: skeleton only. Fleshes out later into the job that assembles the
+# onboarding kit (script + inputs-example.json + docs, and any per-client
+# inputs.json) into a single distributable zip.
+
+on:
+  workflow_dispatch:
+    inputs:
+      organizationCode:
+        description: "3-letter organization code (used to label the zip)"
+        required: true
+        type: string
+      environmentType:
+        description: "Environment type"
+        required: false
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prd
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-zip:
+    name: Prepare onboarding zip
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # TODO: assemble the onboarding kit (Install-NeologikEnvironment.ps1,
+      # inputs-example.json, NeologikGuestUsers.txt, docs, and any per-client
+      # inputs.json) into a single zip for distribution.
+      - name: Assemble onboarding zip (stub)
+        run: |
+          echo "TODO: package onboarding kit for '${{ inputs.organizationCode }}' (${{ inputs.environmentType }})"
+          echo "TODO: produce onboarding-${{ inputs.organizationCode }}-${{ inputs.environmentType }}.zip"
+
+      # TODO: publish the assembled zip (upload-artifact and/or another target).
+      - name: Publish onboarding zip (stub)
+        run: |
+          echo "TODO: upload the produced zip as a workflow artifact"
