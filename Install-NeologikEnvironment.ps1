@@ -1646,7 +1646,7 @@ function New-NeologikAppRegistration {
             ObjectId = $app.Id
             ServicePrincipalId = $sp.Id
             SecretExpiry = $secretEndDate.ToString('yyyy-MM-dd')
-            SubscriptionRoles = @()
+            SubscriptionRoles = @('Reader')
             RGRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
             GraphAppRoles = @('Application.Read.All', 'Application.ReadWrite.OwnedBy')
         }
@@ -1713,7 +1713,7 @@ function Get-NeologikExistingAppRegistration {
             ServicePrincipalId = $sp.Id
             SecretExpiry = 'client-managed'
             Source = 'client-provided'
-            SubscriptionRoles = @()
+            SubscriptionRoles = @('Reader')
             RGRoles = $requiredRgRoles
             GraphAppRoles = @('Application.Read.All', 'Application.ReadWrite.OwnedBy')
         }
@@ -1984,12 +1984,15 @@ function Set-AppRegistrationRoles {
             }
         }
 
-        # No subscription-scoped roles for the deployment SP. Every pipeline operation is now
-        # RG-scoped: the cost-management scheduled email and provider/feature registration moved
-        # to this onboarding script (run as Owner), the resource group is pre-created here, and
-        # the Cognitive Services soft-delete purge was removed. RG-scoped Contributor (below)
-        # plus 'Role Based Access Control Administrator' cover the deployment.
-        $roles = @()
+        # Subscription-scoped roles for the deployment SP. Every WRITE operation is RG-scoped
+        # (cost-management email, provider/feature registration and the resource group are
+        # handled by this onboarding script run as Owner; RG-scoped Contributor plus 'Role
+        # Based Access Control Administrator' below cover the deployment writes). 'Reader' is
+        # the one subscription-scoped role required: the infrastructure deploy's SKU/quota
+        # pre-flight reads subscription/location-level usage APIs (e.g. az search usage list =
+        # Microsoft.Search/locations/usages/read) that RG scope does not grant. Reader is
+        # read-only, so it stays within the least-privilege intent.
+        $roles = @('Reader')
 
         foreach ($roleName in $roles) {
             Write-Log "Assigning $roleName role..." -Level Info
