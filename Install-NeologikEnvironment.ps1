@@ -44,6 +44,26 @@
 .PARAMETER SkipModuleInstall
     Skip Azure module installation check.
 
+.PARAMETER SkipGuestInvitation
+    Skip inviting Neologik guest users. Use when the client provisions its own
+    accounts within its own tenant (no B2B guests). Security groups are still
+    created, seeded with the signed-in user only.
+
+.PARAMETER ExistingServicePrincipalObjectId
+    Object ID (enterprise-application / service-principal object ID, not the app/client
+    ID) of a pre-existing service principal supplied by the client. When provided, the
+    script does NOT create an app registration, service principal, or client secret, and
+    does NOT assign roles or Graph permissions to it - the client owns the SP and grants
+    it the required resource-group-scoped roles themselves. The script resolves the SP's
+    client (app) ID for the configuration output.
+
+.PARAMETER ExistingServicePrincipalSecret
+    Client secret for the pre-existing service principal (shared by the client). Stored
+    in Key Vault as 'neologik-deployment-service-principle-secret' for the deployment
+    pipeline. Optional: if omitted, the Key Vault is still created but the secret is not
+    stored - the client must add it manually before the first deployment. Only meaningful
+    together with -ExistingServicePrincipalObjectId.
+
 .EXAMPLE
     .\Install-NeologikEnvironment.ps1 -OrganizationCode "ABC"
 
@@ -87,6 +107,15 @@ param(
 
     [Parameter(Mandatory = $false)]
     [switch]$SkipModuleInstall,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipGuestInvitation,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ExistingServicePrincipalObjectId,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ExistingServicePrincipalSecret,
 
     # Path to a JSON file of predefined inputs that pre-fill the interactive prompts.
     # When omitted, an 'inputs.json' next to the script is auto-detected.
@@ -1618,6 +1647,123 @@ function New-NeologikAppRegistration {
     }
 }
 
+function Get-NeologikExistingAppRegistration {
+    <#
+    .SYNOPSIS
+        Resolves a client-supplied, pre-existing service principal into the same shape
+        returned by New-NeologikAppRegistration, WITHOUT creating anything.
+    .DESCRIPTION
+        Used when the client owns the deployment service principal and shares its object
+        ID (and optionally its secret). No app registration, service principal, secret,
+        role assignment, or Graph consent is created - those remain the client's
+        responsibility. Only the client (app) ID is resolved for the configuration output.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ServicePrincipalObjectId,
+
+        [Parameter(Mandatory = $false)]
+        [string]$ProvidedSecret = ""
+    )
+
+    Write-Log "Using client-supplied service principal (object ID: $ServicePrincipalObjectId)..." -Level Info
+
+    try {
+        Import-Module Microsoft.Graph.Applications -ErrorAction Stop
+
+        # Resolve the service principal by its object ID to obtain the client (app) ID.
+        $sp = Get-MgServicePrincipal -ServicePrincipalId $ServicePrincipalObjectId -ErrorAction Stop
+        Write-Log "Resolved service principal '$($sp.DisplayName)' (client ID: $($sp.AppId))" -Level Success
+
+        # Best-effort resolve the backing application object ID (may be null if the app is
+        # owned in a different tenant or not readable with the current permissions).
+        $appObjectId = $null
+        try {
+            $app = Get-MgApplication -Filter "appId eq '$($sp.AppId)'" -ErrorAction SilentlyContinue
+            if ($app) { $appObjectId = $app.Id }
+        }
+        catch {
+            Write-Log "Could not resolve backing application object (continuing with client ID only): $_" -Level Warning
+        }
+
+        $requiredRgRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
+
+        $script:ConfigData['AppRegistration'] = @{
+            Name = $sp.DisplayName
+            ClientId = $sp.AppId
+            ObjectId = $appObjectId
+            ServicePrincipalId = $sp.Id
+            SecretExpiry = 'client-managed'
+            Source = 'client-provided'
+            SubscriptionRoles = @()
+            RGRoles = $requiredRgRoles
+            GraphAppRoles = @('Application.Read.All', 'Application.ReadWrite.OwnedBy')
+        }
+
+        Write-Host "`n  Client-provided service principal in use - the script will NOT assign roles." -ForegroundColor Yellow
+        Write-Host "  The client must grant this SP the following roles on '$($script:ResourceGroupName)':" -ForegroundColor Yellow
+        $requiredRgRoles | ForEach-Object { Write-Host "    - $_" -ForegroundColor Gray }
+        Write-Host ""
+
+        return @{
+            Application = if ($appObjectId) { $app } else { @{ Id = $null; AppId = $sp.AppId } }
+            ServicePrincipal = $sp
+            Secret = $ProvidedSecret
+        }
+    }
+    catch {
+        Write-Log "Failed to resolve client-supplied service principal '$ServicePrincipalObjectId': $_" -Level Error
+        throw "Could not resolve the service principal object ID '$ServicePrincipalObjectId'. Verify it is the enterprise-application (service-principal) object ID and that you are signed in to the correct tenant."
+    }
+}
+
+function Read-ExistingServicePrincipalChoice {
+    <#
+    .SYNOPSIS
+        Asks whether to use a pre-existing (client-provided) service principal and, if so,
+        collects its object ID and optional secret. A command-line
+        -ExistingServicePrincipalObjectId short-circuits the y/N prompt.
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$CliObjectId = "",
+        [string]$CliSecret = ""
+    )
+
+    # Command-line object ID provided: use it without prompting.
+    if (-not [string]::IsNullOrWhiteSpace($CliObjectId)) {
+        Write-Log "Existing service principal supplied via command line (object ID: $($CliObjectId.Trim()))." -Level Info
+        return @{ UseExisting = $true; ObjectId = $CliObjectId.Trim(); Secret = $CliSecret }
+    }
+
+    Write-Host ""
+    Write-Host "Use an existing (client-provided) service principal?" -ForegroundColor Cyan
+    Write-Host "  Choose Y if the client created the deployment service principal and shared it." -ForegroundColor Gray
+    Write-Host "  (y/N, default: N): " -NoNewline -ForegroundColor Yellow
+    $answer = Read-Host
+
+    if ($answer -notmatch '^(y|yes)$') {
+        return @{ UseExisting = $false; ObjectId = ""; Secret = "" }
+    }
+
+    $objectId = ""
+    while ([string]::IsNullOrWhiteSpace($objectId)) {
+        Write-Host "  Service principal OBJECT ID (enterprise-application object ID, not the client/app ID): " -NoNewline -ForegroundColor Gray
+        $objectId = Read-Host
+        if ([string]::IsNullOrWhiteSpace($objectId)) {
+            Write-Host "  Object ID is required. Please enter it, or press Ctrl+C to cancel." -ForegroundColor Red
+        }
+    }
+
+    # Read the secret masked so it is never echoed to the console or the log.
+    Write-Host "  Client secret (optional - press Enter to skip and add it to Key Vault manually later): " -NoNewline -ForegroundColor Gray
+    $secureSecret = Read-Host -AsSecureString
+    $secretPlain = [System.Net.NetworkCredential]::new("", $secureSecret).Password
+
+    return @{ UseExisting = $true; ObjectId = $objectId.Trim(); Secret = $secretPlain }
+}
+
 function Grant-GraphAppRolePermissions {
     <#
     .SYNOPSIS
@@ -1973,8 +2119,10 @@ function New-NeologikKeyVault {
         [Parameter(Mandatory = $true)]
         [string]$KeyVaultName,
 
-        [Parameter(Mandatory = $true)]
-        [string]$ClientSecret,
+        # Optional: when empty (e.g. a client-managed service principal whose secret was
+        # not shared), the Key Vault is created but the deploy-SP secret is not stored.
+        [Parameter(Mandatory = $false)]
+        [string]$ClientSecret = "",
 
         [Parameter(Mandatory = $true)]
         [array]$SecurityGroups,
@@ -2090,38 +2238,48 @@ function New-NeologikKeyVault {
             }
         }
 
-        # Now store the client secret (with retry for permission propagation)
-        Write-Log "Storing service principal client secret in Key Vault..." -Level Info
+        # Now store the client secret (with retry for permission propagation).
+        # When no secret was supplied (e.g. a client-managed service principal), the vault
+        # is still created but the secret is left for the client to populate manually.
         $secretName = "neologik-deployment-service-principle-secret"
-        
-        $retryCount = 0
-        $maxRetries = 10
-        $secretStored = $false
 
-        while (-not $secretStored -and $retryCount -lt $maxRetries) {
-            try {
-                $secureSecret = ConvertTo-SecureString -String $ClientSecret -AsPlainText -Force
-                $null = Set-AzKeyVaultSecret -VaultName $KeyVaultName `
-                    -Name $secretName `
-                    -SecretValue $secureSecret `
-                    -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($ClientSecret)) {
+            Write-Log "No client secret supplied - skipping secret storage. The client must add '$secretName' to Key Vault '$KeyVaultName' before the first deployment." -Level Warning
+            Write-Host "`n  ⚠ Key Vault created, but no deploy-SP secret was stored." -ForegroundColor Yellow
+            Write-Host "    Add the secret '$secretName' to '$KeyVaultName' before deploying." -ForegroundColor Yellow
+        }
+        else {
+            Write-Log "Storing service principal client secret in Key Vault..." -Level Info
 
-                Write-Log "Client secret stored successfully as '$secretName'" -Level Success
-                $secretStored = $true
-            }
-            catch {
-                if ($_.Exception.Message -match "Forbidden|not authorized") {
-                    $retryCount++
-                    if ($retryCount -lt $maxRetries) {
-                        Write-Log "Permission not yet propagated. Retrying in 10 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
-                        Start-Sleep -Seconds 10
+            $retryCount = 0
+            $maxRetries = 10
+            $secretStored = $false
+
+            while (-not $secretStored -and $retryCount -lt $maxRetries) {
+                try {
+                    $secureSecret = ConvertTo-SecureString -String $ClientSecret -AsPlainText -Force
+                    $null = Set-AzKeyVaultSecret -VaultName $KeyVaultName `
+                        -Name $secretName `
+                        -SecretValue $secureSecret `
+                        -ErrorAction Stop
+
+                    Write-Log "Client secret stored successfully as '$secretName'" -Level Success
+                    $secretStored = $true
+                }
+                catch {
+                    if ($_.Exception.Message -match "Forbidden|not authorized") {
+                        $retryCount++
+                        if ($retryCount -lt $maxRetries) {
+                            Write-Log "Permission not yet propagated. Retrying in 10 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
+                            Start-Sleep -Seconds 10
+                        }
+                        else {
+                            throw
+                        }
                     }
                     else {
                         throw
                     }
-                }
-                else {
-                    throw
                 }
             }
         }
@@ -4521,8 +4679,15 @@ function Start-NeologikOnboarding {
         # Step 7: Create resource group
         $null = New-NeologikResourceGroup -ResourceGroupName $script:ResourceGroupName -Location $script:AzureRegion
 
-        # Step 8: Invite guest users
-        $guestUsers = Invoke-GuestUserInvitation -GuestEmails $script:NeologikGuestUsers
+        # Step 8: Invite guest users (skipped when the client uses its own-tenant
+        # accounts and takes no B2B guests)
+        if ($SkipGuestInvitation) {
+            Write-Log "Guest user invitation skipped (-SkipGuestInvitation)." -Level Info
+            $guestUsers = @()
+        }
+        else {
+            $guestUsers = Invoke-GuestUserInvitation -GuestEmails $script:NeologikGuestUsers
+        }
 
         # Step 9: Create security groups (includes logged-in user + guest users)
         # Extract agent names for group creation
@@ -4532,12 +4697,28 @@ function Start-NeologikOnboarding {
         # Step 10: Assign roles to security groups
         $null = Set-NeologikRoleAssignments -SecurityGroups $securityGroups -SubscriptionId $script:ConfigData['SubscriptionId'] -ResourceGroupName $script:ResourceGroupName
 
-        # Step 11: Create App Registration
-        $appReg = New-NeologikAppRegistration -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType -EnvironmentIndex $script:EnvironmentIndex
-        $null = Set-AppRegistrationRoles -ServicePrincipalId $appReg.ServicePrincipal.Id `
-            -SubscriptionId $script:ConfigData['SubscriptionId'] `
-            -ResourceGroupName $script:ResourceGroupName `
-            -SecurityGroups $securityGroups
+        # Step 11: App Registration / service principal
+        # Ask whether to use a pre-existing (client-provided) SP; default is No. A
+        # command-line -ExistingServicePrincipalObjectId skips the prompt. When an existing
+        # SP is used, the script neither creates the app registration nor assigns
+        # roles/Graph consent - the client owns the SP and grants it the required
+        # resource-group-scoped roles.
+        $spChoice = Read-ExistingServicePrincipalChoice `
+            -CliObjectId $ExistingServicePrincipalObjectId `
+            -CliSecret $ExistingServicePrincipalSecret
+
+        if ($spChoice.UseExisting) {
+            $appReg = Get-NeologikExistingAppRegistration `
+                -ServicePrincipalObjectId $spChoice.ObjectId `
+                -ProvidedSecret $spChoice.Secret
+        }
+        else {
+            $appReg = New-NeologikAppRegistration -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType -EnvironmentIndex $script:EnvironmentIndex
+            $null = Set-AppRegistrationRoles -ServicePrincipalId $appReg.ServicePrincipal.Id `
+                -SubscriptionId $script:ConfigData['SubscriptionId'] `
+                -ResourceGroupName $script:ResourceGroupName `
+                -SecurityGroups $securityGroups
+        }
 
         # Step 12: Create Key Vault and store client secret
         if (-not [string]::IsNullOrWhiteSpace($script:KeyVaultNameOverride)) {
