@@ -70,6 +70,36 @@ on:
         required: false
         default: ""
         type: string
+      skipGuestInvitation:
+        description: "Skip inviting Neologik guest users (client provisions its own accounts, no B2B guests)"
+        required: false
+        default: false
+        type: boolean
+      useExistingServicePrincipal:
+        description: "Use a client-provided deployment service principal instead of creating one (requires the object ID below)"
+        required: false
+        default: false
+        type: boolean
+      existingServicePrincipalObjectId:
+        description: "Object ID of the pre-existing service principal (only when useExistingServicePrincipal is checked). The secret is supplied at runtime, never baked into the zip."
+        required: false
+        default: ""
+        type: string
+      resourceGroupName:
+        description: "Resource group name override for client naming (blank = computed rg-neo-... default)"
+        required: false
+        default: ""
+        type: string
+      keyVaultName:
+        description: "Key Vault name override for client naming — 3-24 chars, letters/digits/hyphens (blank = computed kvneo... default)"
+        required: false
+        default: ""
+        type: string
+      storageAccountName:
+        description: "Deployment storage account name override for client naming — 3-24 lowercase alphanumeric (blank = computed stneodeploy... default)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -99,6 +129,11 @@ jobs:
           IN_ENV_INDEX: ${{ inputs.environmentIndex }}
           IN_AGENT_NAMES: ${{ inputs.agentNames }}
           IN_SHORT_NAMES: ${{ inputs.shortNames }}
+          IN_USE_EXISTING_SP: ${{ inputs.useExistingServicePrincipal }}
+          IN_SP_OBJECT_ID: ${{ inputs.existingServicePrincipalObjectId }}
+          IN_RG_NAME: ${{ inputs.resourceGroupName }}
+          IN_KV_NAME: ${{ inputs.keyVaultName }}
+          IN_SA_NAME: ${{ inputs.storageAccountName }}
         run: |
           set -euo pipefail
           fail() { echo "::error::$1"; exit 1; }
@@ -175,6 +210,44 @@ jobs:
           BOTS=$(jq -cn --argjson a "$AGENTS" --argjson c "$CODES" \
             '[range(0; ($a | length)) | {agentName: $a[.], shortName: $c[.]}]')
 
+          # --- existingServicePrincipalObjectId: GUID when provided; required if useExistingServicePrincipal ---
+          SPID=""
+          if [ -n "$IN_SP_OBJECT_ID" ]; then
+            SPID="$IN_SP_OBJECT_ID"
+            printf '%s' "$SPID" | grep -Eiq '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$' \
+              || fail "existingServicePrincipalObjectId must be a GUID (got '$IN_SP_OBJECT_ID')."
+          fi
+          if [ "$IN_USE_EXISTING_SP" = "true" ] && [ -z "$SPID" ]; then
+            fail "useExistingServicePrincipal is checked but existingServicePrincipalObjectId is empty."
+          fi
+
+          # --- resourceGroupName: Azure RG naming (when provided) ---
+          RGN=""
+          if [ -n "$IN_RG_NAME" ]; then
+            RGN="$IN_RG_NAME"
+            { [ "${#RGN}" -ge 1 ] && [ "${#RGN}" -le 90 ]; } || fail "resourceGroupName must be 1-90 characters."
+            printf '%s' "$RGN" | grep -Eq '^[A-Za-z0-9._()-]+$' || fail "resourceGroupName may only contain alphanumerics, underscores, hyphens, periods and parentheses."
+            if printf '%s' "$RGN" | grep -Eq '\.$'; then fail "resourceGroupName cannot end with a period."; fi
+          fi
+
+          # --- keyVaultName: 3-24, start letter, letters/digits/hyphens, no double hyphen ---
+          KVN=""
+          if [ -n "$IN_KV_NAME" ]; then
+            KVN="$IN_KV_NAME"
+            { [ "${#KVN}" -ge 3 ] && [ "${#KVN}" -le 24 ]; } || fail "keyVaultName must be 3-24 characters."
+            printf '%s' "$KVN" | grep -Eq '^[A-Za-z][A-Za-z0-9-]*[A-Za-z0-9]$' \
+              || fail "keyVaultName must start with a letter, end with a letter or digit, and use only letters, digits and hyphens."
+            if printf '%s' "$KVN" | grep -q -- '--'; then fail "keyVaultName cannot contain consecutive hyphens."; fi
+          fi
+
+          # --- storageAccountName: 3-24 lowercase alphanumeric ---
+          SAN=""
+          if [ -n "$IN_SA_NAME" ]; then
+            SAN=$(printf '%s' "$IN_SA_NAME" | tr '[:upper:]' '[:lower:]')
+            { [ "${#SAN}" -ge 3 ] && [ "${#SAN}" -le 24 ]; } || fail "storageAccountName must be 3-24 characters."
+            printf '%s' "$SAN" | grep -Eq '^[a-z0-9]+$' || fail "storageAccountName must be lowercase letters and digits only (no hyphens)."
+          fi
+
           # --- export normalized values for the build step ---
           {
             echo "NORM_ORG_CODE=$OC"
@@ -184,12 +257,20 @@ jobs:
             echo "NORM_ENV_INDEX=$EI"
             echo "BOTS_JSON=$BOTS"
             echo "PARSED_BOT_COUNT=$NA"
+            echo "NORM_SP_OBJECT_ID=$SPID"
+            echo "NORM_RG_NAME=$RGN"
+            echo "NORM_KV_NAME=$KVN"
+            echo "NORM_SA_NAME=$SAN"
           } >> "$GITHUB_ENV"
           echo "Inputs validated. bots=$BOTS"
 
       - name: Build inputs.json and assemble zip
         env:
           IN_ENV_TYPE: ${{ inputs.environmentType }}
+          IN_REGISTER_RPS: ${{ inputs.registerResourceProviders }}
+          IN_BUDGET: ${{ inputs.budgetCostReportEmailRecipients }}
+          IN_SKIP_GUESTS: ${{ inputs.skipGuestInvitation }}
+          IN_USE_EXISTING_SP: ${{ inputs.useExistingServicePrincipal }}
         run: |
           set -euo pipefail
 
@@ -201,7 +282,16 @@ jobs:
             EFFECTIVE_BOT_COUNT=""
           fi
 
-          # Build inputs.json from the validated/normalized values (empties omitted).
+          # Parse the comma-separated budget recipients into a JSON array (empty = omitted).
+          if [ -z "$(printf '%s' "${IN_BUDGET:-}" | tr -d '[:space:]')" ]; then
+            BUDGET_JSON='[]'
+          else
+            BUDGET_JSON=$(jq -cn --arg s "$IN_BUDGET" \
+              '$s | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+          fi
+
+          # Build inputs.json from the validated/normalized values (empties/nulls omitted, so the
+          # onboarding script falls back to its own defaults / prompts for anything not provided).
           jq -n \
             --arg organizationCode "$NORM_ORG_CODE" \
             --arg organizationName "$NORM_ORG_NAME" \
@@ -211,6 +301,14 @@ jobs:
             --arg environmentIndex "$NORM_ENV_INDEX" \
             --arg botCount "$EFFECTIVE_BOT_COUNT" \
             --argjson bots "${BOTS_JSON:-[]}" \
+            --argjson budgetRecipients "$BUDGET_JSON" \
+            --arg registerRPs "$IN_REGISTER_RPS" \
+            --arg skipGuests "$IN_SKIP_GUESTS" \
+            --arg useExistingSp "$IN_USE_EXISTING_SP" \
+            --arg spObjectId "$NORM_SP_OBJECT_ID" \
+            --arg rgName "$NORM_RG_NAME" \
+            --arg kvName "$NORM_KV_NAME" \
+            --arg saName "$NORM_SA_NAME" \
             '
             {
               organizationCode: $organizationCode,
@@ -220,11 +318,18 @@ jobs:
               azureRegion: $azureRegion,
               environmentIndex: $environmentIndex,
               budgetCostReportEmailRecipients: (if ($budgetRecipients | length) == 0 then null else $budgetRecipients end),
-              # Only emitted when requesting the full set; left out otherwise so the script keeps
-              # its built-in default (minimal set).
+              # Booleans and overrides are only emitted when explicitly set; otherwise omitted so
+              # the script keeps its built-in default (minimal providers, invite guests, create SP,
+              # computed resource names).
               registerResourceProviders: (if $registerRPs == "true" then true else null end),
               botCount: (if $botCount == "" then null else ($botCount | tonumber) end),
-              bots: (if ($bots | length) == 0 then null else $bots end)
+              bots: (if ($bots | length) == 0 then null else $bots end),
+              skipGuestInvitation: (if $skipGuests == "true" then true else null end),
+              useExistingServicePrincipal: (if $useExistingSp == "true" then true else null end),
+              existingServicePrincipalObjectId: $spObjectId,
+              resourceGroupName: $rgName,
+              keyVaultName: $kvName,
+              storageAccountName: $saName
             }
             | with_entries(select(.value != null and .value != ""))
             ' > inputs.json
