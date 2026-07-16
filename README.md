@@ -2,6 +2,15 @@
 
 > **For IT/Security Review:** See [QUICK-REFERENCE.md](QUICK-REFERENCE.md) for a concise list of all Azure changes and permissions.
 
+> **Contributors - no customer data, ever.** This repository is
+> customer-facing: treat it as **public regardless of its visibility
+> setting**. Never commit, log, or attach anything containing customer data:
+> configuration JSONs, deployment references, workshop inputs, run logs - and
+> no GitHub Actions workflows that take customer details as inputs (run logs,
+> summaries and download links here are world-readable). The onboarding kit
+> zip is built by an internal Neologik workflow that checks this repository
+> out - not by an action in this repository.
+
 ## 📁 Repository Contents
 
 Welcome! This repository contains everything you need to set up your Neologik environment on Azure.
@@ -10,6 +19,7 @@ Welcome! This repository contains everything you need to set up your Neologik en
 - **Install-NeologikEnvironment.ps1** - The PowerShell script that creates your Azure resources
 - **PFX-CERT-GUIDE.md** - Instructions for creating your TLS/SSL certificate
 - **FINISHING-STEPS-GUIDE.md** - Final steps after Neologik completes the deployment
+- **Upgrade-TeamsAppInstallations.ps1** + **TEAMS-APP-UPGRADE-GUIDE.md** - Bulk-upgrade every user's installed Neologik Teams bot to the latest version (run periodically, after onboarding)
 
 **How to Use This Repository:**
 
@@ -110,6 +120,8 @@ Type this command:
 
 Press **Enter**
 
+> **Resuming after an interruption:** As it runs, the script saves its progress to a `NeologikCheckpoint.json` file in the same folder. If the script stops before finishing (for example, due to an error), simply run it again — it will offer to resume from where it left off and skip the steps already completed. The checkpoint file is deleted automatically once the script finishes successfully.
+
 ### 6. Answer the Configuration Questions
 
 The script will ask you several questions. For each one:
@@ -160,11 +172,11 @@ Questions you'll be asked:
    - Used to create separate user groups for each bot
 
 9. **Bot Configuration**: For each bot, you'll be asked:
-    - **Agent Name**: Descriptive name for the bot (e.g., "bot", "support")
-      - Lowercase only, max 7 characters, letters and dashes
+    - **Full Bot Name**: Descriptive name for the bot (e.g., "Customer Service Bot")
+      - Letters (upper or lower case), numbers, spaces, dashes and underscores; 30 character limit
       - Used in security group names
     - **Short Name**: Short identifier for the bot (e.g., "bot", "sup")
-      - Lowercase only, max 7 characters, letters and dashes
+      - Lowercase, 1–4 characters, must start with a letter, letters/numbers/dashes only
       - Used internally for identification
 
 ### 7. Confirm and Continue
