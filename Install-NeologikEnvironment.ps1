@@ -1323,8 +1323,8 @@ function New-NeologikSecurityGroups {
         }
         # Add NCE and Admin groups (unchanged)
         $groups += @{
-            Name = "Neologik NCE User Group$groupSuffix"
-            Description = 'Users who need access to NCE web tool'
+            Name = "Neologik Harness User Group$groupSuffix"
+            Description = 'Users who need access to the Neologik Harness admin tool'
         }
         $groups += @{
             Name = "Neologik Admin User Group$groupSuffix"

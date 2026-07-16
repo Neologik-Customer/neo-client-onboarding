@@ -14,6 +14,10 @@ This document tracks the version history of the Neologik customer onboarding scr
 **Ticket**: https://github.com/Neologik-AI/project/issues/1063
 
 ### Changes
+- **v5: NCE group renamed** - new onboardings create
+  `Neologik Harness User Group - {org}{env}{index}` (was `Neologik NCE User
+  Group`); consumption is by group ID (`NEO_NCE_USERS`), so existing
+  environments keep their old-named groups unaffected.
 - **v5: no bots created at onboarding** (Neologik Harness, agent/channel
   decoupling): removed the bot count / agent name / short name prompts,
   answer-file parsing (`botCount`/`bots` now ignored), per-bot user group
