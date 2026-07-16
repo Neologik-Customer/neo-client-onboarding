@@ -23,8 +23,5 @@
   "_existingServicePrincipalSecret_note": "Prefer the -ExistingServicePrincipalSecret CLI parameter (masked, not written to disk) over storing a client secret in this file. If set here, it is used; leave blank to be prompted (or to skip and add it to Key Vault manually).",
   "existingServicePrincipalSecret": "",
 
-  "botCount": 1,
-  "bots": [
-    { "agentName": "REPLACE_ME — full agent name, e.g. Neologik", "shortName": "REPLACE_ME — lowercase, max 4 chars, e.g. bot" }
-  ]
+  "_v5_note": "Agents (bots) are no longer created at onboarding - they are created post-deployment in the Neologik Harness admin tool. botCount/bots keys from older kits are ignored."
 }

@@ -14,6 +14,16 @@ This document tracks the version history of the Neologik customer onboarding scr
 **Ticket**: https://github.com/Neologik-AI/project/issues/1063
 
 ### Changes
+- **v5: no bots created at onboarding** (Neologik Harness, agent/channel
+  decoupling): removed the bot count / agent name / short name prompts,
+  answer-file parsing (`botCount`/`bots` now ignored), per-bot user group
+  creation, and bot fields from checkpoint/summary/config export. The script
+  now creates ONE default user group (`Neologik User Group - {org}{env}{index}`)
+  alongside the NCE and Admin groups, and grants the deployment SP the Graph
+  `Group.Create` application permission (bf7b1a76-6e77-406b-b258-bf5c7720e98f)
+  so Harness channel provisioning can create per-agent user groups at channel
+  attach. Agents and channels are created post-deployment in the Harness
+  admin tool.
 - **Onboarding-kit zip builder moved out of this repo** (owner decision
   2026-07-16): this repository is customer-facing and carries no customer
   data - contents, history, or Actions. `prepare-onboarding-zip.yml`

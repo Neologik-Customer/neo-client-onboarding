@@ -337,8 +337,6 @@ function Save-Checkpoint {
         HostName              = $script:HostName
         ResourceGroupName     = $script:ResourceGroupName
         EnvironmentIndex      = $script:EnvironmentIndex
-        BotCount              = $script:BotCount
-        BotConfigurations     = $script:BotConfigurations
         OutputFile            = $script:OutputFile
         KeyVaultNameOverride  = $script:KeyVaultNameOverride
     }
@@ -402,8 +400,6 @@ function Restore-Checkpoint {
                                      else { $data.HostName }
     $script:ResourceGroupName      = $data.ResourceGroupName
     $script:EnvironmentIndex       = $data.EnvironmentIndex
-    $script:BotCount               = [int]$data.BotCount
-    $script:BotConfigurations      = $data.BotConfigurations
     $script:CheckpointRegionAbbrev = $data.RegionAbbrev
     $script:OutputFile             = $data.OutputFile
 
@@ -1304,10 +1300,7 @@ function New-NeologikSecurityGroups {
         [string]$EnvironmentType = "",
 
         [Parameter(Mandatory = $false)]
-        [string]$EnvironmentIndex = "",
-
-        [Parameter(Mandatory = $false)]
-        [array]$BotNames = @("bot")
+        [string]$EnvironmentIndex = ""
     )
 
     Write-Log "Creating Neologik security groups..." -Level Info
@@ -1320,17 +1313,14 @@ function New-NeologikSecurityGroups {
         $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "$($EnvironmentType.ToLower())" }
         $groupSuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { " - $orgLower$envLower$EnvironmentIndex" }
 
-        # Build groups array starting with bot-specific user groups
+        # v5 (Neologik Harness): one default user group. Per-agent groups are
+        # created later by channel provisioning in the Harness admin tool (the
+        # deployment SP holds Group.Create).
         $groups = @()
-        
-        # Create a user group for each bot
-        foreach ($botName in $BotNames) {
-            $groups += @{
-                Name = "Neologik User Group $botName$groupSuffix"
-                Description = "Neologik users for Teams app access - $botName bot"
-            }
+        $groups += @{
+            Name = "Neologik User Group$groupSuffix"
+            Description = 'Default Neologik users group - assign to agent channels created in the Neologik Harness admin tool'
         }
-        
         # Add NCE and Admin groups (unchanged)
         $groups += @{
             Name = "Neologik NCE User Group$groupSuffix"
@@ -1851,6 +1841,8 @@ function Grant-GraphAppRolePermissions {
         'AgentIdentity.Create.All'                       = 'ad25cc1d-84d8-47df-a08e-b34c2e800819'
         # Create the agent USER (directory user) hung off an agent identity.
         'AgentIdUser.ReadWrite.All'                      = 'b782c9ad-6f2b-4894-a21b-72bf22417f0a'
+        # v5: channel provisioning creates per-agent user groups at channel attach.
+        'Group.Create'                                   = 'bf7b1a76-6e77-406b-b258-bf5c7720e98f'
     }
 
     Write-Log "Granting Microsoft Graph app permissions ($($AppRoles -join ', ')) to $PrincipalDescription..." -Level Info
@@ -2151,7 +2143,8 @@ function Set-AppRegistrationRoles {
                 'AgentIdentityBlueprint.UpdateAuthProperties.All',
                 'AgentIdentityBlueprintPrincipal.Create',
                 'AgentIdentity.Create.All',
-                'AgentIdUser.ReadWrite.All'
+                'AgentIdUser.ReadWrite.All',
+                'Group.Create'
             )
 
         # Update ConfigData with group membership
@@ -3190,8 +3183,6 @@ function Export-ConfigurationData {
             'UserAccount' = $script:ConfigData['UserAccount']
             'AzureRegion' = $script:ConfigData['AzureRegion']
             'HostName' = $script:ConfigData['HostName']
-            'BotCount' = $script:ConfigData['BotCount']
-            'Bots' = $script:ConfigData['Bots']
             'BudgetEmailAddresses' = $script:ConfigData['BudgetEmailAddresses']
             'BudgetEmailFrequency' = $script:ConfigData['BudgetEmailFrequency']
             'RegisterAllProviders' = $script:ConfigData['RegisterAllProviders']
@@ -3595,21 +3586,7 @@ function Test-AnswerFileComplete {
         if (-not (Get-Answer $key)) { return $false }
     }
 
-    # Every bot the script will ask about must have both names (no built-in defaults).
-    $bots = @(Get-Answer 'bots')
-    if ($bots.Count -eq 0) { return $false }
-    $botCountAns = Get-Answer 'botCount'
-    if ($botCountAns -and "$botCountAns" -match '^\d+$' -and [int]"$botCountAns" -ge 1 -and [int]"$botCountAns" -le 10) {
-        $needed = [int]"$botCountAns"
-    } else {
-        $needed = 1
-    }
-    if ($bots.Count -lt $needed) { return $false }
-    for ($j = 0; $j -lt $needed; $j++) {
-        if (-not $bots[$j]) { return $false }
-        if ([string]::IsNullOrWhiteSpace([string]$bots[$j].agentName)) { return $false }
-        if ([string]::IsNullOrWhiteSpace([string]$bots[$j].shortName)) { return $false }
-    }
+    # v5 (Neologik Harness): bots are not gathered at onboarding.
     return $true
 }
 
@@ -3745,31 +3722,8 @@ function Set-ConfigFromAnswerFile {
     $sriErr = Test-ManagedIdentityNameError $script:ConfigData['ScriptRunnerIdentityName']
     if ($sriErr) { throw "scriptRunnerIdentityName '$($script:ConfigData['ScriptRunnerIdentityName'])': $sriErr" }
 
-    # Bots (no defaults)
-    $bots = @(Get-Answer 'bots')
-    $bcAns = Get-Answer 'botCount'
-    if ($bcAns -and "$bcAns" -match '^\d+$' -and [int]"$bcAns" -ge 1 -and [int]"$bcAns" -le 10) {
-        $script:BotCount = [int]"$bcAns"
-    }
-    else {
-        $script:BotCount = $bots.Count
-    }
-    if ($script:BotCount -lt 1 -or $script:BotCount -gt 10) { throw "botCount must be between 1 and 10." }
-    if ($bots.Count -lt $script:BotCount) { throw "inputs.json defines $($bots.Count) bot(s) but botCount is $($script:BotCount)." }
-
-    $script:BotConfigurations = @()
-    for ($i = 0; $i -lt $script:BotCount; $i++) {
-        $an = ([string]$bots[$i].agentName).Trim()
-        $sn = ([string]$bots[$i].shortName).Trim().ToLower()
-        if ([string]::IsNullOrWhiteSpace($an)) { throw "bot $($i + 1) agentName is required." }
-        if ($an -notmatch '^[A-Za-z0-9 \-_]+$') { throw "bot $($i + 1) agentName '$an' may only contain letters, numbers, spaces, dashes and underscores." }
-        if ($sn -notmatch '^[a-z][a-z\-]*$' -or $sn.Length -lt 1 -or $sn.Length -gt 4) { throw "bot $($i + 1) shortName '$sn' must be lowercase, 1-4 chars, letters/dashes, starting with a letter." }
-        if ($script:BotConfigurations | Where-Object { $_.AgentName -eq $an }) { throw "duplicate agent name '$an'." }
-        if ($script:BotConfigurations | Where-Object { $_.ShortName -eq $sn }) { throw "duplicate short name '$sn'." }
-        $script:BotConfigurations += @{ AgentName = $an; ShortName = $sn }
-    }
-    $script:ConfigData['BotCount'] = $script:BotCount
-    $script:ConfigData['Bots'] = $script:BotConfigurations
+    # v5 (Neologik Harness): no bots at onboarding - agents and channels are
+    # created post-deployment in the Harness admin tool.
 
     # Budget / cost-report email recipients (optional list; falls back to the built-in default).
     # An empty list disables the scheduled cost-report email (see Set-NeologikCostManagementEmail).
@@ -4507,199 +4461,10 @@ function Start-NeologikOnboarding {
             -DefaultValue $sriDefault -Validator ${function:Test-ManagedIdentityNameError} `
             -LabelPrefix (Get-PromptLabel $sriDefault $sriComputed)
 
-        # Get Number of Bots with validation
-        # Source the default from the answer file when it holds a valid 1-10 value.
-        $botCountDefault = Get-Answer 'botCount'
-        if ($botCountDefault -and "$botCountDefault" -match '^\d+$' -and [int]"$botCountDefault" -ge 1 -and [int]"$botCountDefault" -le 10) {
-            $botCountDefault = [int]"$botCountDefault"
-        }
-        elseif ($botCountDefault) {
-            Write-Host "  ⚠ Ignoring invalid botCount '$botCountDefault' from answer file (must be 1-10)." -ForegroundColor Yellow
-            $botCountDefault = 1
-        }
-        else {
-            $botCountDefault = 1
-        }
-        $botCountLabel = Get-PromptLabel $botCountDefault 1
-        $botCountValid = $false
-        while (-not $botCountValid) {
-            Write-Host ""
-            Write-Host "How many bots will there be?" -ForegroundColor Cyan
-            Write-Host "  $botCountLabel" -NoNewline -ForegroundColor Gray
-            Write-Host $botCountDefault -ForegroundColor Yellow
-            Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
-            $botCountInput = Read-Host
-
-            if ([string]::IsNullOrWhiteSpace($botCountInput)) {
-                $script:BotCount = $botCountDefault
-                $botCountValid = $true
-                Write-Host "  ✓ Using default: $($script:BotCount)" -ForegroundColor Green
-            }
-            else {
-                # Validate it's a number
-                if ($botCountInput -match '^\d+$') {
-                    $botNumber = [int]$botCountInput
-                    
-                    # Validate range (1-10)
-                    if ($botNumber -ge 1 -and $botNumber -le 10) {
-                        $script:BotCount = $botNumber
-                        $botCountValid = $true
-                        Write-Host "  ✓ Using: $($script:BotCount)" -ForegroundColor Green
-                    }
-                    else {
-                        Write-Host "  ✗ Bot count must be between 1 and 10. Please try again." -ForegroundColor Red
-                    }
-                }
-                else {
-                    Write-Host "  ✗ Bot count must be a number. Please try again." -ForegroundColor Red
-                }
-            }
-        }
-
-        # Get Bot Names (Agent Name and Short Name for each bot)
-        $botsAnswer = @(Get-Answer 'bots')
-        # Built-in suggested agent name (the product name), offered as the prompt default when the
-        # answer file has no value for this bot.
-        $agentNameBuiltinDefault = 'Neologik'
-        $script:BotConfigurations = @()
-        for ($i = 1; $i -le $script:BotCount; $i++) {
-            # Agent-name suggestion: prefer the answer-file value; otherwise fall back to the
-            # built-in default, but only while it is still free (so a second bot is not offered a
-            # name an earlier bot already took).
-            $agentNamePrefill = $null
-            $agentNameFromAnswer = $false
-            if ($botsAnswer.Count -ge $i -and $botsAnswer[$i - 1] -and $botsAnswer[$i - 1].agentName) {
-                $anp = ([string]$botsAnswer[$i - 1].agentName).Trim()
-                if (-not [string]::IsNullOrWhiteSpace($anp)) { $agentNamePrefill = $anp; $agentNameFromAnswer = $true }
-            }
-            if (-not $agentNamePrefill -and -not ($script:BotConfigurations | Where-Object { $_.AgentName -eq $agentNameBuiltinDefault })) {
-                $agentNamePrefill = $agentNameBuiltinDefault
-            }
-            $agentNameLabel = if ($agentNameFromAnswer) { 'Pre-filled: ' } else { 'Default: ' }
-            $agentNameValid = $false
-            $agentName = ""
-
-            # Get Agent Name
-            while (-not $agentNameValid) {
-                Write-Host ""
-                Write-Host "Full Agent Name for Bot $i`:" -ForegroundColor Cyan
-                if ($agentNamePrefill) {
-                    Write-Host "  $agentNameLabel" -NoNewline -ForegroundColor Gray
-                    Write-Host $agentNamePrefill -ForegroundColor Yellow
-                }
-                Write-Host "  Requirements: letters, numbers, spaces, dashes, and underscores allowed" -ForegroundColor Gray
-                if ($agentNamePrefill) {
-                    Write-Host "  Press Enter to accept, or type a new value: " -NoNewline -ForegroundColor Gray
-                }
-                else {
-                    Write-Host "  Enter agent name: " -NoNewline -ForegroundColor Gray
-                }
-                $agentNameInput = Read-Host
-
-                if ([string]::IsNullOrWhiteSpace($agentNameInput)) {
-                    if ($agentNamePrefill) {
-                        $agentName = $agentNamePrefill
-                    }
-                    else {
-                        Write-Host "  ✗ Agent name is required. Please enter a value." -ForegroundColor Red
-                        continue
-                    }
-                }
-                else {
-                    $agentName = $agentNameInput.Trim()
-                }
-
-                # Validate characters (letters, numbers, spaces, dashes, and underscores)
-                if ($agentName -notmatch '^[A-Za-z0-9 \-_]+$') {
-                    Write-Host "  ✗ Agent name must contain only letters, numbers, spaces, dashes, and underscores. Please try again." -ForegroundColor Red
-                    continue
-                }
-
-                # Check for duplicates
-                if ($script:BotConfigurations | Where-Object { $_.AgentName -eq $agentName }) {
-                    Write-Host "  ✗ Agent name '$agentName' is already used. Please choose a different name." -ForegroundColor Red
-                    continue
-                }
-
-                $agentNameValid = $true
-                Write-Host "  ✓ Using: $agentName" -ForegroundColor Green
-            }
-
-            # Get Bot Short Name
-            # No built-in default — pre-fill from the answer file when present, otherwise require input.
-            $botShortNamePrefill = $null
-            if ($botsAnswer.Count -ge $i -and $botsAnswer[$i - 1] -and $botsAnswer[$i - 1].shortName) {
-                $snp = ([string]$botsAnswer[$i - 1].shortName).Trim()
-                if (-not [string]::IsNullOrWhiteSpace($snp)) { $botShortNamePrefill = $snp }
-            }
-            $botShortNameValid = $false
-
-            while (-not $botShortNameValid) {
-                Write-Host ""
-                Write-Host "Bot $i Short Name:" -ForegroundColor Cyan
-                if ($botShortNamePrefill) {
-                    Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
-                    Write-Host $botShortNamePrefill -ForegroundColor Yellow
-                    Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
-                }
-                else {
-                    Write-Host "  Example: " -NoNewLine -ForegroundColor Gray
-                    Write-Host "bot" -ForegroundColor Yellow
-                    Write-Host "  Requirements: lowercase, max 4 characters, letters and dashes only" -ForegroundColor Gray
-                    Write-Host "  Enter short name: " -NoNewline -ForegroundColor Gray
-                }
-                $botShortNameInput = Read-Host
-
-                if ([string]::IsNullOrWhiteSpace($botShortNameInput)) {
-                    if ($botShortNamePrefill) {
-                        $botShortName = $botShortNamePrefill
-                    }
-                    else {
-                        Write-Host "  ✗ Short name is required. Please enter a value." -ForegroundColor Red
-                        continue
-                    }
-                }
-                else {
-                    $botShortName = $botShortNameInput.Trim()
-                }
-
-                # Validate lowercase
-                if ($botShortName -cne $botShortName.ToLower()) {
-                    Write-Host "  ✗ Bot short name must be lowercase. Please try again." -ForegroundColor Red
-                    continue
-                }
-
-                # Validate length
-                if ($botShortName.Length -lt 1 -or $botShortName.Length -gt 4) {
-                    Write-Host "  ✗ Bot short name must be between 1 and 4 characters. Please try again." -ForegroundColor Red
-                    continue
-                }
-
-                # Validate characters (lowercase letters and dashes only)
-                if ($botShortName -notmatch '^[a-z][a-z0-9\-]*$') {
-                    Write-Host "  ✗ Bot short name must contain only lowercase letters, numbers and dashes, and must start with a letter. Please try again." -ForegroundColor Red
-                    continue
-                }
-
-                # Check for duplicates
-                if ($script:BotConfigurations | Where-Object { $_.ShortName -eq $botShortName }) {
-                    Write-Host "  ✗ Bot short name '$botShortName' is already used. Please choose a different name." -ForegroundColor Red
-                    continue
-                }
-
-                $botShortNameValid = $true
-                Write-Host "  ✓ Using: $botShortName" -ForegroundColor Green
-            }
-
-            # Store both names for this bot
-            $script:BotConfigurations += @{
-                AgentName = $agentName
-                ShortName = $botShortName
-            }
-        }
-
-        $script:ConfigData['BotCount'] = $script:BotCount
-        $script:ConfigData['Bots'] = $script:BotConfigurations
+        # v5 (Neologik Harness): no bots are created at onboarding. Agents and
+        # their channels are created post-deployment in the Neologik Harness
+        # admin tool; channel provisioning creates the per-agent user groups
+        # (the deployment SP holds Group.Create for this).
 
         # Get Budget Cost-Report Email Recipient(s)
         # A daily Azure Cost Management report is emailed to these addresses. This used to be
@@ -4860,10 +4625,6 @@ function Start-NeologikOnboarding {
         Write-Host "  Key Vault Name:       " -NoNewline; Write-Host $script:KeyVaultNameOverride -ForegroundColor Yellow
         Write-Host "  Storage Account Name: " -NoNewline; Write-Host $script:ConfigData['DeployStorageAccountName'] -ForegroundColor Yellow
         Write-Host "  Script Runner Identity: " -NoNewline; Write-Host $script:ConfigData['ScriptRunnerIdentityName'] -ForegroundColor Yellow
-        Write-Host "  Bot Count:            " -NoNewline; Write-Host $script:BotCount -ForegroundColor Yellow
-        foreach ($bot in $script:BotConfigurations) {
-            Write-Host "  Bot:                  " -NoNewline; Write-Host "$($bot.AgentName) (short: $($bot.ShortName))" -ForegroundColor Yellow
-        }
         $budgetEmailSummary = if ($script:ConfigData['BudgetEmailAddresses'].Count -gt 0) { $script:ConfigData['BudgetEmailAddresses'] -join ', ' } else { '(disabled)' }
         Write-Host "  Cost-Report Email:    " -NoNewline; Write-Host $budgetEmailSummary -ForegroundColor Yellow
         $providerSummary = if ($script:ConfigData['RegisterAllProviders']) { 'All providers' } else { 'Minimal set (run Register-NeologikResourceProviders.ps1 before deploying)' }
@@ -4931,7 +4692,7 @@ function Start-NeologikOnboarding {
 
             Write-Host "`n  ⏩ Configuration restored from checkpoint — skipping input prompts" -ForegroundColor Gray
             Write-Host "     Org: $($script:OrganizationCode)  |  Env: $($script:EnvironmentType)  |  Region: $($script:AzureRegion)" -ForegroundColor Cyan
-            Write-Host "     Resource Group: $($script:ResourceGroupName)  |  Bots: $($script:BotCount)" -ForegroundColor Cyan
+            Write-Host "     Resource Group: $($script:ResourceGroupName)" -ForegroundColor Cyan
             Write-Host ""
         }
 
@@ -4953,9 +4714,7 @@ function Start-NeologikOnboarding {
         }
 
         # Step 9: Create security groups (includes logged-in user + guest users)
-        # Extract agent names for group creation
-        $agentNames = $script:BotConfigurations | ForEach-Object { $_.AgentName }
-        $securityGroups = New-NeologikSecurityGroups -GuestUsers $guestUsers -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType -EnvironmentIndex $script:EnvironmentIndex -BotNames $agentNames
+        $securityGroups = New-NeologikSecurityGroups -GuestUsers $guestUsers -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType -EnvironmentIndex $script:EnvironmentIndex
 
         # Step 10: Assign roles to security groups
         $null = Set-NeologikRoleAssignments -SecurityGroups $securityGroups -SubscriptionId $script:ConfigData['SubscriptionId'] -ResourceGroupName $script:ResourceGroupName
