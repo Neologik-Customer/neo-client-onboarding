@@ -7,7 +7,7 @@
     - PowerShell version validation and updates
     - Azure authentication with required permissions
     - Role validation (Subscription Owner and Global Administrator)
-    - Quota pre-flight checks (vCPU and Azure OpenAI gpt-5.4-mini)
+    - Quota pre-flight checks (Azure OpenAI gpt-5.4-mini)
     - Guest user invitations
     - Subscription, resource group, and security group creation
     - App registration and managed identity setup
@@ -44,6 +44,33 @@
 .PARAMETER SkipModuleInstall
     Skip Azure module installation check.
 
+.PARAMETER SkipGuestInvitation
+    Skip inviting Neologik guest users. Use when the client provisions its own
+    accounts within its own tenant (no B2B guests). Security groups are still
+    created, seeded with the signed-in user only. May also be set from the answer file
+    ('skipGuestInvitation': true/false); this switch, when passed, takes precedence.
+
+.PARAMETER ExistingServicePrincipalObjectId
+    Object ID (enterprise-application / service-principal object ID, not the app/client
+    ID) of a pre-existing service principal supplied by the client. When provided, the
+    script does NOT create an app registration, service principal, or client secret, but
+    it still assigns the required resource-group-scoped roles and Graph application
+    permissions to the SP (the operator is Owner + Global Admin, so it can grant these
+    whether the SP was created here or supplied by the client). The script resolves the
+    SP's client (app) ID for the configuration output.
+    The decision may also be driven from the answer file ('useExistingServicePrincipal':
+    true/false, with 'existingServicePrincipalObjectId'); this CLI parameter, when passed,
+    takes precedence. With neither, an interactive y/N prompt (default N) is shown.
+
+.PARAMETER ExistingServicePrincipalSecret
+    Client secret for the pre-existing service principal (shared by the client). Stored
+    in Key Vault as 'neologik-deployment-service-principle-secret' for the deployment
+    pipeline. Optional: if omitted, the Key Vault is still created but the secret is not
+    stored - the client must add it manually before the first deployment. Only meaningful
+    together with -ExistingServicePrincipalObjectId. May also be supplied from the answer
+    file ('existingServicePrincipalSecret'), but the CLI parameter is preferred so the
+    secret is not persisted to disk.
+
 .EXAMPLE
     .\Install-NeologikEnvironment.ps1 -OrganizationCode "ABC"
 
@@ -60,8 +87,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [ValidateLength(1, 3)]
-    [string]$OrganizationCode = "abc",
+    [string]$OrganizationCode = "",
 
     [Parameter(Mandatory = $false)]
     # 'dmo', 'test' and 'stg' are supported but intentionally undocumented — they are
@@ -87,7 +113,21 @@ param(
     [switch]$SkipPowerShellUpdate,
 
     [Parameter(Mandatory = $false)]
-    [switch]$SkipModuleInstall
+    [switch]$SkipModuleInstall,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipGuestInvitation,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ExistingServicePrincipalObjectId,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ExistingServicePrincipalSecret,
+
+    # Path to a JSON file of predefined inputs that pre-fill the interactive prompts.
+    # When omitted, an 'inputs.json' next to the script is auto-detected.
+    [Parameter(Mandatory = $false)]
+    [string]$AnswerFile = ""
 )
 
 # Script variables
@@ -113,6 +153,18 @@ $script:CheckpointRegionAbbrev = $null
 # operator explicitly overrides it again on the command line.
 $script:KeyVaultNameFromCli = $PSBoundParameters.ContainsKey('KeyVaultName')
 $script:KeyVaultNameOverride = if ($script:KeyVaultNameFromCli) { $KeyVaultName } else { $null }
+
+# Whether -SkipGuestInvitation was passed on THIS invocation. Computed at script scope where
+# $PSBoundParameters reflects the script parameters. When the switch is absent, the guest-invite
+# decision falls back to the answer file's 'skipGuestInvitation' key, then to an interactive prompt.
+$script:SkipGuestInvitationFromCli = $PSBoundParameters.ContainsKey('SkipGuestInvitation')
+
+# Resolved client-provided SP secret. Held here (NOT in ConfigData) so it is never written to
+# the checkpoint or exported config. Set during configuration gathering; empty on resume.
+$script:ExistingSpSecretResolved = ""
+
+# Built-in default recipients for the budget / cost-report emails (used when inputs.json omits the field)
+$script:DefaultBudgetCostReportEmailRecipients = @('support_budget_alerts@neologik.ai')
 
 # Load Neologik guest user emails from file
 $script:GuestUsersFile = Join-Path $PSScriptRoot "NeologikGuestUsers.txt"
@@ -174,13 +226,14 @@ function Write-Log {
 function Initialize-ConfigurationFile {
     <#
     .SYNOPSIS
-        Initializes the configuration JSON file name with organization code and environment type.
+        Initializes the configuration JSON file name with organization code, environment type, and
+        environment index. Call after the environment index has been set.
     #>
     [CmdletBinding()]
     param()
-    
-    # Generate configuration file name with org code and env type
-    $configFileName = "Neologik_$($script:OrganizationCode)$($script:EnvironmentType)_Configuration_$($script:FileTimestamp).json"
+
+    # Generate configuration file name with org code, env type, and env index (e.g. xyzdev01)
+    $configFileName = "Neologik_$($script:OrganizationCode)$($script:EnvironmentType)$($script:EnvironmentIndex)_Configuration_$($script:FileTimestamp).json"
     $script:OutputFile = Join-Path $PSScriptRoot $configFileName
     
     Write-Host "  ✓ Configuration file initialized: $configFileName" -ForegroundColor Green
@@ -281,8 +334,7 @@ function Save-Checkpoint {
         EnvironmentType       = $script:EnvironmentType
         AzureRegion           = $script:AzureRegion
         OrganizationName      = $script:OrganizationName
-        Hostname              = $script:Hostname
-        DomainName            = $script:DomainName
+        HostName              = $script:HostName
         ResourceGroupName     = $script:ResourceGroupName
         EnvironmentIndex      = $script:EnvironmentIndex
         BotCount              = $script:BotCount
@@ -344,8 +396,10 @@ function Restore-Checkpoint {
     $script:EnvironmentType        = $data.EnvironmentType
     $script:AzureRegion            = $data.AzureRegion
     $script:OrganizationName       = $data.OrganizationName
-    $script:Hostname               = $data.Hostname
-    $script:DomainName             = $data.DomainName
+    # Back-compat: an in-flight checkpoint from an older run stored separate Hostname/DomainName.
+    $script:HostName               = if ($data.HostName) { $data.HostName }
+                                     elseif ($data.Hostname -and $data.DomainName) { "$($data.Hostname).$($data.DomainName)" }
+                                     else { $data.HostName }
     $script:ResourceGroupName      = $data.ResourceGroupName
     $script:EnvironmentIndex       = $data.EnvironmentIndex
     $script:BotCount               = [int]$data.BotCount
@@ -522,6 +576,36 @@ function Install-RequiredModules {
 
 #region Azure Authentication
 
+function Invoke-AzConnect {
+    <#
+    .SYNOPSIS
+        Connects to Azure using interactive browser authentication, falling back
+        to device code authentication when a browser is unavailable (e.g. headless
+        or SSH sessions).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$TenantId
+    )
+
+    $connectParams = @{ ErrorAction = 'Stop' }
+    if ($TenantId) {
+        $connectParams['TenantId'] = $TenantId
+    }
+
+    try {
+        Write-Host "`nℹ️  A browser window will open for Azure login.`n" -ForegroundColor Cyan
+        return Connect-AzAccount @connectParams
+    }
+    catch {
+        Write-Log "Interactive browser authentication failed: $($_.Exception.Message)" -Level Warning
+        Write-Log "Falling back to device code authentication" -Level Info
+        Write-Host "`nℹ️  A code will be displayed. Visit the URL and enter the code to authenticate.`n" -ForegroundColor Cyan
+        return Connect-AzAccount @connectParams -UseDeviceAuthentication
+    }
+}
+
 function Connect-AzureEnvironment {
     <#
     .SYNOPSIS
@@ -550,17 +634,9 @@ function Connect-AzureEnvironment {
                 Write-Log "Force re-authentication requested" -Level Info
             }
             
-            # Connect to Azure using device code authentication
+            # Connect to Azure (interactive browser, falling back to device code)
             Write-Log "Authenticating to Azure..." -Level Info
-            Write-Host "`nℹ️  Using device code authentication for Azure login." -ForegroundColor Cyan
-            Write-Host "A code will be displayed. Visit the URL and enter the code to authenticate.`n" -ForegroundColor Cyan
-            
-            if ($TenantId) {
-                $azContext = Connect-AzAccount -TenantId $TenantId -UseDeviceAuthentication -ErrorAction Stop
-            }
-            else {
-                $azContext = Connect-AzAccount -UseDeviceAuthentication -ErrorAction Stop
-            }
+            $azContext = Invoke-AzConnect -TenantId $TenantId
             Write-Log "Connected to Azure as $($azContext.Context.Account.Id)" -Level Success
         }
         elseif ($currentContext -and $currentContext.Account) {
@@ -569,7 +645,7 @@ function Connect-AzureEnvironment {
             # If TenantId is specified and different, reconnect
             if ($TenantId -and $currentContext.Tenant.Id -ne $TenantId) {
                 Write-Log "Switching to specified tenant: $TenantId" -Level Info
-                $azContext = Connect-AzAccount -TenantId $TenantId -UseDeviceAuthentication -ErrorAction Stop
+                $azContext = Invoke-AzConnect -TenantId $TenantId
             }
             else {
                 $azContext = [PSCustomObject]@{
@@ -818,7 +894,7 @@ function Test-RequiredPermissions {
             Write-Host "⚠️  Unable to verify the Global Administrator role for $userAccount (the check failed to run)." -ForegroundColor Yellow
             Write-Host "    Global Administrator is required for app registration, admin consent, and guest invitations." -ForegroundColor Yellow
             Write-Host "    Continuing without confirming it may cause later steps to fail." -ForegroundColor Yellow
-            $proceed = Read-Host "Proceed anyway? [Y/n]"
+            $proceed = Read-Host "Proceed anyway? [Y/N]"
             if ($proceed -match '^\s*(n|no)\s*$') {
                 throw "Global Administrator role could not be verified and the operator chose not to continue."
             }
@@ -837,7 +913,7 @@ function Test-RequiredPermissions {
 function Test-QuotaRequirements {
     <#
     .SYNOPSIS
-        Checks vCPU and Azure OpenAI gpt-5.4-mini quota availability for the target region.
+        Checks Azure OpenAI gpt-5.4-mini quota availability for the target region.
     #>
     [CmdletBinding()]
     param(
@@ -857,42 +933,6 @@ function Test-QuotaRequirements {
     Write-Log "Checking quota requirements for region: $Location" -Level Info
 
     $quotaIssues = @()
-
-    # vCPU quota — Standard D2ds v6 / Standard DC2ds v6
-    Write-Host "  Checking vCPU quota (Standard D2ds v6 / Standard DC2ds v6)..." -ForegroundColor Gray
-    try {
-        $vmUsages = Get-AzVMUsage -Location $Location -ErrorAction Stop
-
-        $ddsv6   = $vmUsages | Where-Object { $_.Name.Value -like '*DDSv6*'   -or $_.Name.LocalizedValue -like '*DDSv6*' }
-        $dcsdsv6 = $vmUsages | Where-Object { $_.Name.Value -like '*DCDSv6*'  -or $_.Name.LocalizedValue -like '*DCDSv6*' }
-
-        $checkedAny = $false
-        foreach ($quota in @($ddsv6, $dcsdsv6)) {
-            if (-not $quota) { continue }
-            $checkedAny = $true
-            $available  = $quota.Limit - $quota.CurrentValue
-            $label      = $quota.Name.LocalizedValue
-            if ($available -gt 0) {
-                Write-Host "  ✓ ${label}: $($quota.CurrentValue)/$($quota.Limit) vCPUs used ($available available)" -ForegroundColor Green
-                Write-Log "${label} quota: $($quota.CurrentValue)/$($quota.Limit) ($available available)" -Level Info
-            }
-            else {
-                Write-Host "  ✗ ${label}: $($quota.CurrentValue)/$($quota.Limit) vCPUs used (none available)" -ForegroundColor Red
-                Write-Log "${label} quota exhausted: $($quota.CurrentValue)/$($quota.Limit)" -Level Warning
-                $quotaIssues += "vCPU quota for ${label} is at its limit in ${Location} — a quota increase request is required"
-            }
-        }
-
-        if (-not $checkedAny) {
-            Write-Host "  ⚠ Standard DDSv6 / DCDSv6 quota not found in ${Location} — VM series may not be available here" -ForegroundColor Yellow
-            Write-Log "Standard DDSv6/DCDSv6 quota not found in region: $Location" -Level Warning
-            $quotaIssues += "Standard D2ds v6 / Standard DC2ds v6 quota was not found in ${Location} — confirm this VM series is available in this region"
-        }
-    }
-    catch {
-        Write-Host "  ⚠ Could not check vCPU quota: $_" -ForegroundColor Yellow
-        Write-Log "vCPU quota check failed: $_" -Level Warning
-    }
 
     # Azure OpenAI quota — gpt-5.4-mini
     Write-Host "  Checking Azure OpenAI gpt-5.4-mini quota..." -ForegroundColor Gray
@@ -1606,7 +1646,7 @@ function New-NeologikAppRegistration {
             ObjectId = $app.Id
             ServicePrincipalId = $sp.Id
             SecretExpiry = $secretEndDate.ToString('yyyy-MM-dd')
-            SubscriptionRoles = @()
+            SubscriptionRoles = @('Reader')
             RGRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
             GraphAppRoles = @('Application.Read.All', 'Application.ReadWrite.OwnedBy')
         }
@@ -1621,6 +1661,151 @@ function New-NeologikAppRegistration {
         Write-Log "Failed to create App Registration: $_" -Level Error
         throw
     }
+}
+
+function Get-NeologikExistingAppRegistration {
+    <#
+    .SYNOPSIS
+        Resolves a client-supplied, pre-existing service principal into the same shape
+        returned by New-NeologikAppRegistration, WITHOUT creating anything.
+    .DESCRIPTION
+        Used when the client owns the deployment service principal and shares its object
+        ID (and optionally its secret). No app registration, service principal, or secret
+        is created. Role assignment and Graph consent are NOT done here - the caller runs
+        Set-AppRegistrationRoles against the resolved SP, exactly as for a script-created
+        one (the operator is Owner + Global Admin, so it can grant either way).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ServicePrincipalObjectId,
+
+        [Parameter(Mandatory = $false)]
+        [string]$ProvidedSecret = ""
+    )
+
+    Write-Log "Using client-supplied service principal (object ID: $ServicePrincipalObjectId)..." -Level Info
+
+    try {
+        Import-Module Microsoft.Graph.Applications -ErrorAction Stop
+
+        # Resolve the service principal by its object ID to obtain the client (app) ID.
+        $sp = Get-MgServicePrincipal -ServicePrincipalId $ServicePrincipalObjectId -ErrorAction Stop
+        Write-Log "Resolved service principal '$($sp.DisplayName)' (client ID: $($sp.AppId))" -Level Success
+
+        # Best-effort resolve the backing application object ID (may be null if the app is
+        # owned in a different tenant or not readable with the current permissions).
+        $appObjectId = $null
+        try {
+            $app = Get-MgApplication -Filter "appId eq '$($sp.AppId)'" -ErrorAction SilentlyContinue
+            if ($app) { $appObjectId = $app.Id }
+        }
+        catch {
+            Write-Log "Could not resolve backing application object (continuing with client ID only): $_" -Level Warning
+        }
+
+        $requiredRgRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
+
+        $script:ConfigData['AppRegistration'] = @{
+            Name = $sp.DisplayName
+            ClientId = $sp.AppId
+            ObjectId = $appObjectId
+            ServicePrincipalId = $sp.Id
+            SecretExpiry = 'client-managed'
+            Source = 'client-provided'
+            SubscriptionRoles = @('Reader')
+            RGRoles = $requiredRgRoles
+            GraphAppRoles = @('Application.Read.All', 'Application.ReadWrite.OwnedBy')
+        }
+
+        Write-Host "`n  Existing service principal resolved - roles and Graph consent will be assigned to it." -ForegroundColor Yellow
+
+        return @{
+            Application = if ($appObjectId) { $app } else { @{ Id = $null; AppId = $sp.AppId } }
+            ServicePrincipal = $sp
+            Secret = $ProvidedSecret
+        }
+    }
+    catch {
+        Write-Log "Failed to resolve client-supplied service principal '$ServicePrincipalObjectId': $_" -Level Error
+        throw "Could not resolve the service principal object ID '$ServicePrincipalObjectId'. Verify it is the enterprise-application (service-principal) object ID and that you are signed in to the correct tenant."
+    }
+}
+
+function Read-ExistingServicePrincipalChoice {
+    <#
+    .SYNOPSIS
+        Decides whether to use a pre-existing (client-provided) service principal and, if so,
+        resolves its object ID and optional secret.
+    .DESCRIPTION
+        Precedence:
+          1. Command-line -ExistingServicePrincipalObjectId - use it, no prompt.
+          2. Answer file - 'useExistingServicePrincipal' (true/false) with
+             'existingServicePrincipalObjectId' / 'existingServicePrincipalSecret'. false
+             skips without prompting; true uses the answer-file object ID (prompting only
+             if it is missing).
+          3. Interactive y/N prompt (default N).
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$CliObjectId = "",
+        [string]$CliSecret = "",
+        [object]$AnswerUseExisting = $null,
+        [string]$AnswerObjectId = "",
+        [string]$AnswerSecret = ""
+    )
+
+    # 1. Command-line object ID provided: use it without prompting.
+    if (-not [string]::IsNullOrWhiteSpace($CliObjectId)) {
+        Write-Log "Existing service principal supplied via command line (object ID: $($CliObjectId.Trim()))." -Level Info
+        return @{ UseExisting = $true; ObjectId = $CliObjectId.Trim(); Secret = $CliSecret }
+    }
+
+    # 2. Answer-file decision (when present).
+    if ($null -ne $AnswerUseExisting) {
+        $useExisting = [bool]$AnswerUseExisting
+        Write-Log "Existing-service-principal decision from answer file: useExistingServicePrincipal=$useExisting." -Level Info
+        if (-not $useExisting) {
+            return @{ UseExisting = $false; ObjectId = ""; Secret = "" }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($AnswerObjectId)) {
+            return @{ UseExisting = $true; ObjectId = $AnswerObjectId.Trim(); Secret = $AnswerSecret }
+        }
+        Write-Host "  answer file sets useExistingServicePrincipal=true but supplies no existingServicePrincipalObjectId - enter it now." -ForegroundColor Yellow
+        # Fall through to prompt for the object ID only (the y/N question is skipped).
+    }
+    else {
+        # 3. No CLI value and no answer-file decision: ask the y/N question.
+        Write-Host ""
+        Write-Host "Use a service principal you have already created for deployment?" -ForegroundColor Cyan
+        Write-Host "  Choose Y if you have already created the deployment service principal yourself" -ForegroundColor Gray
+        Write-Host "  and want to use it. Choose N to let this script create one for you." -ForegroundColor Gray
+        Write-Host "  (y/N, default: N): " -NoNewline -ForegroundColor Yellow
+        $answer = Read-Host
+
+        if ($answer -notmatch '^(y|yes)$') {
+            return @{ UseExisting = $false; ObjectId = ""; Secret = "" }
+        }
+    }
+
+    $objectId = ""
+    while ([string]::IsNullOrWhiteSpace($objectId)) {
+        Write-Host "  Service principal OBJECT ID (enterprise-application object ID, not the client/app ID): " -NoNewline -ForegroundColor Gray
+        $objectId = Read-Host
+        if ([string]::IsNullOrWhiteSpace($objectId)) {
+            Write-Host "  Object ID is required. Please enter it, or press Ctrl+C to cancel." -ForegroundColor Red
+        }
+    }
+
+    # Prefer an answer-file secret; otherwise read it masked so it is never echoed or logged.
+    if (-not [string]::IsNullOrWhiteSpace($AnswerSecret)) {
+        return @{ UseExisting = $true; ObjectId = $objectId.Trim(); Secret = $AnswerSecret }
+    }
+    Write-Host "  Client secret (optional - press Enter to skip and add it to Key Vault manually later): " -NoNewline -ForegroundColor Gray
+    $secureSecret = Read-Host -AsSecureString
+    $secretPlain = [System.Net.NetworkCredential]::new("", $secureSecret).Password
+
+    return @{ UseExisting = $true; ObjectId = $objectId.Trim(); Secret = $secretPlain }
 }
 
 function Grant-GraphAppRolePermissions {
@@ -1811,12 +1996,15 @@ function Set-AppRegistrationRoles {
             }
         }
 
-        # No subscription-scoped roles for the deployment SP. Every pipeline operation is now
-        # RG-scoped: the cost-management scheduled email and provider/feature registration moved
-        # to this onboarding script (run as Owner), the resource group is pre-created here, and
-        # the Cognitive Services soft-delete purge was removed. RG-scoped Contributor (below)
-        # plus 'Role Based Access Control Administrator' cover the deployment.
-        $roles = @()
+        # Subscription-scoped roles for the deployment SP. Every WRITE operation is RG-scoped
+        # (cost-management email, provider/feature registration and the resource group are
+        # handled by this onboarding script run as Owner; RG-scoped Contributor plus 'Role
+        # Based Access Control Administrator' below cover the deployment writes). 'Reader' is
+        # the one subscription-scoped role required: the infrastructure deploy's SKU/quota
+        # pre-flight reads subscription/location-level usage APIs (e.g. az search usage list =
+        # Microsoft.Search/locations/usages/read) that RG scope does not grant. Reader is
+        # read-only, so it stays within the least-privilege intent.
+        $roles = @('Reader')
 
         foreach ($roleName in $roles) {
             Write-Log "Assigning $roleName role..." -Level Info
@@ -2003,8 +2191,10 @@ function New-NeologikKeyVault {
         [Parameter(Mandatory = $true)]
         [string]$KeyVaultName,
 
-        [Parameter(Mandatory = $true)]
-        [string]$ClientSecret,
+        # Optional: when empty (e.g. a client-managed service principal whose secret was
+        # not shared), the Key Vault is created but the deploy-SP secret is not stored.
+        [Parameter(Mandatory = $false)]
+        [string]$ClientSecret = "",
 
         [Parameter(Mandatory = $true)]
         [array]$SecurityGroups,
@@ -2120,38 +2310,48 @@ function New-NeologikKeyVault {
             }
         }
 
-        # Now store the client secret (with retry for permission propagation)
-        Write-Log "Storing service principal client secret in Key Vault..." -Level Info
+        # Now store the client secret (with retry for permission propagation).
+        # When no secret was supplied (e.g. a client-managed service principal), the vault
+        # is still created but the secret is left for the client to populate manually.
         $secretName = "neologik-deployment-service-principle-secret"
-        
-        $retryCount = 0
-        $maxRetries = 10
-        $secretStored = $false
 
-        while (-not $secretStored -and $retryCount -lt $maxRetries) {
-            try {
-                $secureSecret = ConvertTo-SecureString -String $ClientSecret -AsPlainText -Force
-                $null = Set-AzKeyVaultSecret -VaultName $KeyVaultName `
-                    -Name $secretName `
-                    -SecretValue $secureSecret `
-                    -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($ClientSecret)) {
+            Write-Log "No client secret supplied - skipping secret storage. The client must add '$secretName' to Key Vault '$KeyVaultName' before the first deployment." -Level Warning
+            Write-Host "`n  ⚠ Key Vault created, but no deploy-SP secret was stored." -ForegroundColor Yellow
+            Write-Host "    Add the secret '$secretName' to '$KeyVaultName' before deploying." -ForegroundColor Yellow
+        }
+        else {
+            Write-Log "Storing service principal client secret in Key Vault..." -Level Info
 
-                Write-Log "Client secret stored successfully as '$secretName'" -Level Success
-                $secretStored = $true
-            }
-            catch {
-                if ($_.Exception.Message -match "Forbidden|not authorized") {
-                    $retryCount++
-                    if ($retryCount -lt $maxRetries) {
-                        Write-Log "Permission not yet propagated. Retrying in 10 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
-                        Start-Sleep -Seconds 10
+            $retryCount = 0
+            $maxRetries = 10
+            $secretStored = $false
+
+            while (-not $secretStored -and $retryCount -lt $maxRetries) {
+                try {
+                    $secureSecret = ConvertTo-SecureString -String $ClientSecret -AsPlainText -Force
+                    $null = Set-AzKeyVaultSecret -VaultName $KeyVaultName `
+                        -Name $secretName `
+                        -SecretValue $secureSecret `
+                        -ErrorAction Stop
+
+                    Write-Log "Client secret stored successfully as '$secretName'" -Level Success
+                    $secretStored = $true
+                }
+                catch {
+                    if ($_.Exception.Message -match "Forbidden|not authorized") {
+                        $retryCount++
+                        if ($retryCount -lt $maxRetries) {
+                            Write-Log "Permission not yet propagated. Retrying in 10 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
+                            Start-Sleep -Seconds 10
+                        }
+                        else {
+                            throw
+                        }
                     }
                     else {
                         throw
                     }
-                }
-                else {
-                    throw
                 }
             }
         }
@@ -2981,10 +3181,12 @@ function Export-ConfigurationData {
             'SolutionShortName' = $script:ConfigData['SolutionShortName']
             'UserAccount' = $script:ConfigData['UserAccount']
             'AzureRegion' = $script:ConfigData['AzureRegion']
-            'Hostname' = $script:ConfigData['Hostname']
-            'DomainName' = $script:ConfigData['DomainName']
+            'HostName' = $script:ConfigData['HostName']
             'BotCount' = $script:ConfigData['BotCount']
             'Bots' = $script:ConfigData['Bots']
+            'BudgetEmailAddresses' = $script:ConfigData['BudgetEmailAddresses']
+            'BudgetEmailFrequency' = $script:ConfigData['BudgetEmailFrequency']
+            'RegisterAllProviders' = $script:ConfigData['RegisterAllProviders']
             'InvitedGuestUsers' = $script:ConfigData['InvitedGuestUsers']
             'SecurityGroups' = $script:ConfigData['SecurityGroups']
             'AppRegistration' = $script:ConfigData['AppRegistration']
@@ -3170,7 +3372,7 @@ function Export-ConfigurationData {
         Write-Host "  1. Review the configuration file (available locally and in Storage Account)"
         Write-Host "  2. Service principal client secret is securely stored in Key Vault: $($script:ConfigData['KeyVault'].Name)"
         Write-Host "     Secret name: $($script:ConfigData['KeyVault'].SecretName)"
-        Write-Host "  3. Import your TLS certificate (.pfx file) into Key Vault as a certificate:"
+        Write-Host "  3. Import your TLS certificate (.pfx file) into Key Vault as a certificate (if using own hostname):"
         Write-Host "     Key Vault:        $($script:ConfigData['KeyVault'].Name)"
         Write-Host "     Certificate name: keyvault-neo-ingress"
         Write-Host "     Command:"
@@ -3189,6 +3391,390 @@ function Export-ConfigurationData {
 #endregion
 
 #region Main Execution
+
+function Import-AnswerFile {
+    <#
+    .SYNOPSIS
+        Loads a predefined-answers JSON file whose values pre-fill the interactive prompts.
+    .DESCRIPTION
+        Reads the file given by -AnswerFile, or auto-detects 'inputs.json' next to the script.
+        Values populate $script:Answers and become the default for the matching
+        prompt (Enter accepts, typing overrides). Only configuration inputs are read here; runtime
+        decisions (terms acceptance, module install, re-auth, quota/permission warnings) are always
+        asked interactively and are never read from the file.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$Path
+    )
+
+    $script:Answers = @{}
+    $script:AnswerFilePath = $null
+
+    $candidate = $null
+    if (-not [string]::IsNullOrWhiteSpace($Path)) {
+        if (-not (Test-Path -Path $Path)) {
+            throw "Answer file not found: $Path"
+        }
+        $candidate = (Resolve-Path -Path $Path).Path
+    }
+    else {
+        $p = Join-Path $PSScriptRoot 'inputs.json'
+        if (Test-Path -Path $p) { $candidate = $p }
+    }
+
+    if (-not $candidate) {
+        Write-Log "No answer file found - running fully interactive." -Level Info
+        return
+    }
+
+    try {
+        $json = Get-Content -Path $candidate -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "Failed to parse answer file '$candidate': $_"
+    }
+
+    foreach ($prop in $json.PSObject.Properties) {
+        if ($prop.Name -eq '_readme') { continue }
+        $script:Answers[$prop.Name] = $prop.Value
+    }
+    $script:AnswerFilePath = $candidate
+
+    Write-Host ""
+    Write-Host "  ✓ Loaded predefined inputs: $([System.IO.Path]::GetFileName($candidate))" -ForegroundColor Green
+    Write-Host "    These pre-fill the prompts below - press Enter to accept, or type to override." -ForegroundColor Gray
+    Write-Log "Loaded answer file: $candidate" -Level Info
+}
+
+function Get-Answer {
+    <#
+    .SYNOPSIS
+        Returns the predefined answer for a key, or $null when absent or blank.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Key
+    )
+
+    if ($null -eq $script:Answers -or -not $script:Answers.ContainsKey($Key)) { return $null }
+    $val = $script:Answers[$Key]
+    if ($val -is [string] -and [string]::IsNullOrWhiteSpace($val)) { return $null }
+    return $val
+}
+
+function Get-AnswerBool {
+    <#
+    .SYNOPSIS
+        Returns a boolean for an answer-file key, tolerant of JSON booleans and
+        true/false/yes/no/1/0 strings. Returns $null when the key is absent, blank, or holds
+        an unrecognised value (the caller then warns or falls back as appropriate).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Key
+    )
+
+    $val = Get-Answer $Key
+    if ($null -eq $val) { return $null }
+    if ($val -is [bool]) { return [bool]$val }
+    if ("$val" -match '^(true|yes|y|1)$') { return $true }
+    if ("$val" -match '^(false|no|n|0)$') { return $false }
+    Write-Host "  ⚠ Ignoring invalid boolean for '$Key' in answer file (must be true/false): '$val'" -ForegroundColor Yellow
+    return $null
+}
+
+function Get-PromptLabel {
+    <#
+    .SYNOPSIS
+        Chooses the prompt's value label: "Pre-filled: " when the effective value came from the
+        answer file and differs from the built-in default; otherwise "Default: ".
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]$Effective,
+        [Parameter(Mandatory = $false)]$Builtin
+    )
+
+    if ("$Effective" -ne "$Builtin") { return "Pre-filled: " }
+    return "Default: "
+}
+
+function Test-ResourceGroupNameError {
+    # Returns $null when the resource-group name is valid, otherwise an error string.
+    param([string]$Name)
+    if ($Name.Length -lt 1 -or $Name.Length -gt 90) { return "Resource group name must be 1-90 characters." }
+    if ($Name -notmatch '^[\w\-\.\(\)]+$') { return "Resource group name can only contain alphanumerics, underscores, hyphens, periods, and parentheses." }
+    if ($Name -match '\.$') { return "Resource group name cannot end with a period." }
+    return $null
+}
+
+function Test-KeyVaultNameError {
+    # Returns $null when the Key Vault name is valid, otherwise an error string.
+    param([string]$Name)
+    if ($Name.Length -lt 3 -or $Name.Length -gt 24) { return "Key Vault name must be 3-24 characters." }
+    if ($Name -notmatch '^[a-zA-Z][a-zA-Z0-9-]*[a-zA-Z0-9]$') { return "Key Vault name must start with a letter, end with a letter or digit, and contain only letters, digits and hyphens." }
+    if ($Name -match '--') { return "Key Vault name cannot contain consecutive hyphens." }
+    return $null
+}
+
+function Test-StorageAccountNameError {
+    # Returns $null when the storage-account name is valid, otherwise an error string.
+    param([string]$Name)
+    if ($Name.Length -lt 3 -or $Name.Length -gt 24) { return "Storage account name must be 3-24 characters." }
+    if ($Name -cnotmatch '^[a-z0-9]+$') { return "Storage account name must be lowercase letters and digits only (no hyphens)." }
+    return $null
+}
+
+function Read-NameWithDefault {
+    <#
+    .SYNOPSIS
+        Prompts for a resource name showing an effective default (computed, or pre-filled from
+        the answer file / CLI). Enter accepts the default; typing overrides. Re-prompts until the
+        value passes the supplied validator. Returns the accepted name.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Title,
+        [Parameter(Mandatory = $true)][string]$DefaultValue,
+        [Parameter(Mandatory = $true)][scriptblock]$Validator,
+        [string]$LabelPrefix = 'Default: '
+    )
+
+    while ($true) {
+        Write-Host ""
+        Write-Host "${Title}:" -ForegroundColor Cyan
+        Write-Host "  $LabelPrefix" -NoNewline -ForegroundColor Gray
+        Write-Host $DefaultValue -ForegroundColor Yellow
+        Write-Host "  Press Enter to use this value, or type a new one: " -NoNewline -ForegroundColor Gray
+        $entered = Read-Host
+
+        $candidate = if ([string]::IsNullOrWhiteSpace($entered)) { $DefaultValue } else { $entered.Trim() }
+        $err = & $Validator $candidate
+        if ($err) {
+            Write-Host "  ✗ $err Please try again." -ForegroundColor Red
+            continue
+        }
+        Write-Host "  ✓ Using: $candidate" -ForegroundColor Green
+        return $candidate
+    }
+}
+
+function Test-AnswerFileComplete {
+    <#
+    .SYNOPSIS
+        True when the answer file supplies every value that has no built-in default, so the
+        configuration can be shown as a summary up front without prompting field-by-field.
+    #>
+    [CmdletBinding()]
+    param()
+
+    if ($null -eq $script:Answers -or $script:Answers.Count -eq 0) { return $false }
+
+    # Fields with no built-in default must be present.
+    foreach ($key in @('organizationCode', 'organizationName', 'fqdn')) {
+        if (-not (Get-Answer $key)) { return $false }
+    }
+
+    # Every bot the script will ask about must have both names (no built-in defaults).
+    $bots = @(Get-Answer 'bots')
+    if ($bots.Count -eq 0) { return $false }
+    $botCountAns = Get-Answer 'botCount'
+    if ($botCountAns -and "$botCountAns" -match '^\d+$' -and [int]"$botCountAns" -ge 1 -and [int]"$botCountAns" -le 10) {
+        $needed = [int]"$botCountAns"
+    } else {
+        $needed = 1
+    }
+    if ($bots.Count -lt $needed) { return $false }
+    for ($j = 0; $j -lt $needed; $j++) {
+        if (-not $bots[$j]) { return $false }
+        if ([string]::IsNullOrWhiteSpace([string]$bots[$j].agentName)) { return $false }
+        if ([string]::IsNullOrWhiteSpace([string]$bots[$j].shortName)) { return $false }
+    }
+    return $true
+}
+
+function Get-CafRegionCodes {
+    <#
+    .SYNOPSIS
+        Microsoft Cloud Adoption Framework (CAF) region -> abbreviation map. Static; no Azure call.
+        Reference: https://learn.microsoft.com/azure/cloud-adoption-framework/ready/azure-best-practices/resource-abbreviations
+    #>
+    return @{
+        # Americas
+        'eastus' = 'eus'; 'eastus2' = 'eus2'; 'westus' = 'wus'; 'westus2' = 'wus2'; 'westus3' = 'wus3'
+        'centralus' = 'cus'; 'northcentralus' = 'ncus'; 'southcentralus' = 'scus'; 'westcentralus' = 'wcus'
+        'canadacentral' = 'cac'; 'canadaeast' = 'cae'; 'brazilsouth' = 'brs'; 'brazilsoutheast' = 'brse'
+        'brazilus' = 'bru'; 'mexicocentral' = 'mxc'; 'chilecentral' = 'clc'
+        # Europe
+        'northeurope' = 'neu'; 'westeurope' = 'weu'; 'uksouth' = 'uks'; 'ukwest' = 'ukw'
+        'francecentral' = 'frc'; 'francesouth' = 'frs'; 'germanywestcentral' = 'gwc'; 'germanynorth' = 'gno'
+        'norwayeast' = 'noe'; 'norwaywest' = 'now'; 'swedencentral' = 'sdc'; 'swedensouth' = 'sds'
+        'switzerlandnorth' = 'szn'; 'switzerlandwest' = 'szw'; 'italynorth' = 'itn'; 'polandcentral' = 'plc'
+        'spaincentral' = 'spc'; 'austriaeast' = 'ate'; 'belgiumcentral' = 'bec'
+        # Asia Pacific
+        'eastasia' = 'eas'; 'southeastasia' = 'seas'; 'australiaeast' = 'aue'; 'australiasoutheast' = 'ause'
+        'australiacentral' = 'auc'; 'australiacentral2' = 'auc2'; 'japaneast' = 'jpe'; 'japanwest' = 'jpw'
+        'koreacentral' = 'krc'; 'koreasouth' = 'krs'; 'centralindia' = 'inc'; 'southindia' = 'ins'
+        'westindia' = 'inw'; 'jioindiawest' = 'jiw'; 'jioindiacentral' = 'jic'; 'indonesiacentral' = 'idc'
+        'malaysiawest' = 'myw'; 'newzealandnorth' = 'nzn'
+        # Middle East & Africa
+        'southafricanorth' = 'san'; 'southafricawest' = 'saw'; 'uaenorth' = 'uan'; 'uaecentral' = 'uac'
+        'qatarcentral' = 'qac'; 'israelcentral' = 'ilc'
+        # China (special subscription)
+        'chinanorth' = 'cnn'; 'chinanorth2' = 'cnn2'; 'chinanorth3' = 'cnn3'
+        'chinaeast' = 'cne'; 'chinaeast2' = 'cne2'; 'chinaeast3' = 'cne3'
+        # Government (special subscription)
+        'usgovvirginia' = 'ugv'; 'usgovarizona' = 'uga'; 'usgovtexas' = 'ugt'; 'usdodeast' = 'ude'; 'usdodcentral' = 'udc'
+        # EUAP
+        'centraluseuap' = 'cuse'; 'eastus2euap' = 'eus2e'
+        # Geographic groups (returned by Azure API, not for deployment)
+        'asia' = 'asia'; 'asiapacific' = 'apac'; 'australia' = 'au'; 'brazil' = 'br'; 'canada' = 'ca'
+        'europe' = 'eu'; 'france' = 'fr'; 'germany' = 'de'; 'global' = 'global'; 'india' = 'in'
+        'indonesia' = 'id'; 'israel' = 'il'; 'italy' = 'it'; 'japan' = 'jp'; 'korea' = 'kr'
+        'malaysia' = 'my'; 'mexico' = 'mx'; 'newzealand' = 'nz'; 'norway' = 'no'; 'poland' = 'pl'
+        'qatar' = 'qa'; 'singapore' = 'sg'; 'southafrica' = 'za'; 'spain' = 'es'; 'sweden' = 'se'
+        'switzerland' = 'ch'; 'taiwan' = 'tw'; 'unitedstates' = 'us'
+    }
+}
+
+function Set-ConfigFromAnswerFile {
+    <#
+    .SYNOPSIS
+        Populates and validates all configuration from inputs.json WITHOUT prompting, deriving
+        names from the static CAF region map (no Azure region retrieval). Throws on any invalid
+        value so the caller can fall back to interactive entry. Returns the region abbreviation.
+    #>
+    [CmdletBinding()]
+    param()
+
+    # Organization code (no default)
+    $oc = ([string](Get-Answer 'organizationCode')).Trim().ToLower()
+    if ($oc -notmatch '^[a-z0-9]{3}$') { throw "organizationCode '$oc' must be exactly 3 lowercase alphanumeric characters." }
+    $script:OrganizationCode = $oc
+
+    # Environment type (default from -EnvironmentType, 'dev')
+    $et = [string](Get-Answer 'environmentType')
+    if ([string]::IsNullOrWhiteSpace($et)) { $et = $EnvironmentType }
+    $et = $et.ToLower()
+    if (@('dev', 'prd') -notcontains $et) { throw "environmentType '$et' must be 'dev' or 'prd'." }
+    $script:EnvironmentType = $et
+
+    # Organization name (no default)
+    $on = ([string](Get-Answer 'organizationName')).Trim()
+    if ([string]::IsNullOrWhiteSpace($on)) { throw "organizationName is required." }
+    $script:OrganizationName = $on
+
+    # Hostname / FQDN (no default)
+    $fq = ([string](Get-Answer 'fqdn')).Trim().ToLower()
+    $fq = $fq -replace '^[a-z]+://', ''
+    $fq = ($fq -split '/')[0]
+    $fq = $fq.Trim('.')
+    if ($fq -notmatch '\.' -or $fq -notmatch '^[a-z0-9]([a-z0-9\-\.]*[a-z0-9])?$') { throw "fqdn '$fq' is not a valid fully-qualified domain name." }
+    $script:HostName = $fq
+    $script:ConfigData['HostName'] = $script:HostName
+
+    # Azure region (default from -AzureRegion, 'uksouth'); abbrev from CAF map — no Azure call
+    $script:MicrosoftCAFRegionCodes = Get-CafRegionCodes
+    $script:AzureRegionCodes = $script:MicrosoftCAFRegionCodes
+    $rg = [string](Get-Answer 'azureRegion')
+    if ([string]::IsNullOrWhiteSpace($rg)) { $rg = $AzureRegion }
+    $rg = $rg.ToLower()
+    if (-not $script:MicrosoftCAFRegionCodes.ContainsKey($rg)) {
+        throw "azureRegion '$rg' is not a recognized region — run interactively to validate it against Azure."
+    }
+    $script:AzureRegion = $rg
+    $regionAbbrev = ([string]$script:MicrosoftCAFRegionCodes[$rg]).ToLower()
+
+    # Environment index (default '01')
+    $ei = [string](Get-Answer 'environmentIndex')
+    if ([string]::IsNullOrWhiteSpace($ei)) { $ei = '01' }
+    if ($ei -notmatch '^\d+$' -or [int]$ei -lt 1 -or [int]$ei -gt 99) { throw "environmentIndex '$ei' must be between 01 and 99." }
+    $script:EnvironmentIndex = ([int]$ei).ToString('00')
+
+    # Config file name now that org code, env type, and env index are known
+    Initialize-ConfigurationFile
+
+    # Resource group name (answer-file override, else computed).
+    $rgComputed = "rg-neo-$($script:OrganizationCode)$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
+    $rgAns = [string](Get-Answer 'resourceGroupName')
+    $script:ResourceGroupName = if (-not [string]::IsNullOrWhiteSpace($rgAns)) { $rgAns.Trim() } else { $rgComputed }
+    $rgErr = Test-ResourceGroupNameError $script:ResourceGroupName
+    if ($rgErr) { throw "resourceGroupName '$($script:ResourceGroupName)': $rgErr" }
+
+    # Key Vault name (-KeyVaultName CLI, else answer-file override, else computed).
+    $kvComputed = "kvneo$($script:OrganizationCode)$($script:EnvironmentType)$($script:EnvironmentIndex)"
+    $kvAns = [string](Get-Answer 'keyVaultName')
+    $script:KeyVaultNameOverride = if ($script:KeyVaultNameFromCli -and -not [string]::IsNullOrWhiteSpace($KeyVaultName)) { $KeyVaultName.Trim() }
+                                   elseif (-not [string]::IsNullOrWhiteSpace($kvAns)) { $kvAns.Trim() }
+                                   else { $kvComputed }
+    $kvErr = Test-KeyVaultNameError $script:KeyVaultNameOverride
+    if ($kvErr) { throw "keyVaultName '$($script:KeyVaultNameOverride)': $kvErr" }
+
+    # Deployment storage account name (answer-file override, else computed and truncated to 24).
+    $saComputed = "stneodeploy$($script:OrganizationCode)$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+    if ($saComputed.Length -gt 24) { $saComputed = $saComputed.Substring(0, 24) }
+    $saAns = [string](Get-Answer 'storageAccountName')
+    $script:ConfigData['DeployStorageAccountName'] = if (-not [string]::IsNullOrWhiteSpace($saAns)) { $saAns.Trim().ToLower() } else { $saComputed }
+    $saErr = Test-StorageAccountNameError $script:ConfigData['DeployStorageAccountName']
+    if ($saErr) { throw "storageAccountName '$($script:ConfigData['DeployStorageAccountName'])': $saErr" }
+
+    # Bots (no defaults)
+    $bots = @(Get-Answer 'bots')
+    $bcAns = Get-Answer 'botCount'
+    if ($bcAns -and "$bcAns" -match '^\d+$' -and [int]"$bcAns" -ge 1 -and [int]"$bcAns" -le 10) {
+        $script:BotCount = [int]"$bcAns"
+    }
+    else {
+        $script:BotCount = $bots.Count
+    }
+    if ($script:BotCount -lt 1 -or $script:BotCount -gt 10) { throw "botCount must be between 1 and 10." }
+    if ($bots.Count -lt $script:BotCount) { throw "inputs.json defines $($bots.Count) bot(s) but botCount is $($script:BotCount)." }
+
+    $script:BotConfigurations = @()
+    for ($i = 0; $i -lt $script:BotCount; $i++) {
+        $an = ([string]$bots[$i].agentName).Trim()
+        $sn = ([string]$bots[$i].shortName).Trim().ToLower()
+        if ([string]::IsNullOrWhiteSpace($an)) { throw "bot $($i + 1) agentName is required." }
+        if ($an -notmatch '^[A-Za-z0-9 \-_]+$') { throw "bot $($i + 1) agentName '$an' may only contain letters, numbers, spaces, dashes and underscores." }
+        if ($sn -notmatch '^[a-z][a-z\-]*$' -or $sn.Length -lt 1 -or $sn.Length -gt 4) { throw "bot $($i + 1) shortName '$sn' must be lowercase, 1-4 chars, letters/dashes, starting with a letter." }
+        if ($script:BotConfigurations | Where-Object { $_.AgentName -eq $an }) { throw "duplicate agent name '$an'." }
+        if ($script:BotConfigurations | Where-Object { $_.ShortName -eq $sn }) { throw "duplicate short name '$sn'." }
+        $script:BotConfigurations += @{ AgentName = $an; ShortName = $sn }
+    }
+    $script:ConfigData['BotCount'] = $script:BotCount
+    $script:ConfigData['Bots'] = $script:BotConfigurations
+
+    # Budget / cost-report email recipients (optional list; falls back to the built-in default).
+    # An empty list disables the scheduled cost-report email (see Set-NeologikCostManagementEmail).
+    $bcrAns = Get-Answer 'budgetCostReportEmailRecipients'
+    if ($null -ne $bcrAns) {
+        $script:ConfigData['BudgetEmailAddresses'] = @(Resolve-BudgetEmailRecipients $bcrAns)
+    }
+    else {
+        $script:ConfigData['BudgetEmailAddresses'] = @($script:DefaultBudgetCostReportEmailRecipients)
+    }
+    $script:ConfigData['BudgetEmailFrequency'] = 'Daily'
+
+    # Register-all-resource-providers choice (optional boolean; defaults to the minimal set).
+    # $true registers the full platform provider set now; $false (default) registers the minimal
+    # set here and leaves the rest to Register-NeologikResourceProviders.ps1.
+    $rrpAns = Get-Answer 'registerResourceProviders'
+    if ($null -eq $rrpAns) { $script:ConfigData['RegisterAllProviders'] = $false }
+    elseif ($rrpAns -is [bool]) { $script:ConfigData['RegisterAllProviders'] = [bool]$rrpAns }
+    elseif ("$rrpAns" -match '^(true|yes|y|1)$') { $script:ConfigData['RegisterAllProviders'] = $true }
+    elseif ("$rrpAns" -match '^(false|no|n|0)$') { $script:ConfigData['RegisterAllProviders'] = $false }
+    else { throw "registerResourceProviders '$rrpAns' must be true or false." }
+
+    # Solution names
+    $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode)$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
+    $script:ConfigData['SolutionShortName'] = "neo$($script:OrganizationCode)$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+
+    return $regionAbbrev
+}
 
 function Get-UserInput {
     <#
@@ -3246,6 +3832,10 @@ function Start-NeologikOnboarding {
         $resuming = $false
         Write-ScriptHeader
 
+        # Load predefined inputs (from -AnswerFile, or an auto-detected inputs.json).
+        # Values pre-fill the configuration prompts below; runtime decisions stay interactive.
+        Import-AnswerFile -Path $AnswerFile
+
         # Check for an existing checkpoint and offer to resume
         $existingCheckpoint = Find-LatestCheckpoint
         if ($existingCheckpoint) {
@@ -3263,7 +3853,7 @@ function Start-NeologikOnboarding {
             Write-Host "  A saved checkpoint was found ($ageStr):" -ForegroundColor Gray
             Write-Host "  $($existingCheckpoint.Name)" -ForegroundColor Cyan
             Write-Host ""
-            Write-Host "  Resume from this checkpoint? (default: Y): " -NoNewline -ForegroundColor Yellow
+            Write-Host "  Resume from this checkpoint? (Y/N, default: Y): " -NoNewline -ForegroundColor Yellow
             $resumeChoice = Read-Host
 
             if ([string]::IsNullOrWhiteSpace($resumeChoice) -or $resumeChoice -eq 'Y' -or $resumeChoice -eq 'y') {
@@ -3427,19 +4017,65 @@ function Start-NeologikOnboarding {
         Write-Host "║                                                               ║" -ForegroundColor Magenta
         Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Magenta
 
+        # When inputs.json supplies every no-default value, gather config non-interactively and
+        # jump straight to the summary; otherwise prompt for each value. On "edit" (N) we re-run
+        # this same block interactively.
+        $answerComplete = Test-AnswerFileComplete
+        $editing = $false
+        while ($true) {
+            if ($answerComplete -and -not $editing) {
+                # inputs.json is complete — apply it directly and go straight to the summary
+                # (no field-by-field prompts, and no Azure region retrieval).
+                try {
+                    $regionAbbrev = Set-ConfigFromAnswerFile
+                }
+                catch {
+                    Write-Host ""
+                    Write-Host "  ⚠ inputs.json: $($_.Exception.Message)" -ForegroundColor Yellow
+                    Write-Host "  Entering configuration interactively..." -ForegroundColor Yellow
+                    $editing = $true
+                    continue
+                }
+            }
+            else {
+
         # Get Organization Code with validation (FIRST QUESTION)
+        # No built-in default - the org code is client-specific. Pre-fill from the answer file
+        # (or a -OrganizationCode passed on the command line) when available.
+        $orgCodePrefill = Get-Answer 'organizationCode'
+        if (-not $orgCodePrefill -and -not [string]::IsNullOrWhiteSpace($OrganizationCode)) {
+            $orgCodePrefill = $OrganizationCode
+        }
         $orgCodeValid = $false
         while (-not $orgCodeValid) {
             Write-Host ""
-            Write-Host "Organization Code (exactly 3 characters):" -ForegroundColor Cyan
-            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-            Write-Host $OrganizationCode -ForegroundColor Yellow
-            Write-Host "  Requirements: lowercase, exactly 3 characters, letters and numbers only" -ForegroundColor Gray
-            Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
+            Write-Host "Organization Code:" -ForegroundColor Cyan
+            if ($orgCodePrefill) {
+                Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
+                Write-Host $orgCodePrefill -ForegroundColor Yellow
+                Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
+            }
+            else
+            {
+                Write-Host "  Example: " -NoNewLine -ForegroundColor Gray
+                Write-Host "abc" -ForegroundColor Yellow
+                Write-Host "  Requirements: lowercase, exactly 3 characters, letters and numbers only" -ForegroundColor Gray
+                Write-Host "  Enter organization code: " -NoNewline -ForegroundColor Gray
+            }
+            if ($orgCodePrefill) {
+            }
+            else {
+            }
             $orgInput = Read-Host
 
             if ([string]::IsNullOrWhiteSpace($orgInput)) {
-                $script:OrganizationCode = $OrganizationCode.ToLower()
+                if ($orgCodePrefill) {
+                    $script:OrganizationCode = ([string]$orgCodePrefill).Trim().ToLower()
+                }
+                else {
+                    Write-Host "  ✗ Organization code is required. Please enter a value." -ForegroundColor Red
+                    continue
+                }
             }
             else {
                 $script:OrganizationCode = $orgInput.Trim().ToLower()
@@ -3462,11 +4098,23 @@ function Start-NeologikOnboarding {
         }
 
         # Get Environment Type with validation (SECOND QUESTION)
+        # A valid environmentType in the answer file pre-fills (and overrides) the built-in default.
+        $envBuiltin = $EnvironmentType
+        $envAnswer = Get-Answer 'environmentType'
+        if ($envAnswer) {
+            if (@('dev', 'prd') -contains ([string]$envAnswer).ToLower()) {
+                $EnvironmentType = ([string]$envAnswer).ToLower()
+            }
+            else {
+                Write-Host "  ⚠ Ignoring invalid environmentType '$envAnswer' from answer file (must be dev or prd)." -ForegroundColor Yellow
+            }
+        }
+        $envLabel = Get-PromptLabel $EnvironmentType $envBuiltin
         $envTypeValid = $false
         while (-not $envTypeValid) {
             Write-Host ""
             Write-Host "Environment Type:" -ForegroundColor Cyan
-            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+            Write-Host "  $envLabel" -NoNewline -ForegroundColor Gray
             Write-Host $EnvironmentType -ForegroundColor Yellow
             Write-Host "  Valid options: dev, prd" -ForegroundColor Gray
             Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
@@ -3490,15 +4138,24 @@ function Start-NeologikOnboarding {
             }
         }
 
-        # Initialize configuration file now that we have org code and environment type
-        Initialize-ConfigurationFile
-
         # Get Organization Name
+        $orgNamePrefill = Get-Answer 'organizationName'
         Write-Host ""
         Write-Host "Organization Name (full company name):" -ForegroundColor Cyan
-        Write-Host "  Example: Contoso Ltd, Acme Corporation" -ForegroundColor Gray
-        Write-Host "  Enter organization name: " -NoNewline -ForegroundColor Gray
+        if ($orgNamePrefill) {
+            Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
+            Write-Host $orgNamePrefill -ForegroundColor Yellow
+            Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
+        }
+        else {
+            Write-Host "  Example: " -NoNewLine -ForegroundColor Gray
+            Write-Host "Contoso Ltd" -ForegroundColor Yellow
+            Write-Host "  Enter organization name: " -NoNewline -ForegroundColor Gray
+        }
         $orgNameInput = Read-Host
+        if ([string]::IsNullOrWhiteSpace($orgNameInput) -and $orgNamePrefill) {
+            $orgNameInput = [string]$orgNamePrefill
+        }
 
         while ([string]::IsNullOrWhiteSpace($orgNameInput)) {
             Write-Host "  Organization name is required. Please enter a name: " -NoNewline -ForegroundColor Yellow
@@ -3509,164 +4166,62 @@ function Start-NeologikOnboarding {
         Write-Host "  ✓ Using: " -NoNewline -ForegroundColor Green
         Write-Host $script:OrganizationName -ForegroundColor White
 
-        # Get Hostname
+        # Get the bot's hostname (full FQDN).
+        # This is the complete public host, e.g. neologik.contoso.com. It is stored and consumed
+        # downstream as a single value (hostName); it is never split into separate host/domain parts.
+        $fqdnPrefill = Get-Answer 'fqdn'
         Write-Host ""
-        Write-Host "Bot DNS Hostname:" -ForegroundColor Cyan
-        Write-Host "  Example: neologik, neologik-dev" -ForegroundColor Gray
-        Write-Host "  Enter DNS hostname: " -NoNewline -ForegroundColor Gray
-        $hostnameInput = Read-Host
-
-        while ([string]::IsNullOrWhiteSpace($hostnameInput)) {
-            Write-Host "  DNS hostname is required. Please enter a DNS hostname: " -NoNewline -ForegroundColor Yellow
-            $hostnameInput = Read-Host
+        Write-Host "Bot Hostname (full FQDN):" -ForegroundColor Cyan
+        if ($fqdnPrefill) {
+            Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
+            Write-Host $fqdnPrefill -ForegroundColor Yellow
+            Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
+        }
+        else {
+            Write-Host "  Example: " -NoNewLine -ForegroundColor Gray
+            Write-Host "neologik.contoso.com, abcprd.neologik.ai" -ForegroundColor Yellow
+            Write-Host "  Enter full hostname: " -NoNewline -ForegroundColor Gray
+        }
+        $fqdnInput = Read-Host
+        if ([string]::IsNullOrWhiteSpace($fqdnInput) -and $fqdnPrefill) {
+            $fqdnInput = [string]$fqdnPrefill
         }
 
-        $script:Hostname = $hostnameInput.Trim().ToLower()
-        $script:ConfigData['Hostname'] = $script:Hostname
-        Write-Host "  ✓ Using: " -NoNewline -ForegroundColor Green
-        Write-Host $script:Hostname -ForegroundColor White
+        $fqdnValid = $false
+        while (-not $fqdnValid) {
+            while ([string]::IsNullOrWhiteSpace($fqdnInput)) {
+                Write-Host "  Hostname is required. Please enter the full FQDN: " -NoNewline -ForegroundColor Yellow
+                $fqdnInput = Read-Host
+            }
 
-        # Get Domain Name
-        Write-Host ""
-        Write-Host "Bot DNS Domain Name:" -ForegroundColor Cyan
-        Write-Host "  Example: contoso.com, example.co.uk" -ForegroundColor Gray
-        Write-Host "  Enter DNS domain name: " -NoNewline -ForegroundColor Gray
-        $domainInput = Read-Host
+            # Normalize: strip any scheme/path, lowercase, trim stray dots.
+            $normalizedFqdn = $fqdnInput.Trim().ToLower()
+            $normalizedFqdn = $normalizedFqdn -replace '^[a-z]+://', ''
+            $normalizedFqdn = ($normalizedFqdn -split '/')[0]
+            $normalizedFqdn = $normalizedFqdn.Trim('.')
 
-        while ([string]::IsNullOrWhiteSpace($domainInput)) {
-            Write-Host "  DNS domain name is required. Please enter a DNS domain name: " -NoNewline -ForegroundColor Yellow
-            $domainInput = Read-Host
+            # Require a dotted, DNS-valid fully-qualified name (host.domain).
+            if ($normalizedFqdn -notmatch '\.' -or $normalizedFqdn -notmatch '^[a-z0-9]([a-z0-9\-\.]*[a-z0-9])?$') {
+                Write-Host "  ✗ Enter a valid fully-qualified hostname, e.g. neologik.contoso.com" -ForegroundColor Red
+                $fqdnInput = ""
+                continue
+            }
+
+            $script:HostName = $normalizedFqdn
+            $fqdnValid = $true
         }
 
-        $script:DomainName = $domainInput.Trim().ToLower()
-        $script:ConfigData['DomainName'] = $script:DomainName
+        $script:ConfigData['HostName'] = $script:HostName
         Write-Host "  ✓ Using: " -NoNewline -ForegroundColor Green
-        Write-Host $script:DomainName -ForegroundColor White
+        Write-Host $script:HostName -ForegroundColor White
 
         # Get Azure Region with real-time validation
         # Query Azure for available locations
         Write-Host ""
         Write-Host "Retrieving available Azure regions..." -ForegroundColor Gray
         
-        # Microsoft Cloud Adoption Framework (CAF) recommended region abbreviations
-        # Reference: https://learn.microsoft.com/azure/cloud-adoption-framework/ready/azure-best-practices/resource-abbreviations
-        $script:MicrosoftCAFRegionCodes = @{
-            # Americas
-            'eastus' = 'eus'
-            'eastus2' = 'eus2'
-            'westus' = 'wus'
-            'westus2' = 'wus2'
-            'westus3' = 'wus3'
-            'centralus' = 'cus'
-            'northcentralus' = 'ncus'
-            'southcentralus' = 'scus'
-            'westcentralus' = 'wcus'
-            'canadacentral' = 'cac'
-            'canadaeast' = 'cae'
-            'brazilsouth' = 'brs'
-            'brazilsoutheast' = 'brse'
-            'brazilus' = 'bru'
-            'mexicocentral' = 'mxc'
-            'chilecentral' = 'clc'
-            
-            # Europe
-            'northeurope' = 'neu'
-            'westeurope' = 'weu'
-            'uksouth' = 'uks'
-            'ukwest' = 'ukw'
-            'francecentral' = 'frc'
-            'francesouth' = 'frs'
-            'germanywestcentral' = 'gwc'
-            'germanynorth' = 'gno'
-            'norwayeast' = 'noe'
-            'norwaywest' = 'now'
-            'swedencentral' = 'sdc'
-            'swedensouth' = 'sds'
-            'switzerlandnorth' = 'szn'
-            'switzerlandwest' = 'szw'
-            'italynorth' = 'itn'
-            'polandcentral' = 'plc'
-            'spaincentral' = 'spc'
-            'austriaeast' = 'ate'
-            'belgiumcentral' = 'bec'
-            
-            # Asia Pacific
-            'eastasia' = 'eas'
-            'southeastasia' = 'seas'
-            'australiaeast' = 'aue'
-            'australiasoutheast' = 'ause'
-            'australiacentral' = 'auc'
-            'australiacentral2' = 'auc2'
-            'japaneast' = 'jpe'
-            'japanwest' = 'jpw'
-            'koreacentral' = 'krc'
-            'koreasouth' = 'krs'
-            'centralindia' = 'inc'
-            'southindia' = 'ins'
-            'westindia' = 'inw'
-            'jioindiawest' = 'jiw'
-            'jioindiacentral' = 'jic'
-            'indonesiacentral' = 'idc'
-            'malaysiawest' = 'myw'
-            'newzealandnorth' = 'nzn'
-            
-            # Middle East & Africa
-            'southafricanorth' = 'san'
-            'southafricawest' = 'saw'
-            'uaenorth' = 'uan'
-            'uaecentral' = 'uac'
-            'qatarcentral' = 'qac'
-            'israelcentral' = 'ilc'
-            
-            # China (requires special subscription)
-            'chinanorth' = 'cnn'
-            'chinanorth2' = 'cnn2'
-            'chinanorth3' = 'cnn3'
-            'chinaeast' = 'cne'
-            'chinaeast2' = 'cne2'
-            'chinaeast3' = 'cne3'
-            
-            # Government (requires special subscription)
-            'usgovvirginia' = 'ugv'
-            'usgovarizona' = 'uga'
-            'usgovtexas' = 'ugt'
-            'usdodeast' = 'ude'
-            'usdodcentral' = 'udc'
-            
-            # EUAP (Early Update Access Program) regions
-            'centraluseuap' = 'cuse'
-            'eastus2euap' = 'eus2e'
-            
-            # Geographic groups (not for deployment, but returned by Azure API)
-            'asia' = 'asia'
-            'asiapacific' = 'apac'
-            'australia' = 'au'
-            'brazil' = 'br'
-            'canada' = 'ca'
-            'europe' = 'eu'
-            'france' = 'fr'
-            'germany' = 'de'
-            'global' = 'global'
-            'india' = 'in'
-            'indonesia' = 'id'
-            'israel' = 'il'
-            'italy' = 'it'
-            'japan' = 'jp'
-            'korea' = 'kr'
-            'malaysia' = 'my'
-            'mexico' = 'mx'
-            'newzealand' = 'nz'
-            'norway' = 'no'
-            'poland' = 'pl'
-            'qatar' = 'qa'
-            'singapore' = 'sg'
-            'southafrica' = 'za'
-            'spain' = 'es'
-            'sweden' = 'se'
-            'switzerland' = 'ch'
-            'taiwan' = 'tw'
-            'unitedstates' = 'us'
-        }
+        # Region abbreviations from the shared CAF map (single source of truth — see Get-CafRegionCodes).
+        $script:MicrosoftCAFRegionCodes = Get-CafRegionCodes
         
         try {
             $azureLocations = Get-AzLocation | Sort-Object Location
@@ -3710,12 +4265,18 @@ function Start-NeologikOnboarding {
             $script:AzureRegionCodes = $script:MicrosoftCAFRegionCodes
         }
         
+        # Pre-fill (and override) the default region from the answer file when provided (still validated below).
+        $regionBuiltin = $AzureRegion
+        $regionAnswer = Get-Answer 'azureRegion'
+        if ($regionAnswer) { $AzureRegion = ([string]$regionAnswer).ToLower() }
+        $regionLabel = Get-PromptLabel $AzureRegion $regionBuiltin
+
         $regionValid = $false
-        
+
         while (-not $regionValid) {
             Write-Host ""
             Write-Host "Azure Region:" -ForegroundColor Cyan
-            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+            Write-Host "  $regionLabel" -NoNewline -ForegroundColor Gray
             Write-Host $AzureRegion -ForegroundColor Yellow
             
             if ($azureLocations) {
@@ -3730,7 +4291,8 @@ function Start-NeologikOnboarding {
                 }
                 Write-Host "  Type 'list' to see all available regions" -ForegroundColor Gray
             } else {
-                Write-Host "  Examples: uksouth, ukwest, eastus, westus, northeurope, westeurope" -ForegroundColor Gray
+                Write-Host "  Example: " -NoNewLine -ForegroundColor Gray
+                Write-Host "uksouth, ukwest, eastus, westus, northeurope, westeurope" -ForegroundColor Yellow
             }
             
             Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
@@ -3813,20 +4375,33 @@ function Start-NeologikOnboarding {
         }
 
         # Get Environment Index with validation
+        # Source the default from the answer file when it holds a valid 1-99 value.
+        $indexDefault = Get-Answer 'environmentIndex'
+        if ($indexDefault -and "$indexDefault" -match '^\d+$' -and [int]"$indexDefault" -ge 1 -and [int]"$indexDefault" -le 99) {
+            $indexDefault = ([int]"$indexDefault").ToString("00")
+        }
+        elseif ($indexDefault) {
+            Write-Host "  ⚠ Ignoring invalid environmentIndex '$indexDefault' from answer file (must be 01-99)." -ForegroundColor Yellow
+            $indexDefault = "01"
+        }
+        else {
+            $indexDefault = "01"
+        }
+        $indexLabel = Get-PromptLabel $indexDefault "01"
         $indexValid = $false
         while (-not $indexValid) {
             Write-Host ""
             Write-Host "Environment Index Number:" -ForegroundColor Cyan
-            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-            Write-Host "01" -ForegroundColor Yellow
+            Write-Host "  $indexLabel" -NoNewline -ForegroundColor Gray
+            Write-Host $indexDefault -ForegroundColor Yellow
             Write-Host "  (Use for multiple environments: 01, 02, 03, etc.)" -ForegroundColor Gray
             Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
             $indexInput = Read-Host
 
             if ([string]::IsNullOrWhiteSpace($indexInput)) {
-                $script:EnvironmentIndex = "01"
+                $script:EnvironmentIndex = $indexDefault
                 $indexValid = $true
-                Write-Host "  ✓ Using default: 01" -ForegroundColor Green
+                Write-Host "  ✓ Using default: $($script:EnvironmentIndex)" -ForegroundColor Green
             }
             else {
                 # Validate it's a number
@@ -3849,6 +4424,9 @@ function Start-NeologikOnboarding {
             }
         }
 
+        # Config file name now that org code, env type, and env index are known
+        Initialize-ConfigurationFile
+
         # Calculate resource group name based on inputs
         # Use Azure region codes from real-time lookup
         $regionAbbrev = if ($script:AzureRegionCodes -and $script:AzureRegionCodes.ContainsKey($script:AzureRegion.ToLower())) {
@@ -3865,62 +4443,66 @@ function Start-NeologikOnboarding {
             }
         }
         
-        $defaultResourceGroupName = "rg-neo-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
+        # Resource Group, Key Vault and Storage Account names. Each shows an effective default:
+        # the answer-file value (or, for Key Vault, a -KeyVaultName CLI value) when present,
+        # otherwise the computed Neologik-standard name. Press Enter to accept, or type to
+        # override; validated against Azure naming rules. This lets client-specific naming
+        # conventions be applied from inputs.json without editing the script.
 
-        # Get Resource Group Name with validation
-        $rgNameValid = $false
-        while (-not $rgNameValid) {
-            Write-Host ""
-            Write-Host "Resource Group Name:" -ForegroundColor Cyan
-            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-            Write-Host $defaultResourceGroupName -ForegroundColor Yellow
-            Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
-            $rgInput = Read-Host
+        # Resource group name.
+        $rgComputed = "rg-neo-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
+        $rgAns = [string](Get-Answer 'resourceGroupName')
+        $rgDefault = if (-not [string]::IsNullOrWhiteSpace($rgAns)) { $rgAns.Trim() } else { $rgComputed }
+        $script:ResourceGroupName = Read-NameWithDefault -Title 'Resource Group Name' `
+            -DefaultValue $rgDefault -Validator ${function:Test-ResourceGroupNameError} `
+            -LabelPrefix (Get-PromptLabel $rgDefault $rgComputed)
 
-            if ([string]::IsNullOrWhiteSpace($rgInput)) {
-                $script:ResourceGroupName = $defaultResourceGroupName
-                $rgNameValid = $true
-                Write-Host "  ✓ Using default: $defaultResourceGroupName" -ForegroundColor Green
-            }
-            else {
-                # Validate length (1-90 characters)
-                if ($rgInput.Length -lt 1 -or $rgInput.Length -gt 90) {
-                    Write-Host "  ✗ Resource group name must be between 1 and 90 characters. Please try again." -ForegroundColor Red
-                    continue
-                }
+        # Key Vault name. Precedence for the default: -KeyVaultName CLI, then answer file, then computed.
+        $kvComputed = "kvneo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$($script:EnvironmentIndex)"
+        $kvAns = [string](Get-Answer 'keyVaultName')
+        $kvDefault = if ($script:KeyVaultNameFromCli -and -not [string]::IsNullOrWhiteSpace($KeyVaultName)) { $KeyVaultName.Trim() }
+                     elseif (-not [string]::IsNullOrWhiteSpace($kvAns)) { $kvAns.Trim() }
+                     else { $kvComputed }
+        $script:KeyVaultNameOverride = Read-NameWithDefault -Title 'Key Vault Name' `
+            -DefaultValue $kvDefault -Validator ${function:Test-KeyVaultNameError} `
+            -LabelPrefix (Get-PromptLabel $kvDefault $kvComputed)
 
-                # Validate characters (alphanumerics, underscores, hyphens, periods, and parentheses)
-                if ($rgInput -notmatch '^[\w\-\.\(\)]+$') {
-                    Write-Host "  ✗ Resource group name can only contain alphanumerics, underscores, hyphens, periods, and parentheses. Please try again." -ForegroundColor Red
-                    continue
-                }
-
-                # Validate doesn't end with period
-                if ($rgInput -match '\.$') {
-                    Write-Host "  ✗ Resource group name cannot end with a period. Please try again." -ForegroundColor Red
-                    continue
-                }
-
-                $script:ResourceGroupName = $rgInput
-                $rgNameValid = $true
-                Write-Host "  ✓ Using: $rgInput" -ForegroundColor Green
-            }
-        }
+        # Deployment storage account name (holds the certificate blob container).
+        $saComputed = "stneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+        if ($saComputed.Length -gt 24) { $saComputed = $saComputed.Substring(0, 24) }
+        $saAns = [string](Get-Answer 'storageAccountName')
+        $saDefault = if (-not [string]::IsNullOrWhiteSpace($saAns)) { $saAns.Trim().ToLower() } else { $saComputed }
+        $script:ConfigData['DeployStorageAccountName'] = Read-NameWithDefault -Title 'Deployment Storage Account Name' `
+            -DefaultValue $saDefault -Validator ${function:Test-StorageAccountNameError} `
+            -LabelPrefix (Get-PromptLabel $saDefault $saComputed)
 
         # Get Number of Bots with validation
+        # Source the default from the answer file when it holds a valid 1-10 value.
+        $botCountDefault = Get-Answer 'botCount'
+        if ($botCountDefault -and "$botCountDefault" -match '^\d+$' -and [int]"$botCountDefault" -ge 1 -and [int]"$botCountDefault" -le 10) {
+            $botCountDefault = [int]"$botCountDefault"
+        }
+        elseif ($botCountDefault) {
+            Write-Host "  ⚠ Ignoring invalid botCount '$botCountDefault' from answer file (must be 1-10)." -ForegroundColor Yellow
+            $botCountDefault = 1
+        }
+        else {
+            $botCountDefault = 1
+        }
+        $botCountLabel = Get-PromptLabel $botCountDefault 1
         $botCountValid = $false
         while (-not $botCountValid) {
             Write-Host ""
             Write-Host "How many bots will there be?" -ForegroundColor Cyan
-            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-            Write-Host "1" -ForegroundColor Yellow
+            Write-Host "  $botCountLabel" -NoNewline -ForegroundColor Gray
+            Write-Host $botCountDefault -ForegroundColor Yellow
             Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
             $botCountInput = Read-Host
 
             if ([string]::IsNullOrWhiteSpace($botCountInput)) {
-                $script:BotCount = 1
+                $script:BotCount = $botCountDefault
                 $botCountValid = $true
-                Write-Host "  ✓ Using default: 1" -ForegroundColor Green
+                Write-Host "  ✓ Using default: $($script:BotCount)" -ForegroundColor Green
             }
             else {
                 # Validate it's a number
@@ -3944,32 +4526,56 @@ function Start-NeologikOnboarding {
         }
 
         # Get Bot Names (Agent Name and Short Name for each bot)
+        $botsAnswer = @(Get-Answer 'bots')
+        # Built-in suggested agent name (the product name), offered as the prompt default when the
+        # answer file has no value for this bot.
+        $agentNameBuiltinDefault = 'Neologik'
         $script:BotConfigurations = @()
         for ($i = 1; $i -le $script:BotCount; $i++) {
-            $defaultAgentName = if ($i -eq 1) { "Bot Name" } else { "Bot Name $i" }
+            # Agent-name suggestion: prefer the answer-file value; otherwise fall back to the
+            # built-in default, but only while it is still free (so a second bot is not offered a
+            # name an earlier bot already took).
+            $agentNamePrefill = $null
+            $agentNameFromAnswer = $false
+            if ($botsAnswer.Count -ge $i -and $botsAnswer[$i - 1] -and $botsAnswer[$i - 1].agentName) {
+                $anp = ([string]$botsAnswer[$i - 1].agentName).Trim()
+                if (-not [string]::IsNullOrWhiteSpace($anp)) { $agentNamePrefill = $anp; $agentNameFromAnswer = $true }
+            }
+            if (-not $agentNamePrefill -and -not ($script:BotConfigurations | Where-Object { $_.AgentName -eq $agentNameBuiltinDefault })) {
+                $agentNamePrefill = $agentNameBuiltinDefault
+            }
+            $agentNameLabel = if ($agentNameFromAnswer) { 'Pre-filled: ' } else { 'Default: ' }
             $agentNameValid = $false
             $agentName = ""
-            
+
             # Get Agent Name
             while (-not $agentNameValid) {
                 Write-Host ""
-                Write-Host "Full Bot Name for Bot $i`:" -ForegroundColor Cyan
-                Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-                Write-Host $defaultAgentName -ForegroundColor Yellow
+                Write-Host "Full Agent Name for Bot $i`:" -ForegroundColor Cyan
+                if ($agentNamePrefill) {
+                    Write-Host "  $agentNameLabel" -NoNewline -ForegroundColor Gray
+                    Write-Host $agentNamePrefill -ForegroundColor Yellow
+                }
                 Write-Host "  Requirements: letters, numbers, spaces, dashes, and underscores allowed" -ForegroundColor Gray
-                Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
+                if ($agentNamePrefill) {
+                    Write-Host "  Press Enter to accept, or type a new value: " -NoNewline -ForegroundColor Gray
+                }
+                else {
+                    Write-Host "  Enter agent name: " -NoNewline -ForegroundColor Gray
+                }
                 $agentNameInput = Read-Host
 
-                $agentName = if ([string]::IsNullOrWhiteSpace($agentNameInput)) {
-                    $defaultAgentName
-                } else {
-                    $agentNameInput.Trim()
+                if ([string]::IsNullOrWhiteSpace($agentNameInput)) {
+                    if ($agentNamePrefill) {
+                        $agentName = $agentNamePrefill
+                    }
+                    else {
+                        Write-Host "  ✗ Agent name is required. Please enter a value." -ForegroundColor Red
+                        continue
+                    }
                 }
-
-                # Validate not empty
-                if ([string]::IsNullOrWhiteSpace($agentName)) {
-                    Write-Host "  ✗ Agent name cannot be empty. Please try again." -ForegroundColor Red
-                    continue
+                else {
+                    $agentName = $agentNameInput.Trim()
                 }
 
                 # Validate characters (letters, numbers, spaces, dashes, and underscores)
@@ -3989,22 +4595,41 @@ function Start-NeologikOnboarding {
             }
 
             # Get Bot Short Name
-            $defaultBotShortName = if ($i -eq 1) { "bot" } else { "bot$i" }
+            # No built-in default — pre-fill from the answer file when present, otherwise require input.
+            $botShortNamePrefill = $null
+            if ($botsAnswer.Count -ge $i -and $botsAnswer[$i - 1] -and $botsAnswer[$i - 1].shortName) {
+                $snp = ([string]$botsAnswer[$i - 1].shortName).Trim()
+                if (-not [string]::IsNullOrWhiteSpace($snp)) { $botShortNamePrefill = $snp }
+            }
             $botShortNameValid = $false
-            
+
             while (-not $botShortNameValid) {
                 Write-Host ""
                 Write-Host "Bot $i Short Name:" -ForegroundColor Cyan
-                Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-                Write-Host $defaultBotShortName -ForegroundColor Yellow
-                Write-Host "  Requirements: lowercase, max 4 characters, letters, numbers and dashes only" -ForegroundColor Gray
-                Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
+                if ($botShortNamePrefill) {
+                    Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
+                    Write-Host $botShortNamePrefill -ForegroundColor Yellow
+                    Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
+                }
+                else {
+                    Write-Host "  Example: " -NoNewLine -ForegroundColor Gray
+                    Write-Host "bot" -ForegroundColor Yellow
+                    Write-Host "  Requirements: lowercase, max 4 characters, letters and dashes only" -ForegroundColor Gray
+                    Write-Host "  Enter short name: " -NoNewline -ForegroundColor Gray
+                }
                 $botShortNameInput = Read-Host
 
-                $botShortName = if ([string]::IsNullOrWhiteSpace($botShortNameInput)) {
-                    $defaultBotShortName
-                } else {
-                    $botShortNameInput.Trim()
+                if ([string]::IsNullOrWhiteSpace($botShortNameInput)) {
+                    if ($botShortNamePrefill) {
+                        $botShortName = $botShortNamePrefill
+                    }
+                    else {
+                        Write-Host "  ✗ Short name is required. Please enter a value." -ForegroundColor Red
+                        continue
+                    }
+                }
+                else {
+                    $botShortName = $botShortNameInput.Trim()
                 }
 
                 # Validate lowercase
@@ -4048,9 +4673,20 @@ function Start-NeologikOnboarding {
         # Get Budget Cost-Report Email Recipient(s)
         # A daily Azure Cost Management report is emailed to these addresses. This used to be
         # provisioned by the infrastructure deployment as a subscription-scoped Bicep module; it
-        # is now created here (run as Owner) so the deployment service connection needs no
-        # subscription-scoped role. Leave blank / 'none' to disable.
-        $defaultBudgetEmail = 'support_budget_alerts@neologik.ai'
+        # is now created here (run as Owner, at Step 13b) so the deployment service connection
+        # needs no subscription-scoped role. Pre-filled from inputs.json
+        # 'budgetCostReportEmailRecipients' when present. Leave blank for the default, or 'none'
+        # to disable.
+        $defaultBudgetEmail = @($script:DefaultBudgetCostReportEmailRecipients)
+        $budgetAns = Get-Answer 'budgetCostReportEmailRecipients'
+        if ($null -ne $budgetAns) {
+            try {
+                $fromAnswer = @(Resolve-BudgetEmailRecipients $budgetAns)
+                if ($fromAnswer.Count -gt 0) { $defaultBudgetEmail = $fromAnswer }
+            }
+            catch { Write-Host "  ⚠ Ignoring invalid budgetCostReportEmailRecipients from answer file: $($_.Exception.Message)" -ForegroundColor Yellow }
+        }
+        $budgetDefaultText = $defaultBudgetEmail -join ', '
         $budgetEmailsValid = $false
         $budgetEmails = @()
         while (-not $budgetEmailsValid) {
@@ -4059,7 +4695,7 @@ function Start-NeologikOnboarding {
             Write-Host "  A daily Azure cost report is emailed to these address(es)." -ForegroundColor Gray
             Write-Host "  Enter one or more email addresses separated by commas, or 'none' to disable." -ForegroundColor Gray
             Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-            Write-Host $defaultBudgetEmail -ForegroundColor Yellow
+            Write-Host $budgetDefaultText -ForegroundColor Yellow
             Write-Host "  Press Enter for default, type address(es), or 'none' to disable: " -NoNewline -ForegroundColor Gray
             $budgetEmailInput = Read-Host
 
@@ -4091,19 +4727,32 @@ function Start-NeologikOnboarding {
         $script:ConfigData['BudgetEmailFrequency'] = 'Daily'
 
         # Ask whether to register the full Azure resource provider set now.
-        # Default: No — register only the minimal providers this script needs; the full platform
-        # provider set is registered separately via Register-NeologikResourceProviders.ps1 before
-        # the infrastructure deployment runs.
+        # Pre-filled from inputs.json 'registerResourceProviders' when present. Default: No —
+        # register only the minimal providers this script needs; the full platform provider set is
+        # registered separately via Register-NeologikResourceProviders.ps1 before the
+        # infrastructure deployment runs.
+        $registerAllDefault = $false
+        $rpAns = Get-Answer 'registerResourceProviders'
+        if ($rpAns -is [bool]) { $registerAllDefault = [bool]$rpAns }
+        elseif ($rpAns -and "$rpAns" -match '^(true|yes|y|1)$') { $registerAllDefault = $true }
+        elseif ($rpAns -and "$rpAns" -match '^(false|no|n|0)$') { $registerAllDefault = $false }
+        elseif ($rpAns) { Write-Host "  ⚠ Ignoring invalid registerResourceProviders '$rpAns' from answer file (must be true/false)." -ForegroundColor Yellow }
+        $registerAllDefaultText = if ($registerAllDefault) { 'Y (register the full set now)' } else { 'N (register the minimal set only)' }
         Write-Host ""
         Write-Host "Register ALL Azure resource providers now?" -ForegroundColor Cyan
         Write-Host "  The full platform deployment needs ~30 resource providers registered on the" -ForegroundColor Gray
         Write-Host "  subscription. You can register them now, or skip and run" -ForegroundColor Gray
         Write-Host "  Register-NeologikResourceProviders.ps1 separately before deploying." -ForegroundColor Gray
         Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-        Write-Host "N (register the minimal set only)" -ForegroundColor Yellow
+        Write-Host $registerAllDefaultText -ForegroundColor Yellow
         Write-Host "  Register all now? (y/N): " -NoNewline -ForegroundColor Gray
         $registerAllInput = Read-Host
-        $script:ConfigData['RegisterAllProviders'] = ($registerAllInput -match '^[Yy]')
+        if ([string]::IsNullOrWhiteSpace($registerAllInput)) {
+            $script:ConfigData['RegisterAllProviders'] = $registerAllDefault
+        }
+        else {
+            $script:ConfigData['RegisterAllProviders'] = ($registerAllInput -match '^[Yy]')
+        }
         if ($script:ConfigData['RegisterAllProviders']) {
             Write-Host "  ✓ Will register the full provider set" -ForegroundColor Green
         }
@@ -4114,6 +4763,51 @@ function Start-NeologikOnboarding {
         # Calculate solution names based on configuration
         $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
         $script:ConfigData['SolutionShortName'] = "neo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+            }
+
+        # Provisioning decisions - presented BEFORE the summary so they appear in it and are
+        # confirmed alongside the rest of the configuration. Precedence for each: command-line
+        # switch/param, then the answer file, then an interactive prompt. Runs for both the
+        # interactive and answer-file-complete paths. Steps 8 and 11 consume the stored
+        # decision and never prompt again. (The SP secret is held in a script variable, not
+        # ConfigData, so it is never written to the checkpoint or exported config.)
+
+        # Guest invitations.
+        if ($script:SkipGuestInvitationFromCli) {
+            $script:ConfigData['SkipGuestInvitation'] = [bool]$SkipGuestInvitation
+        }
+        else {
+            $sgAns = Get-AnswerBool 'skipGuestInvitation'
+            if ($null -ne $sgAns) {
+                $script:ConfigData['SkipGuestInvitation'] = $sgAns
+            }
+            else {
+                Write-Host ""
+                Write-Host "Invite Neologik guest users into this tenant?" -ForegroundColor Cyan
+                if ($script:NeologikGuestUsers.Count -gt 0) {
+                    Write-Host "  The following $($script:NeologikGuestUsers.Count) guest(s) from NeologikGuestUsers.txt will be invited:" -ForegroundColor Gray
+                    $script:NeologikGuestUsers | ForEach-Object { Write-Host "    - $_" -ForegroundColor Gray }
+                }
+                else {
+                    Write-Host "  NeologikGuestUsers.txt is empty or missing - no guests will be invited even if you choose Y." -ForegroundColor Gray
+                }
+                Write-Host "  (Y/n, default: Y - invite): " -NoNewline -ForegroundColor Yellow
+                $inviteAns = Read-Host
+                # Default (Enter) invites; only an explicit N/no skips.
+                $script:ConfigData['SkipGuestInvitation'] = ($inviteAns -match '^(n|no)$')
+            }
+        }
+
+        # Existing (client-provided) deployment service principal.
+        $spChoice = Read-ExistingServicePrincipalChoice `
+            -CliObjectId $ExistingServicePrincipalObjectId `
+            -CliSecret $ExistingServicePrincipalSecret `
+            -AnswerUseExisting (Get-AnswerBool 'useExistingServicePrincipal') `
+            -AnswerObjectId ([string](Get-Answer 'existingServicePrincipalObjectId')) `
+            -AnswerSecret ([string](Get-Answer 'existingServicePrincipalSecret'))
+        $script:ConfigData['UseExistingServicePrincipal'] = $spChoice.UseExisting
+        $script:ConfigData['ExistingServicePrincipalObjectId'] = $spChoice.ObjectId
+        $script:ExistingSpSecretResolved = $spChoice.Secret
 
         # Display summary
         Write-Host "`n╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
@@ -4126,13 +4820,14 @@ function Start-NeologikOnboarding {
         Write-Host "  Tenant ID:            " -NoNewline; Write-Host $script:ConfigData['TenantId'] -ForegroundColor Yellow
         Write-Host "  Subscription Name:    " -NoNewline; Write-Host $script:ConfigData['SubscriptionName'] -ForegroundColor Yellow
         Write-Host "  Organization Name:    " -NoNewline; Write-Host $script:OrganizationName -ForegroundColor Yellow
-        Write-Host "  Bot DNS Hostname:     " -NoNewline; Write-Host $script:Hostname -ForegroundColor Yellow
-        Write-Host "  Bot DNS Domain Name:  " -NoNewline; Write-Host $script:DomainName -ForegroundColor Yellow
+        Write-Host "  Bot Hostname (FQDN):  " -NoNewline; Write-Host $script:HostName -ForegroundColor Yellow
         Write-Host "  Organization Code:    " -NoNewline; Write-Host $script:OrganizationCode -ForegroundColor Yellow
         Write-Host "  Environment Type:     " -NoNewline; Write-Host $script:EnvironmentType -ForegroundColor Yellow
         Write-Host "  Environment Index:    " -NoNewline; Write-Host $script:EnvironmentIndex -ForegroundColor Yellow
         Write-Host "  Azure Region:         " -NoNewline; Write-Host $script:AzureRegion -ForegroundColor Yellow
         Write-Host "  Resource Group Name:  " -NoNewline; Write-Host $script:ResourceGroupName -ForegroundColor Yellow
+        Write-Host "  Key Vault Name:       " -NoNewline; Write-Host $script:KeyVaultNameOverride -ForegroundColor Yellow
+        Write-Host "  Storage Account Name: " -NoNewline; Write-Host $script:ConfigData['DeployStorageAccountName'] -ForegroundColor Yellow
         Write-Host "  Bot Count:            " -NoNewline; Write-Host $script:BotCount -ForegroundColor Yellow
         foreach ($bot in $script:BotConfigurations) {
             Write-Host "  Bot:                  " -NoNewline; Write-Host "$($bot.AgentName) (short: $($bot.ShortName))" -ForegroundColor Yellow
@@ -4141,9 +4836,36 @@ function Start-NeologikOnboarding {
         Write-Host "  Cost-Report Email:    " -NoNewline; Write-Host $budgetEmailSummary -ForegroundColor Yellow
         $providerSummary = if ($script:ConfigData['RegisterAllProviders']) { 'All providers' } else { 'Minimal set (run Register-NeologikResourceProviders.ps1 before deploying)' }
         Write-Host "  Provider Registration:" -NoNewline; Write-Host " $providerSummary" -ForegroundColor Yellow
+        $guestSummary = if ($script:ConfigData['SkipGuestInvitation']) { 'No (skipped)' } else { 'Yes' }
+        Write-Host "  Invite Neologik Guests:" -NoNewline; Write-Host " $guestSummary" -ForegroundColor Yellow
+        if ($script:ConfigData['UseExistingServicePrincipal']) {
+            Write-Host "  Deployment SP:        " -NoNewline; Write-Host "Existing: $($script:ConfigData['ExistingServicePrincipalObjectId'])" -ForegroundColor Yellow
+        }
+        else {
+            Write-Host "  Deployment SP:        " -NoNewline; Write-Host "Create new" -ForegroundColor Yellow
+        }
         Write-Host ""
-        Write-Host "Press Enter to continue with these settings, or Ctrl+C to cancel..." -ForegroundColor Yellow
-        Read-Host
+        if ($answerComplete) {
+            # Required confirmation — no default; the user must type Y (continue) or N (edit).
+            $confirmChoice = ''
+            while ($confirmChoice -notmatch '^[YyNn]$') {
+                Write-Host ""
+                Write-Host "Continue with these settings? Type Y to continue, or N to edit: " -NoNewline -ForegroundColor Yellow
+                $confirmChoice = (Read-Host).Trim()
+            }
+            if ($confirmChoice -match '^[Nn]$') {
+                Write-Host "`n  Editing — you'll be prompted for each value (pre-filled from your inputs)..." -ForegroundColor Cyan
+                $editing = $true
+                continue
+            }
+            break
+        }
+        else {
+            Write-Host "Press Enter to continue with these settings, or Ctrl+C to cancel..." -ForegroundColor Yellow
+            Read-Host
+            break
+        }
+        }
 
         # Save configuration to checkpoint now that it has been confirmed.
         # This allows a resume if any subsequent step fails (e.g. permission errors or provider timeouts).
@@ -4153,6 +4875,27 @@ function Start-NeologikOnboarding {
         } else {
             # Resume path: restore the region abbreviation local variable from checkpoint data.
             $regionAbbrev = $script:CheckpointRegionAbbrev
+
+            # Back-compat: checkpoints written before these inputs existed lack the keys — default them.
+            if (-not $script:ConfigData.ContainsKey('BudgetEmailAddresses')) {
+                $script:ConfigData['BudgetEmailAddresses'] = @($script:DefaultBudgetCostReportEmailRecipients)
+            }
+            if (-not $script:ConfigData.ContainsKey('BudgetEmailFrequency')) {
+                $script:ConfigData['BudgetEmailFrequency'] = 'Daily'
+            }
+            if (-not $script:ConfigData.ContainsKey('RegisterAllProviders')) {
+                $script:ConfigData['RegisterAllProviders'] = $false
+            }
+            # Provisioning decisions may be absent on older checkpoints — default them. The SP
+            # secret is not persisted, so a resumed run cannot re-store it in Key Vault (the
+            # client adds it manually if needed).
+            if (-not $script:ConfigData.ContainsKey('SkipGuestInvitation')) {
+                $script:ConfigData['SkipGuestInvitation'] = $false
+            }
+            if (-not $script:ConfigData.ContainsKey('UseExistingServicePrincipal')) {
+                $script:ConfigData['UseExistingServicePrincipal'] = $false
+                $script:ConfigData['ExistingServicePrincipalObjectId'] = ''
+            }
 
             Write-Host "`n  ⏩ Configuration restored from checkpoint — skipping input prompts" -ForegroundColor Gray
             Write-Host "     Org: $($script:OrganizationCode)  |  Env: $($script:EnvironmentType)  |  Region: $($script:AzureRegion)" -ForegroundColor Cyan
@@ -4166,8 +4909,16 @@ function Start-NeologikOnboarding {
         # Step 7: Create resource group
         $null = New-NeologikResourceGroup -ResourceGroupName $script:ResourceGroupName -Location $script:AzureRegion
 
-        # Step 8: Invite guest users
-        $guestUsers = Invoke-GuestUserInvitation -GuestEmails $script:NeologikGuestUsers
+        # Step 8: Invite guest users (skipped when the client uses its own-tenant
+        # accounts and takes no B2B guests). The decision was made during configuration
+        # gathering and shown in the summary.
+        if ($script:ConfigData['SkipGuestInvitation']) {
+            Write-Log "Guest user invitation skipped (per configuration)." -Level Info
+            $guestUsers = @()
+        }
+        else {
+            $guestUsers = Invoke-GuestUserInvitation -GuestEmails $script:NeologikGuestUsers
+        }
 
         # Step 9: Create security groups (includes logged-in user + guest users)
         # Extract agent names for group creation
@@ -4177,8 +4928,21 @@ function Start-NeologikOnboarding {
         # Step 10: Assign roles to security groups
         $null = Set-NeologikRoleAssignments -SecurityGroups $securityGroups -SubscriptionId $script:ConfigData['SubscriptionId'] -ResourceGroupName $script:ResourceGroupName
 
-        # Step 11: Create App Registration
-        $appReg = New-NeologikAppRegistration -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType -EnvironmentIndex $script:EnvironmentIndex
+        # Step 11: App Registration / service principal. The use-existing-vs-create decision
+        # was made during configuration gathering and shown in the summary. When an existing
+        # SP is used, the script does not CREATE the app registration/SP/secret - but it still
+        # assigns the required roles and Graph consent to it below, exactly as for a
+        # script-created SP (the operator is Owner + Global Admin either way).
+        if ($script:ConfigData['UseExistingServicePrincipal']) {
+            $appReg = Get-NeologikExistingAppRegistration `
+                -ServicePrincipalObjectId $script:ConfigData['ExistingServicePrincipalObjectId'] `
+                -ProvidedSecret $script:ExistingSpSecretResolved
+        }
+        else {
+            $appReg = New-NeologikAppRegistration -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType -EnvironmentIndex $script:EnvironmentIndex
+        }
+
+        # Assign roles + Graph consent to the SP whether created here or client-provided.
         $null = Set-AppRegistrationRoles -ServicePrincipalId $appReg.ServicePrincipal.Id `
             -SubscriptionId $script:ConfigData['SubscriptionId'] `
             -ResourceGroupName $script:ResourceGroupName `
@@ -4221,15 +4985,20 @@ function Start-NeologikOnboarding {
             -Frequency $script:ConfigData['BudgetEmailFrequency']
         Complete-OnboardingStep 'CostManagementEmail'
 
-        # Step 14: Create Storage Account and blob container for certificates
-        $storageAccountName = "stneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
-        
+        # Step 14: Create Storage Account and blob container for certificates.
+        # Name was resolved during configuration gathering (answer file / prompt / computed).
+        # Fall back to the computed name for checkpoints written before this field existed.
+        $storageAccountName = [string]$script:ConfigData['DeployStorageAccountName']
+        if ([string]::IsNullOrWhiteSpace($storageAccountName)) {
+            $storageAccountName = "stneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+        }
+
         # Storage account names must be 3-24 characters, lowercase alphanumeric only
         if ($storageAccountName.Length -gt 24) {
             Write-Log "Storage Account name too long, truncating to 24 characters" -Level Warning
             $storageAccountName = $storageAccountName.Substring(0, 24)
         }
-        
+
         $null = New-NeologikStorageAccount -ResourceGroupName $script:ResourceGroupName `
             -Location $script:AzureRegion `
             -StorageAccountName $storageAccountName `

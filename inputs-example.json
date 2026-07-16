@@ -1,0 +1,29 @@
+{
+  "_readme": "Predefined inputs for Install-NeologikEnvironment.ps1. Copy this file to 'inputs.json' (auto-detected next to the script) or pass its path with -AnswerFile. Every value here pre-fills the matching prompt: press Enter to accept, or type to override. This file holds configuration inputs plus two provisioning switches (skipGuestInvitation, useExistingServicePrincipal and its object ID/secret); the CLI switches -SkipGuestInvitation / -ExistingServicePrincipalObjectId take precedence when passed. Runtime decisions (Terms acceptance, PowerShell/module install, re-auth, quota/permission warnings) are always asked interactively and are never read from here. Replace every REPLACE_ME / example value below before use. Remove any field to fall back to its built-in default (for default fields) or to be prompted with no pre-fill (for per-client fields).",
+
+  "organizationCode": "REPLACE_ME — client 3-letter code, lowercase, e.g. abc",
+  "organizationName": "REPLACE_ME — full company name, e.g. Contoso Ltd",
+  "fqdn": "REPLACE_ME — bot's full hostname (FQDN), e.g. neologik.contoso.com",
+
+  "environmentType": "dev",
+  "azureRegion": "uksouth",
+  "environmentIndex": "01",
+  "budgetCostReportEmailRecipients": ["support_budget_alerts@neologik.ai"],
+  "registerResourceProviders": false,
+
+  "_naming_note": "Optional resource-name overrides for client-specific naming conventions. Remove any of these to accept the computed Neologik-standard name. keyVaultName: 3-24 chars, letters/digits/hyphens, starts with a letter. storageAccountName: 3-24 chars, lowercase letters/digits only.",
+  "resourceGroupName": "",
+  "keyVaultName": "",
+  "storageAccountName": "",
+
+  "skipGuestInvitation": false,
+  "useExistingServicePrincipal": false,
+  "existingServicePrincipalObjectId": "",
+  "_existingServicePrincipalSecret_note": "Prefer the -ExistingServicePrincipalSecret CLI parameter (masked, not written to disk) over storing a client secret in this file. If set here, it is used; leave blank to be prompted (or to skip and add it to Key Vault manually).",
+  "existingServicePrincipalSecret": "",
+
+  "botCount": 1,
+  "bots": [
+    { "agentName": "REPLACE_ME — full agent name, e.g. Neologik", "shortName": "REPLACE_ME — lowercase, max 4 chars, e.g. bot" }
+  ]
+}
