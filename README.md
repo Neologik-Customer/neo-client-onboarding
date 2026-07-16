@@ -2,6 +2,15 @@
 
 > **For IT/Security Review:** See [QUICK-REFERENCE.md](QUICK-REFERENCE.md) for a concise list of all Azure changes and permissions.
 
+> **Contributors - no customer data, ever.** This repository is
+> customer-facing: treat it as **public regardless of its visibility
+> setting**. Never commit, log, or attach anything containing customer data:
+> configuration JSONs, deployment references, workshop inputs, run logs - and
+> no GitHub Actions workflows that take customer details as inputs (run logs,
+> summaries and download links here are world-readable). The onboarding kit
+> zip is built by an internal Neologik workflow that checks this repository
+> out - not by an action in this repository.
+
 ## 📁 Repository Contents
 
 Welcome! This repository contains everything you need to set up your Neologik environment on Azure.
