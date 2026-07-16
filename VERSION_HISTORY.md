@@ -9,6 +9,20 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased
+
+### Changes
+- **Onboarding-kit zip builder moved out of this repo** (owner decision
+  2026-07-16): this repository is customer-facing and carries no customer
+  data - contents, history, or Actions. `prepare-onboarding-zip.yml`
+  removed; the kit is now built by the same-named workflow in the internal
+  `neo-env-config` repo, which checks this repository out. README gains the
+  no-customer-data contributor rule. The dispatch inputs (workshop data),
+  the run log's `inputs.json` echo, and the SAS download link were
+  world-readable while the action lived here.
+
+---
+
 ## Version 1.10.1
 **Built**: June 29, 2026  
 **Git Tag**: v1.10.1
