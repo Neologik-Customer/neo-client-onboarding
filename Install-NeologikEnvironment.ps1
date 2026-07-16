@@ -2905,7 +2905,10 @@ function New-NeologikManagedIdentities {
         [string]$EnvironmentType = "",
 
         [Parameter(Mandatory = $false)]
-        [string]$EnvironmentIndex = ""
+        [string]$EnvironmentIndex = "",
+
+        [Parameter(Mandatory = $false)]
+        [string]$ScriptRunnerIdentityName = ""
     )
 
     Write-Log "Creating Managed Identities..." -Level Info
@@ -2922,9 +2925,14 @@ function New-NeologikManagedIdentities {
         $nameSuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { "-$orgLower$envLower$EnvironmentIndex" }
         $displaySuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { " - $orgLower$envLower$EnvironmentIndex" }
 
+        # Script-runner name was resolved during configuration gathering (answer file / prompt /
+        # computed); empty on checkpoints written before the field existed - fall back to the
+        # computed Neologik-standard name.
+        $scriptRunnerName = if (-not [string]::IsNullOrWhiteSpace($ScriptRunnerIdentityName)) { $ScriptRunnerIdentityName.Trim() } else { "neologik-script-runner-service-connection$nameSuffix" }
+
         $managedIdentities = @(
             @{
-                Name = "neologik-script-runner-service-connection$nameSuffix"
+                Name = $scriptRunnerName
                 DisplayName = "Neologik Script Runner Service Connection$displaySuffix"
                 Roles = @('Contributor')
                 RGRoles = @('Key Vault Secrets Officer', 'Azure Bot Service Contributor Role')
@@ -3529,6 +3537,14 @@ function Test-StorageAccountNameError {
     return $null
 }
 
+function Test-ManagedIdentityNameError {
+    # Returns $null when the managed-identity name is valid, otherwise an error string.
+    param([string]$Name)
+    if ($Name.Length -lt 3 -or $Name.Length -gt 128) { return "Managed identity name must be 3-128 characters." }
+    if ($Name -notmatch '^[a-zA-Z0-9][a-zA-Z0-9_-]*$') { return "Managed identity name must start with a letter or digit and contain only letters, digits, hyphens and underscores." }
+    return $null
+}
+
 function Read-NameWithDefault {
     <#
     .SYNOPSIS
@@ -3721,6 +3737,13 @@ function Set-ConfigFromAnswerFile {
     $script:ConfigData['DeployStorageAccountName'] = if (-not [string]::IsNullOrWhiteSpace($saAns)) { $saAns.Trim().ToLower() } else { $saComputed }
     $saErr = Test-StorageAccountNameError $script:ConfigData['DeployStorageAccountName']
     if ($saErr) { throw "storageAccountName '$($script:ConfigData['DeployStorageAccountName'])': $saErr" }
+
+    # Script-runner managed identity name (answer-file override, else computed).
+    $sriComputed = "neologik-script-runner-service-connection-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$($script:EnvironmentIndex)"
+    $sriAns = [string](Get-Answer 'scriptRunnerIdentityName')
+    $script:ConfigData['ScriptRunnerIdentityName'] = if (-not [string]::IsNullOrWhiteSpace($sriAns)) { $sriAns.Trim() } else { $sriComputed }
+    $sriErr = Test-ManagedIdentityNameError $script:ConfigData['ScriptRunnerIdentityName']
+    if ($sriErr) { throw "scriptRunnerIdentityName '$($script:ConfigData['ScriptRunnerIdentityName'])': $sriErr" }
 
     # Bots (no defaults)
     $bots = @(Get-Answer 'bots')
@@ -4443,11 +4466,11 @@ function Start-NeologikOnboarding {
             }
         }
         
-        # Resource Group, Key Vault and Storage Account names. Each shows an effective default:
-        # the answer-file value (or, for Key Vault, a -KeyVaultName CLI value) when present,
-        # otherwise the computed Neologik-standard name. Press Enter to accept, or type to
-        # override; validated against Azure naming rules. This lets client-specific naming
-        # conventions be applied from inputs.json without editing the script.
+        # Resource Group, Key Vault, Storage Account and script-runner identity names. Each
+        # shows an effective default: the answer-file value (or, for Key Vault, a -KeyVaultName
+        # CLI value) when present, otherwise the computed Neologik-standard name. Press Enter to
+        # accept, or type to override; validated against Azure naming rules. This lets
+        # client-specific naming conventions be applied from inputs.json without editing the script.
 
         # Resource group name.
         $rgComputed = "rg-neo-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
@@ -4475,6 +4498,14 @@ function Start-NeologikOnboarding {
         $script:ConfigData['DeployStorageAccountName'] = Read-NameWithDefault -Title 'Deployment Storage Account Name' `
             -DefaultValue $saDefault -Validator ${function:Test-StorageAccountNameError} `
             -LabelPrefix (Get-PromptLabel $saDefault $saComputed)
+
+        # Script-runner managed identity name (the deployment pipeline's service connection).
+        $sriComputed = "neologik-script-runner-service-connection-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$($script:EnvironmentIndex)"
+        $sriAns = [string](Get-Answer 'scriptRunnerIdentityName')
+        $sriDefault = if (-not [string]::IsNullOrWhiteSpace($sriAns)) { $sriAns.Trim() } else { $sriComputed }
+        $script:ConfigData['ScriptRunnerIdentityName'] = Read-NameWithDefault -Title 'Script Runner Managed Identity Name' `
+            -DefaultValue $sriDefault -Validator ${function:Test-ManagedIdentityNameError} `
+            -LabelPrefix (Get-PromptLabel $sriDefault $sriComputed)
 
         # Get Number of Bots with validation
         # Source the default from the answer file when it holds a valid 1-10 value.
@@ -4828,6 +4859,7 @@ function Start-NeologikOnboarding {
         Write-Host "  Resource Group Name:  " -NoNewline; Write-Host $script:ResourceGroupName -ForegroundColor Yellow
         Write-Host "  Key Vault Name:       " -NoNewline; Write-Host $script:KeyVaultNameOverride -ForegroundColor Yellow
         Write-Host "  Storage Account Name: " -NoNewline; Write-Host $script:ConfigData['DeployStorageAccountName'] -ForegroundColor Yellow
+        Write-Host "  Script Runner Identity: " -NoNewline; Write-Host $script:ConfigData['ScriptRunnerIdentityName'] -ForegroundColor Yellow
         Write-Host "  Bot Count:            " -NoNewline; Write-Host $script:BotCount -ForegroundColor Yellow
         foreach ($bot in $script:BotConfigurations) {
             Write-Host "  Bot:                  " -NoNewline; Write-Host "$($bot.AgentName) (short: $($bot.ShortName))" -ForegroundColor Yellow
@@ -5010,7 +5042,8 @@ function Start-NeologikOnboarding {
             -SubscriptionId $script:ConfigData['SubscriptionId'] `
             -OrganizationCode $script:OrganizationCode `
             -EnvironmentType $script:EnvironmentType `
-            -EnvironmentIndex $script:EnvironmentIndex
+            -EnvironmentIndex $script:EnvironmentIndex `
+            -ScriptRunnerIdentityName ([string]$script:ConfigData['ScriptRunnerIdentityName'])
 
         # Step 16: Export configuration
         Export-ConfigurationData

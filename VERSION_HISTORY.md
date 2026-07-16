@@ -9,6 +9,32 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1063
+
+### Changes
+- **Script-runner managed identity name override** — new optional `scriptRunnerIdentityName`
+  answer-file key, interactive prompt, and `prepare-onboarding-zip.yml` dispatch input, completing
+  the client-naming override set (resource group, Key Vault, deployment storage account, and now
+  the script-runner UAMI) for client-specific resource naming conventions. Blank/omitted keeps the
+  computed Neologik-standard name (`neologik-script-runner-service-connection-{org}{env}{index}`).
+  Validated against Azure managed-identity naming rules (3-128 chars, letters/digits/hyphens/
+  underscores, starts with a letter or digit). Builds on PR #20
+  (https://github.com/Neologik-Customer/neo-client-onboarding/pull/20), whose branch is merged in
+  as this change's base.
+
+### Files Changed
+- Modified: [Install-NeologikEnvironment.ps1](Install-NeologikEnvironment.ps1) — `Test-ManagedIdentityNameError` validator; answer-file + interactive resolution into `ConfigData['ScriptRunnerIdentityName']`; summary line; `New-NeologikManagedIdentities -ScriptRunnerIdentityName` parameter (falls back to the computed name for pre-existing checkpoints)
+- Modified: [.github/workflows/prepare-onboarding-zip.yml](.github/workflows/prepare-onboarding-zip.yml) — `scriptRunnerIdentityName` input, validation, inputs.json emission
+- Modified: [inputs-example.json](inputs-example.json) — `scriptRunnerIdentityName` field + naming note
+- Modified: [VERSION_HISTORY.md](VERSION_HISTORY.md) — this entry
+
+### Breaking Changes
+- None
+
+---
+
 ## Version NEXT
 **Branch**: `feature/ideas-agent`
 **Status**: Pending
