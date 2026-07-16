@@ -14,6 +14,14 @@ This document tracks the version history of the Neologik customer onboarding scr
 **Ticket**: https://github.com/Neologik-AI/project/issues/1063
 
 ### Changes
+- **Onboarding-kit zip builder moved out of this repo** (owner decision
+  2026-07-16): this repository is customer-facing and carries no customer
+  data - contents, history, or Actions. `prepare-onboarding-zip.yml`
+  removed; the kit is now built by the same-named workflow in the internal
+  `neo-env-config` repo, which checks this repository out. README gains the
+  no-customer-data contributor rule. The dispatch inputs (workshop data),
+  the run log's `inputs.json` echo, and the SAS download link were
+  world-readable while the action lived here.
 - **Script-runner managed identity name override** — new optional `scriptRunnerIdentityName`
   answer-file key, interactive prompt, and `prepare-onboarding-zip.yml` dispatch input, completing
   the client-naming override set (resource group, Key Vault, deployment storage account, and now
