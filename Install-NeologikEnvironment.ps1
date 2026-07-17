@@ -1053,6 +1053,14 @@ function Test-QuotaRequirements {
         Write-Host "  Deploying without sufficient quota may cause failures later." -ForegroundColor Gray
         Write-Host "  See QUICK-REFERENCE.md → Prerequisites for how to request increases." -ForegroundColor Gray
         Write-Host ""
+        # Quota warnings are advisory (the interactive default is to continue) - in
+        # non-interactive mode log them and carry on rather than hitting Read-Host.
+        if ($script:NonInteractiveMode) {
+            Write-Host "  Non-interactive: continuing despite quota warnings." -ForegroundColor Yellow
+            Write-Log "Non-interactive: continuing despite quota warnings: $($quotaIssues -join '; ')" -Level Warning
+            Write-Host ""
+            return
+        }
         Write-Host "  Continue anyway? (Y/N, default: Y): " -NoNewline -ForegroundColor Yellow
         $continueChoice = Read-Host
 
@@ -3635,6 +3643,27 @@ function Test-AnswerFileComplete {
         if ([string]::IsNullOrWhiteSpace([string]$bots[$j].shortName)) { return $false }
     }
     return $true
+}
+
+function Resolve-BudgetEmailRecipients {
+    <#
+    .SYNOPSIS
+        Normalizes the 'budgetCostReportEmailRecipients' answer-file value into an array of
+        email addresses. Accepts an array of addresses or a single (optionally comma-separated)
+        string; 'none' (or an empty list) disables the cost report and yields an empty array.
+        Throws when any address is malformed.
+    #>
+    [CmdletBinding()]
+    param($Value)
+
+    $items = @()
+    foreach ($entry in @($Value)) {
+        $items += @(([string]$entry) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
+    if ($items.Count -eq 1 -and $items[0].ToLower() -eq 'none') { return @() }
+    $invalid = @($items | Where-Object { $_ -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$' })
+    if ($invalid.Count -gt 0) { throw "invalid email address(es): $($invalid -join ', ')." }
+    return $items
 }
 
 function Get-CafRegionCodes {
