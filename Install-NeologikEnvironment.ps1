@@ -3781,7 +3781,7 @@ function Set-ConfigFromAnswerFile {
         $sn = ([string]$bots[$i].shortName).Trim().ToLower()
         if ([string]::IsNullOrWhiteSpace($an)) { throw "bot $($i + 1) agentName is required." }
         if ($an -notmatch '^[A-Za-z0-9 \-_]+$') { throw "bot $($i + 1) agentName '$an' may only contain letters, numbers, spaces, dashes and underscores." }
-        if ($sn -notmatch '^[a-z][a-z\-]*$' -or $sn.Length -lt 1 -or $sn.Length -gt 4) { throw "bot $($i + 1) shortName '$sn' must be lowercase, 1-4 chars, letters/dashes, starting with a letter." }
+        if ($sn -notmatch '^[a-z][a-z0-9\-]*$' -or $sn.Length -lt 1 -or $sn.Length -gt 4) { throw "bot $($i + 1) shortName '$sn' must be lowercase, 1-4 chars, letters/numbers/dashes, starting with a letter." }
         if ($script:BotConfigurations | Where-Object { $_.AgentName -eq $an }) { throw "duplicate agent name '$an'." }
         if ($script:BotConfigurations | Where-Object { $_.ShortName -eq $sn }) { throw "duplicate short name '$sn'." }
         $script:BotConfigurations += @{ AgentName = $an; ShortName = $sn }
@@ -4095,6 +4095,11 @@ function Start-NeologikOnboarding {
                     $regionAbbrev = Set-ConfigFromAnswerFile
                 }
                 catch {
+                    # Interactive fallback is impossible in non-interactive mode - fail with
+                    # the validation error instead of hitting a Read-Host that cannot run.
+                    if ($script:NonInteractiveMode) {
+                        throw "inputs.json is invalid and cannot be corrected interactively (-NonInteractive): $($_.Exception.Message)"
+                    }
                     Write-Host ""
                     Write-Host "  ⚠ inputs.json: $($_.Exception.Message)" -ForegroundColor Yellow
                     Write-Host "  Entering configuration interactively..." -ForegroundColor Yellow
