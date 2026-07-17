@@ -756,7 +756,7 @@ function Connect-AzureEnvironment {
                 Write-Log "Azure token insufficient for Graph (consent may be required) — falling back to interactive login: $_" -Level Warning
                 Write-Host "`nℹ️  A browser window will open for Microsoft Graph login.`n" -ForegroundColor Cyan
                 Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
-                    -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
+                    -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory", "AppRoleAssignment.ReadWrite.All" `
                     -ErrorAction Stop
                 Write-Log "Connected to Microsoft Graph via interactive login" -Level Success
             }
@@ -2375,6 +2375,156 @@ function New-NeologikKeyVault {
 
 #region Resource Provider Registration
 
+function New-NeologikNceAuthApp {
+    <#
+    .SYNOPSIS
+        Creates the 'Neologik Admin Auth' app registration and assigns the
+        Harness user group to it (project#1084).
+
+    .DESCRIPTION
+        From v5 the Harness admin tool (NCE) authorizes from the token's
+        groups claim only, and Entra emits that claim solely for groups
+        ASSIGNED to this app's enterprise application. The deployment
+        pipeline creates the app but its hardened service principal lacks
+        AppRoleAssignment.ReadWrite.All BY DESIGN, so the assignment used to
+        be a hard-blocking manual step (migration runsheet 7b) - skipping it
+        locked every user out of NCE. This script runs as a Global
+        Administrator, so the whole chain completes here instead:
+        app + claims config + deployment-SP ownership + secret in Key Vault
+        + group assignment. The pipeline (ensure-app-regs.sh) later finds
+        the app by its Graph uniqueName, reuses it, reconciles properties,
+        and rotates the secret when needed - its own best-effort group
+        assignment becomes a no-op.
+
+        Owner decision 2026-07-17: ONLY the Harness user group is assigned.
+        The Admin User Group is Azure RBAC only and never grants NCE access.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [array]$SecurityGroups,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DeploySpObjectId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$KeyVaultName
+    )
+
+    Write-Log "Creating the Neologik Admin Auth app registration (NCE login)..." -Level Info
+
+    try {
+        Import-Module Microsoft.Graph.Applications -ErrorAction Stop
+        Import-Module Microsoft.Graph.Groups -ErrorAction Stop
+
+        $solutionName = [string]$script:ConfigData['SolutionName']
+        $shortName = [string]$script:ConfigData['SolutionShortName']
+        $hostName = [string]$script:ConfigData['HostName']
+        # MUST match the deployment pipeline exactly: ensure-app-regs.sh
+        # resolves the app by uniqueName ('sp-admin-<solutionName>') and the
+        # Key Vault secret name derives from it.
+        $uniqueName = "sp-admin-$solutionName"
+        $displayName = "Neologik Admin Auth - $shortName"
+        $redirectUri = "https://$hostName/nce"
+
+        $existingApp = Get-MgApplication -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
+        $secretText = $null
+
+        if ($existingApp) {
+            Write-Log "App Registration '$displayName' already exists (Client ID: $($existingApp.AppId))" -Level Info
+            $app = $existingApp
+        }
+        else {
+            Write-Log "Creating App Registration: $displayName..." -Level Info
+            $app = New-MgApplication -DisplayName $displayName `
+                -UniqueName $uniqueName `
+                -SignInAudience "AzureADMultipleOrgs" `
+                -GroupMembershipClaims "ApplicationGroup" `
+                -Web @{ RedirectUris = @($redirectUri) } `
+                -Api @{ RequestedAccessTokenVersion = 2 } `
+                -ErrorAction Stop
+            Write-Log "App Registration created successfully (Client ID: $($app.AppId))" -Level Success
+        }
+
+        $sp = Get-MgServicePrincipal -Filter "appId eq '$($app.AppId)'" -ErrorAction SilentlyContinue
+        if (-not $sp) {
+            $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
+            Write-Log "Service Principal created successfully" -Level Success
+        }
+
+        # Deployment SP as owner: the pipeline manages this app through
+        # Application.ReadWrite.OwnedBy, which only covers apps it owns.
+        $owners = Get-MgApplicationOwner -ApplicationId $app.Id -ErrorAction SilentlyContinue
+        if ($owners -and ($owners.Id -contains $DeploySpObjectId)) {
+            Write-Log "Deployment SP is already an owner of the auth app" -Level Info
+        }
+        else {
+            New-MgApplicationOwnerByRef -ApplicationId $app.Id `
+                -BodyParameter @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$DeploySpObjectId" } `
+                -ErrorAction Stop
+            Write-Log "Deployment SP added as owner of the auth app" -Level Success
+        }
+
+        # Client secret -> Key Vault under the name the pipeline expects.
+        # Only mint one when the app is new or the vault has no value yet -
+        # the pipeline rotates near-expiry credentials itself.
+        $kvSecretName = "$uniqueName-auth-secret"
+        $existingKvSecret = Get-AzKeyVaultSecret -VaultName $KeyVaultName -Name $kvSecretName -ErrorAction SilentlyContinue
+        if ($existingKvSecret) {
+            Write-Log "Key Vault already holds '$kvSecretName' - keeping the existing credential" -Level Info
+        }
+        else {
+            $passwordCred = Add-MgApplicationPassword -ApplicationId $app.Id `
+                -PasswordCredential @{ DisplayName = 'auth'; EndDateTime = (Get-Date).AddDays(365) } `
+                -ErrorAction Stop
+            $secretText = $passwordCred.SecretText
+            $secureSecret = ConvertTo-SecureString -String $secretText -AsPlainText -Force
+            $null = Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name $kvSecretName -SecretValue $secureSecret -ErrorAction Stop
+            Write-Log "Client secret stored in Key Vault as '$kvSecretName'" -Level Success
+        }
+
+        # Assign the Harness user group so its members' tokens carry the
+        # groups claim NCE authorizes from. Default app role, direct groups
+        # only (nested membership does not expand into the claim).
+        $harnessGroup = $SecurityGroups | Where-Object { $_.Name -like 'Neologik Harness User Group*' } | Select-Object -First 1
+        if (-not $harnessGroup) {
+            Write-Log "Warning: Harness user group not found among the created security groups - NCE group assignment skipped. A Global Admin must assign it manually (runsheet step 7b)." -Level Warning
+        }
+        else {
+            $defaultAppRole = '00000000-0000-0000-0000-000000000000'
+            $alreadyAssigned = Get-MgGroupAppRoleAssignment -GroupId $harnessGroup.Id -ErrorAction SilentlyContinue |
+                Where-Object { $_.ResourceId -eq $sp.Id }
+            if ($alreadyAssigned) {
+                Write-Log "Group '$($harnessGroup.Name)' is already assigned to the auth app" -Level Info
+            }
+            else {
+                $null = New-MgGroupAppRoleAssignment -GroupId $harnessGroup.Id `
+                    -PrincipalId $harnessGroup.Id `
+                    -ResourceId $sp.Id `
+                    -AppRoleId $defaultAppRole `
+                    -ErrorAction Stop
+                Write-Log "Group '$($harnessGroup.Name)' assigned to the auth app - NCE login will carry the groups claim" -Level Success
+            }
+        }
+
+        $script:ConfigData['NceAuthApp'] = @{
+            Name = $displayName
+            ClientId = $app.AppId
+            ObjectId = $app.Id
+            ServicePrincipalId = $sp.Id
+            UniqueName = $uniqueName
+            KeyVaultSecretName = $kvSecretName
+            AssignedGroup = if ($harnessGroup) { $harnessGroup.Name } else { $null }
+        }
+
+        return $script:ConfigData['NceAuthApp']
+    }
+    catch {
+        Write-Log "Failed to create the NCE auth app: $_" -Level Error
+        throw
+    }
+}
+
 function Register-AllResourceProviders {
     <#
     .SYNOPSIS
@@ -3203,6 +3353,7 @@ function Export-ConfigurationData {
             'InvitedGuestUsers' = $script:ConfigData['InvitedGuestUsers']
             'SecurityGroups' = $script:ConfigData['SecurityGroups']
             'AppRegistration' = $script:ConfigData['AppRegistration']
+            'NceAuthApp' = $script:ConfigData['NceAuthApp']
             'KeyVault' = $script:ConfigData['KeyVault']
             'StorageAccount' = $script:ConfigData['StorageAccount']
             'ManagedIdentities' = $script:ConfigData['ManagedIdentities']
@@ -4815,6 +4966,18 @@ function Start-NeologikOnboarding {
             -ClientSecret $appReg.Secret `
             -SecurityGroups $securityGroups `
             -SubscriptionId $script:ConfigData['SubscriptionId']
+
+        # Step 12b: NCE auth app (project#1084). Created here - in the Global
+        # Admin session - so the Harness user group assignment that the v5
+        # groups-claim login depends on happens at onboarding time. The
+        # deployment pipeline's ensure-app-regs.sh finds this app by
+        # uniqueName, reuses it and reconciles its properties; its own
+        # best-effort assignment (blocked for the hardened deploy SP) becomes
+        # a no-op. Retires hard-blocking migration runsheet step 7b for
+        # environments onboarded from this version.
+        $null = New-NeologikNceAuthApp -SecurityGroups $securityGroups `
+            -DeploySpObjectId $appReg.ServicePrincipal.Id `
+            -KeyVaultName $keyVaultName
 
         # Step 13: Register required Azure resource providers (full set unless the operator
         # opted out, in which case only the minimal set is registered here and the rest must be
