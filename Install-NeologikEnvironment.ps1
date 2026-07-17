@@ -71,11 +71,37 @@
     file ('existingServicePrincipalSecret'), but the CLI parameter is preferred so the
     secret is not persisted to disk.
 
+.PARAMETER NonInteractive
+    CI / unattended mode. Requires a fully-populated answer file (see -AnswerFile);
+    every interactive gate either resolves from switches/answer keys or throws instead
+    of prompting: Terms acceptance needs -AcceptTerms, an existing Az/Graph context is
+    always reused (no re-auth prompt), the configuration summary is not confirmed, a
+    leftover checkpoint without -FreshRun is an error, and warn-and-prompt checks
+    (Global Administrator verification, subscription selection) fail hard. Intended for
+    automation where the Az and Microsoft Graph contexts are established by the caller
+    before invoking this script (e.g. Connect-AzAccount -AccessToken / Connect-MgGraph
+    -AccessToken). Run under 'pwsh -NonInteractive' so any unexpected prompt throws.
+
+.PARAMETER AcceptTerms
+    Non-interactive acknowledgement of the Neologik Terms of Use and Privacy Policy
+    (https://www.neologik.ai/terms, https://www.neologik.ai/privacy-policy). Required
+    with -NonInteractive; the acceptance is written to the log.
+
+.PARAMETER FreshRun
+    Discard any existing checkpoint and start a fresh run without prompting. In
+    -NonInteractive mode a leftover checkpoint without -FreshRun is an error.
+
 .EXAMPLE
     .\Install-NeologikEnvironment.ps1 -OrganizationCode "ABC"
 
 .EXAMPLE
     .\Install-NeologikEnvironment.ps1 -OrganizationCode "XYZ" -EnvironmentType "prd" -AzureRegion "ukwest"
+
+.EXAMPLE
+    # CI / unattended (contexts pre-established by the caller):
+    pwsh -NonInteractive -File .\Install-NeologikEnvironment.ps1 -NonInteractive -AcceptTerms -FreshRun `
+        -AnswerFile .\inputs.json -SkipPowerShellUpdate -SkipModuleInstall -SkipGuestInvitation `
+        -SubscriptionName "My Subscription" -ExistingServicePrincipalSecret $env:SP_CLIENT_SECRET
 
 .NOTES
     Author: Neologik
@@ -127,7 +153,23 @@ param(
     # Path to a JSON file of predefined inputs that pre-fill the interactive prompts.
     # When omitted, an 'inputs.json' next to the script is auto-detected.
     [Parameter(Mandatory = $false)]
-    [string]$AnswerFile = ""
+    [string]$AnswerFile = "",
+
+    # CI / unattended mode. Requires a fully-populated answer file; every interactive
+    # gate either resolves from switches/answers or throws instead of prompting.
+    # Intended for automation (e.g. GitHub Actions) where no console input is possible.
+    [Parameter(Mandatory = $false)]
+    [switch]$NonInteractive,
+
+    # Non-interactive acceptance of the Neologik Terms of Use and Privacy Policy.
+    # Required when -NonInteractive is set; the acceptance is written to the log.
+    [Parameter(Mandatory = $false)]
+    [switch]$AcceptTerms,
+
+    # Discard any existing checkpoint and start a fresh run without prompting.
+    # In -NonInteractive mode a leftover checkpoint without -FreshRun is an error.
+    [Parameter(Mandatory = $false)]
+    [switch]$FreshRun
 )
 
 # Script variables
@@ -136,7 +178,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.9.0'
+$script:Version = 'v1.11.0'
 
 # Initialize with timestamp - will be updated after org code and environment type are collected
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -158,6 +200,12 @@ $script:KeyVaultNameOverride = if ($script:KeyVaultNameFromCli) { $KeyVaultName 
 # $PSBoundParameters reflects the script parameters. When the switch is absent, the guest-invite
 # decision falls back to the answer file's 'skipGuestInvitation' key, then to an interactive prompt.
 $script:SkipGuestInvitationFromCli = $PSBoundParameters.ContainsKey('SkipGuestInvitation')
+
+# Non-interactive (CI) mode flags, computed at script scope so functions can read them
+# via $script: without relying on scope walking.
+$script:NonInteractiveMode = $NonInteractive.IsPresent
+$script:AcceptTermsFromCli = $AcceptTerms.IsPresent
+$script:FreshRunMode = $FreshRun.IsPresent
 
 # Resolved client-provided SP secret. Held here (NOT in ConfigData) so it is never written to
 # the checkpoint or exported config. Set during configuration gathering; empty on resume.
@@ -282,7 +330,16 @@ By proceeding with this installation, you acknowledge and agree to
 "@
 
     Write-Host $terms -ForegroundColor Yellow
-    
+
+    if ($script:NonInteractiveMode) {
+        if ($script:AcceptTermsFromCli) {
+            Write-Log "Terms and conditions accepted non-interactively via -AcceptTerms" -Level Info
+            Write-Host "`n✓ Terms accepted (-AcceptTerms). Proceeding with installation...`n" -ForegroundColor Green
+            return $true
+        }
+        throw "Non-interactive mode requires -AcceptTerms to acknowledge the Neologik Terms of Use and Privacy Policy."
+    }
+
     Write-Host "Do you accept the Neologik Terms of Use and Privacy Policy? " -NoNewline -ForegroundColor Cyan
     Write-Host "(Type 'I ACCEPT' to continue, or 'N' to exit): " -NoNewline -ForegroundColor Cyan
     $acceptance = Read-Host
@@ -890,6 +947,10 @@ function Test-RequiredPermissions {
         else {
             # The check could not complete (e.g. a Graph token/permission error such as IDX14102),
             # so membership is genuinely unknown — let the operator decide whether to continue.
+            # In non-interactive mode there is no operator to decide: fail hard.
+            if ($script:NonInteractiveMode) {
+                throw "Global Administrator role could not be verified (the check failed to run) and non-interactive mode cannot prompt. Ensure the Graph token carries directory-role read permission."
+            }
             Write-Host ""
             Write-Host "⚠️  Unable to verify the Global Administrator role for $userAccount (the check failed to run)." -ForegroundColor Yellow
             Write-Host "    Global Administrator is required for app registration, admin consent, and guest invitations." -ForegroundColor Yellow
@@ -1119,9 +1180,13 @@ function New-NeologikSubscription {
             # List available subscriptions
             $existingSubscriptions = Get-AzSubscription
             if ($existingSubscriptions) {
+                # Non-interactive callers must supply a resolvable -SubscriptionName up front.
+                if ($script:NonInteractiveMode) {
+                    throw "Subscription '$SubscriptionName' not found and non-interactive mode cannot prompt for an alternative. Pass a valid -SubscriptionName."
+                }
                 Write-Host "`nAvailable subscriptions:" -ForegroundColor Yellow
                 $existingSubscriptions | ForEach-Object { Write-Host "  - $($_.Name) ($($_.Id))" }
-                
+
                 Write-Host "`nWould you like to use an existing subscription? (Y/N): " -NoNewline -ForegroundColor Cyan
                 $useExisting = Read-Host
                 if ($useExisting -eq 'Y' -or $useExisting -eq 'y' -or [string]::IsNullOrWhiteSpace($useExisting)) {
@@ -3631,11 +3696,12 @@ function Set-ConfigFromAnswerFile {
     if ($oc -notmatch '^[a-z0-9]{3}$') { throw "organizationCode '$oc' must be exactly 3 lowercase alphanumeric characters." }
     $script:OrganizationCode = $oc
 
-    # Environment type (default from -EnvironmentType, 'dev')
+    # Environment type (default from -EnvironmentType, 'dev'). Accept the same set as the
+    # -EnvironmentType parameter: dmo/test/stg are supported but intentionally undocumented.
     $et = [string](Get-Answer 'environmentType')
     if ([string]::IsNullOrWhiteSpace($et)) { $et = $EnvironmentType }
     $et = $et.ToLower()
-    if (@('dev', 'prd') -notcontains $et) { throw "environmentType '$et' must be 'dev' or 'prd'." }
+    if (@('dev', 'prd', 'dmo', 'test', 'stg') -notcontains $et) { throw "environmentType '$et' must be one of 'dev', 'prd', 'dmo', 'test', 'stg'." }
     $script:EnvironmentType = $et
 
     # Organization name (no default)
@@ -3811,8 +3877,25 @@ function Start-NeologikOnboarding {
         # Values pre-fill the configuration prompts below; runtime decisions stay interactive.
         Import-AnswerFile -Path $AnswerFile
 
+        # Non-interactive mode requires a fully-populated answer file — fail before any
+        # prompt could fire, with a clearer error than a Read-Host failure mid-run.
+        if ($script:NonInteractiveMode -and -not (Test-AnswerFileComplete)) {
+            throw "Non-interactive mode requires a fully-populated answer file (organizationCode, organizationName, fqdn, and complete bots[]). Supply -AnswerFile or fix the missing keys."
+        }
+
         # Check for an existing checkpoint and offer to resume
         $existingCheckpoint = Find-LatestCheckpoint
+        if ($existingCheckpoint -and $script:FreshRunMode) {
+            # -FreshRun: discard the checkpoint and start clean, no prompt.
+            Write-Log "FreshRun: discarding existing checkpoint $($existingCheckpoint.Name)" -Level Warning
+            Remove-Item -Path $existingCheckpoint.FullName -Force -ErrorAction SilentlyContinue
+            $existingCheckpoint = $null
+        }
+        if ($existingCheckpoint -and $script:NonInteractiveMode) {
+            # A leftover checkpoint in CI is an unexpected state: resuming silently could act
+            # on stale config, and prompting is impossible. Force an explicit decision.
+            throw "A checkpoint from a previous run exists ($($existingCheckpoint.Name)). Re-run with -FreshRun to discard it, or resume interactively."
+        }
         if ($existingCheckpoint) {
             $age = (Get-Date) - $existingCheckpoint.LastWriteTime
             $ageStr = if ($age.TotalDays -ge 1) { "$([int]$age.TotalDays) day(s) ago" }
@@ -3902,8 +3985,15 @@ function Start-NeologikOnboarding {
 
         # Step 3: Check if user wants to re-authenticate
         $currentContext = Get-AzContext -ErrorAction SilentlyContinue
-        
-        if ($currentContext -and $currentContext.Account) {
+
+        if ($currentContext -and $currentContext.Account -and $script:NonInteractiveMode) {
+            # CI pre-establishes the Az (and Graph) contexts before invoking this script —
+            # always reuse them; never prompt, never force re-auth (an access-token context
+            # cannot re-authenticate anyway).
+            Write-Log "Non-interactive: reusing existing Azure context ($($currentContext.Account.Id))" -Level Info
+            $script:ForceReAuth = $false
+        }
+        elseif ($currentContext -and $currentContext.Account) {
             Write-Host "`n╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
             Write-Host "║                                                               ║" -ForegroundColor Yellow
             Write-Host "║                  CURRENT AZURE CONNECTION                     ║" -ForegroundColor Yellow
@@ -4821,6 +4911,11 @@ function Start-NeologikOnboarding {
         }
         Write-Host ""
         if ($answerComplete) {
+            if ($script:NonInteractiveMode) {
+                # Answer file is complete (verified up front) — proceed without confirmation.
+                Write-Log "Non-interactive: proceeding with the answer-file settings shown above" -Level Info
+                break
+            }
             # Required confirmation — no default; the user must type Y (continue) or N (edit).
             $confirmChoice = ''
             while ($confirmChoice -notmatch '^[YyNn]$') {

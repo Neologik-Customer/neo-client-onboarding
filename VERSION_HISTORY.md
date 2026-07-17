@@ -11,6 +11,27 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ## Unreleased
 
+### Features
+- **Non-interactive (CI) mode for Install-NeologikEnvironment.ps1** (script
+  version bumped to v1.11.0; the in-script version was stale at v1.9.0 since
+  the 1.9.1-1.10.1 releases). Three new switches:
+  - `-NonInteractive`: unattended mode for automation. Requires a fully
+    populated answer file (verified up front); every interactive gate either
+    resolves from switches/answer keys or throws instead of prompting. An
+    Az/Graph context established by the caller (e.g.
+    `Connect-AzAccount -AccessToken` / `Connect-MgGraph -AccessToken`) is
+    always reused - no re-auth prompt. The configuration summary confirm is
+    skipped; the Global-Administrator warn-and-prompt and the
+    subscription-selection prompt fail hard instead.
+  - `-AcceptTerms`: non-interactive acknowledgement of the Neologik Terms of
+    Use and Privacy Policy (required with `-NonInteractive`; logged).
+  - `-FreshRun`: discard a leftover checkpoint without prompting. In
+    non-interactive mode a checkpoint without `-FreshRun` is an error.
+  - Answer-file `environmentType` now accepts the same value set as the
+    `-EnvironmentType` parameter (`dev`, `prd`, `dmo`, `test`, `stg`) instead
+    of only `dev`/`prd`.
+  - Interactive behaviour is unchanged when the new switches are not passed.
+
 ### Changes
 - **Onboarding-kit zip builder moved out of this repo** (owner decision
   2026-07-16): this repository is customer-facing and carries no customer
