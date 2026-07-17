@@ -2378,7 +2378,7 @@ function New-NeologikKeyVault {
 function New-NeologikNceAuthApp {
     <#
     .SYNOPSIS
-        Creates the 'Neologik Admin Auth' app registration and assigns the
+        Creates the 'Neologik NCE Auth' app registration and assigns the
         Harness user group to it (project#1084).
 
     .DESCRIPTION
@@ -2411,7 +2411,7 @@ function New-NeologikNceAuthApp {
         [string]$KeyVaultName
     )
 
-    Write-Log "Creating the Neologik Admin Auth app registration (NCE login)..." -Level Info
+    Write-Log "Creating the Neologik NCE Auth app registration (NCE login)..." -Level Info
 
     try {
         Import-Module Microsoft.Graph.Applications -ErrorAction Stop
@@ -2424,7 +2424,7 @@ function New-NeologikNceAuthApp {
         # resolves the app by uniqueName ('sp-admin-<solutionName>') and the
         # Key Vault secret name derives from it.
         $uniqueName = "sp-admin-$solutionName"
-        $displayName = "Neologik Admin Auth - $shortName"
+        $displayName = "Neologik NCE Auth - $shortName"
         $redirectUri = "https://$hostName/nce"
 
         $existingApp = Get-MgApplication -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
