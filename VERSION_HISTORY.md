@@ -14,6 +14,25 @@ This document tracks the version history of the Neologik customer onboarding scr
 **Ticket**: https://github.com/Neologik-AI/project/issues/1063
 
 ### Changes
+- **Naming convention alignment (project#1063)**: all computed names now follow
+  the platform Neologik-standard convention; the environment type (dev/prd)
+  NEVER appears in names (it only drives sizing/defaults). Canonical tokens:
+  solution `neo-neo{org}-{region}-{index}` (e.g. `neo-neodmo-cus-01`), short
+  name `neo{org}{index}` (e.g. `neodmo01`). Derived: RG `rg-{solution}`, KV
+  `kv{short}`, deploy storage `stneodeployneo{org}{region}{index}`, MIs
+  `neologik-script-runner-service-connection-{short}` /
+  `neologik-sql-managed-identity-{short}`, groups and app registration
+  suffixed `- {short}`, config file `Neologik_{org}{index}_...json`.
+  Previously the script invented `{org}{env}{index}` composites (`dmodev01`,
+  dmo01 dress rehearsal) matching neither of the two registered conventions
+  (neo-env-config `naming/templates/`: neologik-standard, keolis).
+- **Client-convention flexibility (design D6)**: `solutionName` and
+  `solutionShortName` are now answer-file overridable (the short name drives
+  every dependent suffix), and the SQL managed identity name gains the same
+  override/prompt treatment as the script-runner identity (`sqlIdentityName`
+  answer key + interactive prompt). Every script-created resource name is now
+  individually overridable for client naming conventions.
+- **ScriptVersion bumped to v5.0.0** (was stale at v1.9.0 on the v5 branch).
 - **v5: NCE group renamed** - new onboardings create
   `Neologik Harness User Group - {org}{env}{index}` (was `Neologik NCE User
   Group`); consumption is by group ID (`NEO_NCE_USERS`), so existing

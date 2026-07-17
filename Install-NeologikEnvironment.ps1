@@ -136,7 +136,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.9.0'
+$script:Version = 'v5.0.0'
 
 # Initialize with timestamp - will be updated after org code and environment type are collected
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -232,8 +232,10 @@ function Initialize-ConfigurationFile {
     [CmdletBinding()]
     param()
 
-    # Generate configuration file name with org code, env type, and env index (e.g. xyzdev01)
-    $configFileName = "Neologik_$($script:OrganizationCode)$($script:EnvironmentType)$($script:EnvironmentIndex)_Configuration_$($script:FileTimestamp).json"
+    # Generate configuration file name from the environment name = org code + index
+    # (e.g. dmo01, abc01). Environment type never appears in names (naming
+    # convention alignment - project#1063).
+    $configFileName = "Neologik_$($script:OrganizationCode)$($script:EnvironmentIndex)_Configuration_$($script:FileTimestamp).json"
     $script:OutputFile = Join-Path $PSScriptRoot $configFileName
     
     Write-Host "  ✓ Configuration file initialized: $configFileName" -ForegroundColor Green
@@ -1308,10 +1310,14 @@ function New-NeologikSecurityGroups {
     try {
         Import-Module Microsoft.Graph.Groups -ErrorAction Stop
 
-        # Build group names with organization code and environment type (lowercase)
-        $orgLower = $OrganizationCode.ToLower()
-        $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "$($EnvironmentType.ToLower())" }
-        $groupSuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { " - $orgLower$envLower$EnvironmentIndex" }
+        # Group name suffix = the platform solution short name (neo{org}{index},
+        # e.g. neodmo01) so script-created groups match the platform naming
+        # convention (project#1063). SolutionShortName honours any override from
+        # the answer file; environment type never appears in names.
+        $shortName = if (-not [string]::IsNullOrWhiteSpace([string]$script:ConfigData['SolutionShortName'])) { [string]$script:ConfigData['SolutionShortName'] }
+                     elseif ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" }
+                     else { "neo$($OrganizationCode.ToLower())$EnvironmentIndex" }
+        $groupSuffix = if ([string]::IsNullOrWhiteSpace($shortName)) { "" } else { " - $shortName" }
 
         # v5 (Neologik Harness): one default user group. Per-agent groups are
         # created later by channel provisioning in the Harness admin tool (the
@@ -1573,13 +1579,14 @@ function New-NeologikAppRegistration {
     try {
         Import-Module Microsoft.Graph.Applications -ErrorAction Stop
 
-        # Build app name with organization code and environment type (lowercase)
+        # App name suffix = the platform solution short name (neo{org}{index},
+        # e.g. neodmo01) - naming convention alignment, project#1063.
         $appName = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) {
             "Neologik GitHub Service Connection"
         } else {
-            $orgLower = $OrganizationCode.ToLower()
-            $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "$($EnvironmentType.ToLower())" }
-            "Neologik GitHub Service Connection - $orgLower$envLower$EnvironmentIndex"
+            $shortName = if (-not [string]::IsNullOrWhiteSpace([string]$script:ConfigData['SolutionShortName'])) { [string]$script:ConfigData['SolutionShortName'] }
+                         else { "neo$($OrganizationCode.ToLower())$EnvironmentIndex" }
+            "Neologik GitHub Service Connection - $shortName"
         }
 
         # Check if app registration exists
@@ -2901,7 +2908,10 @@ function New-NeologikManagedIdentities {
         [string]$EnvironmentIndex = "",
 
         [Parameter(Mandatory = $false)]
-        [string]$ScriptRunnerIdentityName = ""
+        [string]$ScriptRunnerIdentityName = "",
+
+        [Parameter(Mandatory = $false)]
+        [string]$SqlIdentityName = ""
     )
 
     Write-Log "Creating Managed Identities..." -Level Info
@@ -2912,16 +2922,20 @@ function New-NeologikManagedIdentities {
         # Ensure Microsoft.ManagedIdentity provider is registered
         Register-RequiredResourceProvider -ProviderNamespace 'Microsoft.ManagedIdentity'
 
-        # Build names with organization code and environment type (lowercase)
-        $orgLower = $OrganizationCode.ToLower()
-        $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "$($EnvironmentType.ToLower())" }
-        $nameSuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { "-$orgLower$envLower$EnvironmentIndex" }
-        $displaySuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { " - $orgLower$envLower$EnvironmentIndex" }
+        # Name suffix = the platform solution short name (neo{org}{index}, e.g.
+        # neodmo01) - naming convention alignment, project#1063. Environment
+        # type never appears in names.
+        $shortName = if (-not [string]::IsNullOrWhiteSpace([string]$script:ConfigData['SolutionShortName'])) { [string]$script:ConfigData['SolutionShortName'] }
+                     elseif ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" }
+                     else { "neo$($OrganizationCode.ToLower())$EnvironmentIndex" }
+        $nameSuffix = if ([string]::IsNullOrWhiteSpace($shortName)) { "" } else { "-$shortName" }
+        $displaySuffix = if ([string]::IsNullOrWhiteSpace($shortName)) { "" } else { " - $shortName" }
 
-        # Script-runner name was resolved during configuration gathering (answer file / prompt /
-        # computed); empty on checkpoints written before the field existed - fall back to the
-        # computed Neologik-standard name.
+        # Script-runner and SQL identity names were resolved during configuration
+        # gathering (answer file / prompt / computed); empty on checkpoints written
+        # before the fields existed - fall back to the computed Neologik-standard name.
         $scriptRunnerName = if (-not [string]::IsNullOrWhiteSpace($ScriptRunnerIdentityName)) { $ScriptRunnerIdentityName.Trim() } else { "neologik-script-runner-service-connection$nameSuffix" }
+        $sqlIdentityName = if (-not [string]::IsNullOrWhiteSpace($SqlIdentityName)) { $SqlIdentityName.Trim() } else { "neologik-sql-managed-identity$nameSuffix" }
 
         $managedIdentities = @(
             @{
@@ -2934,7 +2948,7 @@ function New-NeologikManagedIdentities {
                 # Application.Read.All / ReadWrite.OwnedBy on the UAMI would be surplus.
             },
             @{
-                Name = "neologik-sql-managed-identity$nameSuffix"
+                Name = $sqlIdentityName
                 DisplayName = "Neologik SQL Managed Identity$displaySuffix"
                 Roles = @()
                 EntraRole = 'Directory Readers'
@@ -3691,15 +3705,28 @@ function Set-ConfigFromAnswerFile {
     # Config file name now that org code, env type, and env index are known
     Initialize-ConfigurationFile
 
+    # Solution names FIRST (answer-file override, else Neologik-standard) - the
+    # short name is the naming token for every other computed default. Standard
+    # construction (project#1063): org token = "neo{org}", environment type
+    # never appears in names.
+    #   SolutionName      neo-neo{org}-{region}-{index}   e.g. neo-neodmo-cus-01
+    #   SolutionShortName neo{org}{index}                 e.g. neodmo01
+    $snAns = [string](Get-Answer 'solutionName')
+    $script:ConfigData['SolutionName'] = if (-not [string]::IsNullOrWhiteSpace($snAns)) { $snAns.Trim().ToLower() }
+                                         else { "neo-neo$($script:OrganizationCode)-$regionAbbrev-$($script:EnvironmentIndex)" }
+    $ssnAns = [string](Get-Answer 'solutionShortName')
+    $script:ConfigData['SolutionShortName'] = if (-not [string]::IsNullOrWhiteSpace($ssnAns)) { $ssnAns.Trim().ToLower() }
+                                              else { "neo$($script:OrganizationCode)$($script:EnvironmentIndex)" }
+
     # Resource group name (answer-file override, else computed).
-    $rgComputed = "rg-neo-$($script:OrganizationCode)$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
+    $rgComputed = "rg-$($script:ConfigData['SolutionName'])"
     $rgAns = [string](Get-Answer 'resourceGroupName')
     $script:ResourceGroupName = if (-not [string]::IsNullOrWhiteSpace($rgAns)) { $rgAns.Trim() } else { $rgComputed }
     $rgErr = Test-ResourceGroupNameError $script:ResourceGroupName
     if ($rgErr) { throw "resourceGroupName '$($script:ResourceGroupName)': $rgErr" }
 
     # Key Vault name (-KeyVaultName CLI, else answer-file override, else computed).
-    $kvComputed = "kvneo$($script:OrganizationCode)$($script:EnvironmentType)$($script:EnvironmentIndex)"
+    $kvComputed = "kv$($script:ConfigData['SolutionShortName'])"
     $kvAns = [string](Get-Answer 'keyVaultName')
     $script:KeyVaultNameOverride = if ($script:KeyVaultNameFromCli -and -not [string]::IsNullOrWhiteSpace($KeyVaultName)) { $KeyVaultName.Trim() }
                                    elseif (-not [string]::IsNullOrWhiteSpace($kvAns)) { $kvAns.Trim() }
@@ -3708,7 +3735,7 @@ function Set-ConfigFromAnswerFile {
     if ($kvErr) { throw "keyVaultName '$($script:KeyVaultNameOverride)': $kvErr" }
 
     # Deployment storage account name (answer-file override, else computed and truncated to 24).
-    $saComputed = "stneodeploy$($script:OrganizationCode)$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+    $saComputed = "stneodeployneo$($script:OrganizationCode)$regionAbbrev$($script:EnvironmentIndex)"
     if ($saComputed.Length -gt 24) { $saComputed = $saComputed.Substring(0, 24) }
     $saAns = [string](Get-Answer 'storageAccountName')
     $script:ConfigData['DeployStorageAccountName'] = if (-not [string]::IsNullOrWhiteSpace($saAns)) { $saAns.Trim().ToLower() } else { $saComputed }
@@ -3716,11 +3743,18 @@ function Set-ConfigFromAnswerFile {
     if ($saErr) { throw "storageAccountName '$($script:ConfigData['DeployStorageAccountName'])': $saErr" }
 
     # Script-runner managed identity name (answer-file override, else computed).
-    $sriComputed = "neologik-script-runner-service-connection-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$($script:EnvironmentIndex)"
+    $sriComputed = "neologik-script-runner-service-connection-$($script:ConfigData['SolutionShortName'])"
     $sriAns = [string](Get-Answer 'scriptRunnerIdentityName')
     $script:ConfigData['ScriptRunnerIdentityName'] = if (-not [string]::IsNullOrWhiteSpace($sriAns)) { $sriAns.Trim() } else { $sriComputed }
     $sriErr = Test-ManagedIdentityNameError $script:ConfigData['ScriptRunnerIdentityName']
     if ($sriErr) { throw "scriptRunnerIdentityName '$($script:ConfigData['ScriptRunnerIdentityName'])': $sriErr" }
+
+    # SQL managed identity name (answer-file override, else computed).
+    $sqlComputed = "neologik-sql-managed-identity-$($script:ConfigData['SolutionShortName'])"
+    $sqlAns = [string](Get-Answer 'sqlIdentityName')
+    $script:ConfigData['SqlIdentityName'] = if (-not [string]::IsNullOrWhiteSpace($sqlAns)) { $sqlAns.Trim() } else { $sqlComputed }
+    $sqlErr = Test-ManagedIdentityNameError $script:ConfigData['SqlIdentityName']
+    if ($sqlErr) { throw "sqlIdentityName '$($script:ConfigData['SqlIdentityName'])': $sqlErr" }
 
     # v5 (Neologik Harness): no bots at onboarding - agents and channels are
     # created post-deployment in the Harness admin tool.
@@ -3746,9 +3780,8 @@ function Set-ConfigFromAnswerFile {
     elseif ("$rrpAns" -match '^(false|no|n|0)$') { $script:ConfigData['RegisterAllProviders'] = $false }
     else { throw "registerResourceProviders '$rrpAns' must be true or false." }
 
-    # Solution names
-    $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode)$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
-    $script:ConfigData['SolutionShortName'] = "neo$($script:OrganizationCode)$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+    # Solution names were resolved at the top of this function (they drive every
+    # computed default above).
 
     return $regionAbbrev
 }
@@ -4427,7 +4460,17 @@ function Start-NeologikOnboarding {
         # client-specific naming conventions be applied from inputs.json without editing the script.
 
         # Resource group name.
-        $rgComputed = "rg-neo-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
+        # Solution names FIRST (answer-file override, else Neologik-standard) - the
+        # short name is the naming token for every other computed default
+        # (project#1063; environment type never appears in names).
+        $snAns = [string](Get-Answer 'solutionName')
+        $script:ConfigData['SolutionName'] = if (-not [string]::IsNullOrWhiteSpace($snAns)) { $snAns.Trim().ToLower() }
+                                             else { "neo-neo$($script:OrganizationCode.ToLower())-$regionAbbrev-$($script:EnvironmentIndex)" }
+        $ssnAns = [string](Get-Answer 'solutionShortName')
+        $script:ConfigData['SolutionShortName'] = if (-not [string]::IsNullOrWhiteSpace($ssnAns)) { $ssnAns.Trim().ToLower() }
+                                                  else { "neo$($script:OrganizationCode.ToLower())$($script:EnvironmentIndex)" }
+
+        $rgComputed = "rg-$($script:ConfigData['SolutionName'])"
         $rgAns = [string](Get-Answer 'resourceGroupName')
         $rgDefault = if (-not [string]::IsNullOrWhiteSpace($rgAns)) { $rgAns.Trim() } else { $rgComputed }
         $script:ResourceGroupName = Read-NameWithDefault -Title 'Resource Group Name' `
@@ -4435,7 +4478,7 @@ function Start-NeologikOnboarding {
             -LabelPrefix (Get-PromptLabel $rgDefault $rgComputed)
 
         # Key Vault name. Precedence for the default: -KeyVaultName CLI, then answer file, then computed.
-        $kvComputed = "kvneo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$($script:EnvironmentIndex)"
+        $kvComputed = "kv$($script:ConfigData['SolutionShortName'])"
         $kvAns = [string](Get-Answer 'keyVaultName')
         $kvDefault = if ($script:KeyVaultNameFromCli -and -not [string]::IsNullOrWhiteSpace($KeyVaultName)) { $KeyVaultName.Trim() }
                      elseif (-not [string]::IsNullOrWhiteSpace($kvAns)) { $kvAns.Trim() }
@@ -4445,7 +4488,7 @@ function Start-NeologikOnboarding {
             -LabelPrefix (Get-PromptLabel $kvDefault $kvComputed)
 
         # Deployment storage account name (holds the certificate blob container).
-        $saComputed = "stneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+        $saComputed = "stneodeployneo$($script:OrganizationCode.ToLower())$regionAbbrev$($script:EnvironmentIndex)"
         if ($saComputed.Length -gt 24) { $saComputed = $saComputed.Substring(0, 24) }
         $saAns = [string](Get-Answer 'storageAccountName')
         $saDefault = if (-not [string]::IsNullOrWhiteSpace($saAns)) { $saAns.Trim().ToLower() } else { $saComputed }
@@ -4454,12 +4497,20 @@ function Start-NeologikOnboarding {
             -LabelPrefix (Get-PromptLabel $saDefault $saComputed)
 
         # Script-runner managed identity name (the deployment pipeline's service connection).
-        $sriComputed = "neologik-script-runner-service-connection-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$($script:EnvironmentIndex)"
+        $sriComputed = "neologik-script-runner-service-connection-$($script:ConfigData['SolutionShortName'])"
         $sriAns = [string](Get-Answer 'scriptRunnerIdentityName')
         $sriDefault = if (-not [string]::IsNullOrWhiteSpace($sriAns)) { $sriAns.Trim() } else { $sriComputed }
         $script:ConfigData['ScriptRunnerIdentityName'] = Read-NameWithDefault -Title 'Script Runner Managed Identity Name' `
             -DefaultValue $sriDefault -Validator ${function:Test-ManagedIdentityNameError} `
             -LabelPrefix (Get-PromptLabel $sriDefault $sriComputed)
+
+        # SQL managed identity name.
+        $sqlComputed = "neologik-sql-managed-identity-$($script:ConfigData['SolutionShortName'])"
+        $sqlAns = [string](Get-Answer 'sqlIdentityName')
+        $sqlDefault = if (-not [string]::IsNullOrWhiteSpace($sqlAns)) { $sqlAns.Trim() } else { $sqlComputed }
+        $script:ConfigData['SqlIdentityName'] = Read-NameWithDefault -Title 'SQL Managed Identity Name' `
+            -DefaultValue $sqlDefault -Validator ${function:Test-ManagedIdentityNameError} `
+            -LabelPrefix (Get-PromptLabel $sqlDefault $sqlComputed)
 
         # v5 (Neologik Harness): no bots are created at onboarding. Agents and
         # their channels are created post-deployment in the Neologik Harness
@@ -4556,9 +4607,8 @@ function Start-NeologikOnboarding {
             Write-Host "  ✓ Will register the minimal set only — run Register-NeologikResourceProviders.ps1 before deploying" -ForegroundColor Green
         }
 
-        # Calculate solution names based on configuration
-        $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
-        $script:ConfigData['SolutionShortName'] = "neo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+        # Solution names were resolved before the resource-name prompts above
+        # (they drive every computed default).
             }
 
         # Provisioning decisions - presented BEFORE the summary so they appear in it and are
@@ -4625,6 +4675,9 @@ function Start-NeologikOnboarding {
         Write-Host "  Key Vault Name:       " -NoNewline; Write-Host $script:KeyVaultNameOverride -ForegroundColor Yellow
         Write-Host "  Storage Account Name: " -NoNewline; Write-Host $script:ConfigData['DeployStorageAccountName'] -ForegroundColor Yellow
         Write-Host "  Script Runner Identity: " -NoNewline; Write-Host $script:ConfigData['ScriptRunnerIdentityName'] -ForegroundColor Yellow
+        Write-Host "  SQL Managed Identity: " -NoNewline; Write-Host $script:ConfigData['SqlIdentityName'] -ForegroundColor Yellow
+        Write-Host "  Solution Name: " -NoNewline; Write-Host $script:ConfigData['SolutionName'] -ForegroundColor Yellow
+        Write-Host "  Solution Short Name: " -NoNewline; Write-Host $script:ConfigData['SolutionShortName'] -ForegroundColor Yellow
         $budgetEmailSummary = if ($script:ConfigData['BudgetEmailAddresses'].Count -gt 0) { $script:ConfigData['BudgetEmailAddresses'] -join ', ' } else { '(disabled)' }
         Write-Host "  Cost-Report Email:    " -NoNewline; Write-Host $budgetEmailSummary -ForegroundColor Yellow
         $providerSummary = if ($script:ConfigData['RegisterAllProviders']) { 'All providers' } else { 'Minimal set (run Register-NeologikResourceProviders.ps1 before deploying)' }
@@ -4747,7 +4800,7 @@ function Start-NeologikOnboarding {
             Write-Log "Using Key Vault name override: $keyVaultName" -Level Info
         }
         else {
-            $keyVaultName = "kvneo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$($script:EnvironmentIndex)"
+            $keyVaultName = "kv$($script:ConfigData['SolutionShortName'])"
         }
 
         # Key Vault names must be 3-24 characters, only alphanumeric and hyphens
@@ -4781,7 +4834,7 @@ function Start-NeologikOnboarding {
         # Fall back to the computed name for checkpoints written before this field existed.
         $storageAccountName = [string]$script:ConfigData['DeployStorageAccountName']
         if ([string]::IsNullOrWhiteSpace($storageAccountName)) {
-            $storageAccountName = "stneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+            $storageAccountName = "stneodeployneo$($script:OrganizationCode.ToLower())$regionAbbrev$($script:EnvironmentIndex)"
         }
 
         # Storage account names must be 3-24 characters, lowercase alphanumeric only
@@ -4802,7 +4855,8 @@ function Start-NeologikOnboarding {
             -OrganizationCode $script:OrganizationCode `
             -EnvironmentType $script:EnvironmentType `
             -EnvironmentIndex $script:EnvironmentIndex `
-            -ScriptRunnerIdentityName ([string]$script:ConfigData['ScriptRunnerIdentityName'])
+            -ScriptRunnerIdentityName ([string]$script:ConfigData['ScriptRunnerIdentityName']) `
+            -SqlIdentityName ([string]$script:ConfigData['SqlIdentityName'])
 
         # Step 16: Export configuration
         Export-ConfigurationData
