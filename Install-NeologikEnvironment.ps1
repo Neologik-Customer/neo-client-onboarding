@@ -1828,6 +1828,11 @@ function Read-ExistingServicePrincipalChoice {
         [string]$AnswerSecret = ""
     )
 
+    # The command-line secret backs any path with no answer-file secret: the CI wrapper
+    # passes -ExistingServicePrincipalSecret while the object ID comes from the answer
+    # file (the secret is never committed there).
+    if ([string]::IsNullOrWhiteSpace($AnswerSecret)) { $AnswerSecret = $CliSecret }
+
     # 1. Command-line object ID provided: use it without prompting.
     if (-not [string]::IsNullOrWhiteSpace($CliObjectId)) {
         Write-Log "Existing service principal supplied via command line (object ID: $($CliObjectId.Trim()))." -Level Info
@@ -2812,49 +2817,31 @@ function New-NeologikStorageAccount {
         
         Write-Log "Storage Account configured to use Microsoft Entra authentication (shared key access disabled)" -Level Success
 
-        # Get storage context using Entra ID authentication
-        $ctx = New-AzStorageContext -StorageAccountName $StorageAccountName -UseConnectedAccount
-
-        # Create blob container for certificates
-        Write-Log "Creating blob container 'certificate'..." -Level Info
+        # Create the blob containers via the management plane (ARM). A data-plane call
+        # (New-AzStorageContainer -UseConnectedAccount) needs a storage-audience token,
+        # which a static access-token login (CI) cannot mint - and shared key access is
+        # disabled above. The ARM path uses the same token as the rest of the script.
         $certContainerName = "certificate"
-        
-        $existingCertContainer = Get-AzStorageContainer -Name $certContainerName -Context $ctx -ErrorAction SilentlyContinue
-
-        if ($existingCertContainer) {
-            Write-Log "Blob container '$certContainerName' already exists" -Level Info
-        }
-        else {
-            New-AzStorageContainer -Name $certContainerName -Context $ctx -Permission Off -ErrorAction Stop | Out-Null
-            Write-Log "Blob container '$certContainerName' created successfully" -Level Success
-        }
-
-        # Create blob container for JSON configuration files
-        Write-Log "Creating blob container 'json'..." -Level Info
         $jsonContainerName = "json"
-        
-        $existingJsonContainer = Get-AzStorageContainer -Name $jsonContainerName -Context $ctx -ErrorAction SilentlyContinue
-
-        if ($existingJsonContainer) {
-            Write-Log "Blob container '$jsonContainerName' already exists" -Level Info
-        }
-        else {
-            New-AzStorageContainer -Name $jsonContainerName -Context $ctx -Permission Off -ErrorAction Stop | Out-Null
-            Write-Log "Blob container '$jsonContainerName' created successfully" -Level Success
-        }
-
-        # Create blob container for log files
-        Write-Log "Creating blob container 'logs'..." -Level Info
         $logsContainerName = "logs"
-        
-        $existingLogsContainer = Get-AzStorageContainer -Name $logsContainerName -Context $ctx -ErrorAction SilentlyContinue
 
-        if ($existingLogsContainer) {
-            Write-Log "Blob container '$logsContainerName' already exists" -Level Info
-        }
-        else {
-            New-AzStorageContainer -Name $logsContainerName -Context $ctx -Permission Off -ErrorAction Stop | Out-Null
-            Write-Log "Blob container '$logsContainerName' created successfully" -Level Success
+        foreach ($containerName in @($certContainerName, $jsonContainerName, $logsContainerName)) {
+            Write-Log "Creating blob container '$containerName'..." -Level Info
+            $existingContainer = Get-AzRmStorageContainer -ResourceGroupName $ResourceGroupName `
+                -StorageAccountName $StorageAccountName `
+                -ContainerName $containerName `
+                -ErrorAction SilentlyContinue
+
+            if ($existingContainer) {
+                Write-Log "Blob container '$containerName' already exists" -Level Info
+            }
+            else {
+                New-AzRmStorageContainer -ResourceGroupName $ResourceGroupName `
+                    -StorageAccountName $StorageAccountName `
+                    -ContainerName $containerName `
+                    -PublicAccess None -ErrorAction Stop | Out-Null
+                Write-Log "Blob container '$containerName' created successfully" -Level Success
+            }
         }
 
         # Get resource group scope for role assignments
@@ -3248,8 +3235,13 @@ function Export-ConfigurationData {
         $orderedConfig | ConvertTo-Json -Depth 10 | Out-File -FilePath $script:OutputFile -Encoding UTF8
         Write-Log "Configuration exported to: $script:OutputFile" -Level Success
 
-        # Copy JSON file to Storage Account blob container
-        if ($script:ConfigData['StorageAccount']) {
+        # Copy JSON file to Storage Account blob container. Skipped in non-interactive
+        # (CI) mode: blob upload is a data-plane call the static access-token session
+        # cannot authenticate, and the caller collects the local file instead.
+        if ($script:NonInteractiveMode) {
+            Write-Log "Non-interactive: skipping upload of the configuration and log files to the Storage Account; collect them from the local paths logged below." -Level Info
+        }
+        elseif ($script:ConfigData['StorageAccount']) {
             Write-Log "Copying configuration file to Storage Account..." -Level Info
 
             $storageAccountName = $script:ConfigData['StorageAccount'].Name
@@ -3289,8 +3281,8 @@ function Export-ConfigurationData {
             }
         }
 
-        # Copy log file to Storage Account blob container
-        if ($script:ConfigData['StorageAccount']) {
+        # Copy log file to Storage Account blob container (also data-plane; see above).
+        if (-not $script:NonInteractiveMode -and $script:ConfigData['StorageAccount']) {
             Write-Log "Copying log file to Storage Account..." -Level Info
 
             $storageAccountName = $script:ConfigData['StorageAccount'].Name
