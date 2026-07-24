@@ -13,6 +13,30 @@ This document tracks the version history of the Neologik customer onboarding scr
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1063
 
+### Features
+- **Non-interactive (CI) mode for Install-NeologikEnvironment.ps1**
+  (cherry-picked from develop 4f0dcd9, where it bumped the script version to
+  v1.11.0; on feature/agent-platform the script version remains v5.0.0, and
+  the cherry-pick also restores Resolve-BudgetEmailRecipients, whose removal
+  had left the answer-file budget-recipients path broken). Three new
+  switches:
+  - `-NonInteractive`: unattended mode for automation. Requires a fully
+    populated answer file (verified up front); every interactive gate either
+    resolves from switches/answer keys or throws instead of prompting. An
+    Az/Graph context established by the caller (e.g.
+    `Connect-AzAccount -AccessToken` / `Connect-MgGraph -AccessToken`) is
+    always reused - no re-auth prompt. The configuration summary confirm is
+    skipped; the Global-Administrator warn-and-prompt and the
+    subscription-selection prompt fail hard instead.
+  - `-AcceptTerms`: non-interactive acknowledgement of the Neologik Terms of
+    Use and Privacy Policy (required with `-NonInteractive`; logged).
+  - `-FreshRun`: discard a leftover checkpoint without prompting. In
+    non-interactive mode a checkpoint without `-FreshRun` is an error.
+  - Answer-file `environmentType` now accepts the same value set as the
+    `-EnvironmentType` parameter (`dev`, `prd`, `dmo`, `test`, `stg`) instead
+    of only `dev`/`prd`.
+  - Interactive behaviour is unchanged when the new switches are not passed.
+
 ### Changes
 - **Cost report emails move to the deployment pipeline; deployment SP
   gains subscription-scoped 'Cost Management Contributor' (project#1215,
