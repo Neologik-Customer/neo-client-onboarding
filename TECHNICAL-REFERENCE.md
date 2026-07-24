@@ -133,6 +133,31 @@ Or specify all parameters:
 | `KeyVaultName` | String | (auto: `kvneo<org><env><index>`) | Override the Key Vault name | 3-24 chars; start with a letter, end with a letter or digit; letters, digits and hyphens only |
 | `SkipPowerShellUpdate` | Switch | `false` | Skip PowerShell version check and update |
 | `SkipModuleInstall` | Switch | `false` | Skip Azure module installation check |
+| `NonInteractive` | Switch | `false` | CI/unattended mode; requires a fully-populated answer file (see below) |
+| `AcceptTerms` | Switch | `false` | Non-interactive acknowledgement of the Terms of Use; required with `-NonInteractive` |
+| `FreshRun` | Switch | `false` | Discard any leftover checkpoint without prompting |
+
+## Non-Interactive (CI) Mode
+
+`-NonInteractive` runs the script unattended, for automation such as GitHub Actions:
+
+- A fully-populated answer file is required (`organizationCode`, `organizationName`, `fqdn`, complete `bots[]`) and is verified before anything runs.
+- The caller establishes the Azure and Microsoft Graph contexts **before** invoking the script; they are always reused (no re-auth prompt):
+
+```powershell
+Connect-AzAccount -AccessToken $armToken -AccountId $upn -TenantId $tenantId -SubscriptionId $subId
+Connect-MgGraph -AccessToken (ConvertTo-SecureString $graphToken -AsPlainText -Force)
+
+pwsh -NonInteractive -File ./Install-NeologikEnvironment.ps1 -NonInteractive -AcceptTerms -FreshRun `
+    -AnswerFile ./inputs.json -SkipPowerShellUpdate -SkipModuleInstall -SkipGuestInvitation `
+    -SubscriptionName $subName -ExistingServicePrincipalSecret $env:SP_CLIENT_SECRET
+```
+
+- Terms of Use must be acknowledged with `-AcceptTerms` (logged).
+- The configuration summary is not confirmed interactively; warn-and-prompt checks (Global Administrator verification, subscription selection) fail hard instead of prompting.
+- A leftover `NeologikCheckpoint.json` is an error unless `-FreshRun` discards it.
+- Access tokens are short-lived (~60 minutes) and cannot be refreshed mid-run; the token user still needs Subscription Owner + Global Administrator.
+- Run under `pwsh -NonInteractive` so any unexpected prompt throws instead of hanging.
 
 ## Usage Examples
 
