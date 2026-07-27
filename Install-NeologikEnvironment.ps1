@@ -148,6 +148,10 @@ $script:ProviderRegistrations = @{}
 $script:CheckpointFile = Join-Path $PSScriptRoot "NeologikCheckpoint.json"
 $script:CheckpointRegionAbbrev = $null
 
+# Cached resource tag set (project#1173). Built once by Get-NeologikResourceTags on first
+# use after configuration is confirmed; $null until then (and when tagging is disabled).
+$script:ResourceTagsCache = $null
+
 # Key Vault name override. Track whether the operator supplied -KeyVaultName on THIS
 # invocation so that, on resume, a value saved in the checkpoint is preferred unless the
 # operator explicitly overrides it again on the command line.
@@ -423,6 +427,87 @@ function Complete-OnboardingStep {
         $script:CompletedSteps.Add($StepName)
     }
     Save-Checkpoint -Label $StepName
+}
+
+#endregion
+
+#region Resource Tagging
+
+function ConvertTo-NeologikCustomTags {
+    <#
+    .SYNOPSIS
+        Parses custom resource tags into a hashtable (project#1173). Accepts a
+        comma-separated 'key=value' string, or a dictionary/object (from the answer file or
+        a restored checkpoint). Throws on any invalid key or value so the caller can warn
+        or re-prompt. Keys: letters, digits, '.', '_' and '-' only; keys and values must
+        not contain ',' or '='.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]$Value
+    )
+
+    $tags = @{}
+    if ($null -eq $Value) { return $tags }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        foreach ($key in $Value.Keys) { $tags[[string]$key] = [string]$Value[$key] }
+    }
+    elseif ($Value -is [System.Management.Automation.PSCustomObject]) {
+        foreach ($prop in $Value.PSObject.Properties) { $tags[[string]$prop.Name] = [string]$prop.Value }
+    }
+    else {
+        $text = ([string]$Value).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($text)) {
+            foreach ($pair in ($text -split ',')) {
+                $trimmed = $pair.Trim()
+                if ([string]::IsNullOrWhiteSpace($trimmed)) { throw "Empty tag entry - use comma-separated key=value pairs." }
+                $parts = $trimmed -split '=', 2
+                if ($parts.Count -ne 2) { throw "Tag '$trimmed' must be in key=value form." }
+                $tags[$parts[0].Trim()] = $parts[1].Trim()
+            }
+        }
+    }
+
+    foreach ($key in @($tags.Keys)) {
+        if ($key -notmatch '^[a-zA-Z0-9._-]+$') { throw "Tag key '$key' is invalid - use letters, digits, '.', '_' and '-' only." }
+        if ("$($tags[$key])" -match '[,=]') { throw "Tag value for '$key' must not contain ',' or '='." }
+    }
+
+    return $tags
+}
+
+function Get-NeologikResourceTags {
+    <#
+    .SYNOPSIS
+        Returns the tag set applied to script-created Azure resources, or $null when
+        resource tagging is disabled (project#1173). Built once and cached so every
+        resource carries the identical set; the customer's custom tags override the
+        Neologik defaults on key collision.
+    #>
+    [CmdletBinding()]
+    param()
+
+    if (-not $script:ConfigData['ResourceTagsEnabled']) { return $null }
+    if ($null -ne $script:ResourceTagsCache) { return $script:ResourceTagsCache }
+
+    $tags = @{
+        'Vendor'          = 'Neologik'
+        'ApplicationName' = 'NeologikHarness'
+        'ManagedBy'       = 'NeologikOnboarding'
+        'Environment'     = "$($script:OrganizationCode)$($script:EnvironmentType)"
+        'Solution'        = [string]$script:ConfigData['SolutionShortName']
+        'DeploymentDate'  = (Get-Date -Format 'yyyy-MM-dd')
+    }
+
+    # Custom pairs override the defaults on key collision. A checkpoint round-trip stores
+    # the hashtable as an object - ConvertTo-NeologikCustomTags accepts both shapes.
+    foreach ($entry in (ConvertTo-NeologikCustomTags $script:ConfigData['ResourceTagsCustom']).GetEnumerator()) {
+        $tags[[string]$entry.Key] = [string]$entry.Value
+    }
+
+    $script:ResourceTagsCache = $tags
+    return $tags
 }
 
 #endregion
@@ -1183,7 +1268,12 @@ function New-NeologikResourceGroup {
         }
         else {
             Write-Log "Creating resource group: $ResourceGroupName in $Location..." -Level Info
-            $rg = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -ErrorAction Stop
+            # Resource tags (project#1173): applied on the create call itself so tenants whose
+            # Azure Policies deny untagged resources accept it; empty splat when disabled.
+            $tagParams = @{}
+            $resourceTags = Get-NeologikResourceTags
+            if ($resourceTags) { $tagParams['Tag'] = $resourceTags }
+            $rg = New-AzResourceGroup -Name $ResourceGroupName -Location $Location @tagParams -ErrorAction Stop
             Write-Log "Resource group created successfully" -Level Success
             
             $script:ConfigData['ResourceGroupName'] = $rg.ResourceGroupName
@@ -2222,9 +2312,14 @@ function New-NeologikKeyVault {
             Write-Log "Creating Key Vault: $KeyVaultName..." -Level Info
             
             # Create Key Vault
+            # Resource tags (project#1173): applied on the create call; empty splat when disabled.
+            $tagParams = @{}
+            $resourceTags = Get-NeologikResourceTags
+            if ($resourceTags) { $tagParams['Tag'] = $resourceTags }
             $keyVault = New-AzKeyVault -ResourceGroupName $ResourceGroupName `
                 -VaultName $KeyVaultName `
                 -Location $Location `
+                @tagParams `
                 -ErrorAction Stop
 
             # Enable RBAC authorization
@@ -2894,12 +2989,17 @@ function New-NeologikStorageAccount {
         else {
             Write-Log "Creating Storage Account: $StorageAccountName..." -Level Info
             
+            # Resource tags (project#1173): applied on the create call; empty splat when disabled.
+            $tagParams = @{}
+            $resourceTags = Get-NeologikResourceTags
+            if ($resourceTags) { $tagParams['Tag'] = $resourceTags }
             $storageAccount = New-AzStorageAccount -ResourceGroupName $ResourceGroupName `
                 -Name $StorageAccountName `
                 -Location $Location `
                 -SkuName Standard_LRS `
                 -Kind StorageV2 `
                 -AllowBlobPublicAccess $false `
+                @tagParams `
                 -ErrorAction Stop
 
             Write-Log "Storage Account created successfully" -Level Success
@@ -3107,6 +3207,11 @@ function New-NeologikManagedIdentities {
 
         $createdIdentities = @()
 
+        # Resource tags (project#1173): applied on the create call; empty splat when disabled.
+        $tagParams = @{}
+        $resourceTags = Get-NeologikResourceTags
+        if ($resourceTags) { $tagParams['Tag'] = $resourceTags }
+
         foreach ($miDef in $managedIdentities) {
             $displayName = if ($miDef.DisplayName) { $miDef.DisplayName } else { $miDef.Name }
             Write-Log "Processing Managed Identity: $displayName..." -Level Info
@@ -3125,6 +3230,7 @@ function New-NeologikManagedIdentities {
                     $mi = New-AzUserAssignedIdentity -ResourceGroupName $ResourceGroupName `
                         -Name $miDef.Name `
                         -Location $Location `
+                        @tagParams `
                         -ErrorAction Stop
 
                     Write-Log "Managed Identity created successfully (Principal ID: $($mi.PrincipalId))" -Level Success
@@ -3331,6 +3437,10 @@ function Export-ConfigurationData {
     Write-Log "Exporting configuration data..." -Level Info
 
     try {
+        # Custom resource tags may have round-tripped through the checkpoint as an object;
+        # export whatever shape is held (empty object when tagging is disabled).
+        $exportCustomTags = if ($null -ne $script:ConfigData['ResourceTagsCustom']) { $script:ConfigData['ResourceTagsCustom'] } else { @{} }
+
         # Create ordered output with specific field order
         $orderedConfig = [ordered]@{
             'ScriptVersion' = $script:Version
@@ -3350,6 +3460,8 @@ function Export-ConfigurationData {
             'BudgetEmailAddresses' = $script:ConfigData['BudgetEmailAddresses']
             'BudgetEmailFrequency' = $script:ConfigData['BudgetEmailFrequency']
             'RegisterAllProviders' = $script:ConfigData['RegisterAllProviders']
+            'ResourceTagsEnabled' = [bool]$script:ConfigData['ResourceTagsEnabled']
+            'ResourceTagsCustom' = $exportCustomTags
             'InvitedGuestUsers' = $script:ConfigData['InvitedGuestUsers']
             'SecurityGroups' = $script:ConfigData['SecurityGroups']
             'AppRegistration' = $script:ConfigData['AppRegistration']
@@ -3930,6 +4042,25 @@ function Set-ConfigFromAnswerFile {
     elseif ("$rrpAns" -match '^(true|yes|y|1)$') { $script:ConfigData['RegisterAllProviders'] = $true }
     elseif ("$rrpAns" -match '^(false|no|n|0)$') { $script:ConfigData['RegisterAllProviders'] = $false }
     else { throw "registerResourceProviders '$rrpAns' must be true or false." }
+
+    # Resource tagging (project#1173): optional boolean (default: apply tags) plus optional
+    # custom tags as an object or a comma-separated key=value string. Invalid values throw
+    # so the caller falls back to interactive entry.
+    $rtAns = Get-Answer 'applyResourceTags'
+    if ($null -eq $rtAns) { $script:ConfigData['ResourceTagsEnabled'] = $true }
+    elseif ($rtAns -is [bool]) { $script:ConfigData['ResourceTagsEnabled'] = [bool]$rtAns }
+    elseif ("$rtAns" -match '^(true|yes|y|1)$') { $script:ConfigData['ResourceTagsEnabled'] = $true }
+    elseif ("$rtAns" -match '^(false|no|n|0)$') { $script:ConfigData['ResourceTagsEnabled'] = $false }
+    else { throw "applyResourceTags '$rtAns' must be true or false." }
+
+    $script:ConfigData['ResourceTagsCustom'] = @{}
+    if ($script:ConfigData['ResourceTagsEnabled']) {
+        $rtcAns = Get-Answer 'resourceTagsCustom'
+        if ($null -ne $rtcAns) {
+            try { $script:ConfigData['ResourceTagsCustom'] = ConvertTo-NeologikCustomTags $rtcAns }
+            catch { throw "resourceTagsCustom: $($_.Exception.Message)" }
+        }
+    }
 
     # Solution names were resolved at the top of this function (they drive every
     # computed default above).
@@ -4758,6 +4889,108 @@ function Start-NeologikOnboarding {
             Write-Host "  ✓ Will register the minimal set only — run Register-NeologikResourceProviders.ps1 before deploying" -ForegroundColor Green
         }
 
+        # Ask whether to tag created Azure resources (project#1173). Some tenants carry
+        # Azure Policies that DENY creation of untagged resources, so tags must be applied
+        # on the create call itself. Pre-filled from inputs.json 'applyResourceTags' and
+        # 'resourceTagsCustom' when present. Default: apply tags.
+        $tagsDefault = $true
+        $tagsAns = Get-AnswerBool 'applyResourceTags'
+        if ($null -ne $tagsAns) { $tagsDefault = $tagsAns }
+        $tagsDefaultText = if ($tagsDefault) { 'true' } else { 'false' }
+        $tagsValid = $false
+        while (-not $tagsValid) {
+            Write-Host ""
+            Write-Host "Apply Azure resource tags to created resources? (true/false)" -ForegroundColor Cyan
+            Write-Host "  Tags (Vendor, ApplicationName, ManagedBy, Environment, Solution," -ForegroundColor Gray
+            Write-Host "  DeploymentDate) are applied when each resource is created, satisfying" -ForegroundColor Gray
+            Write-Host "  Azure Policies that deny creation of untagged resources." -ForegroundColor Gray
+            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+            Write-Host $tagsDefaultText -ForegroundColor Yellow
+            Write-Host "  Press Enter to use default, or type true/false: " -NoNewline -ForegroundColor Gray
+            $tagsInput = Read-Host
+
+            if ([string]::IsNullOrWhiteSpace($tagsInput)) {
+                $script:ConfigData['ResourceTagsEnabled'] = $tagsDefault
+                $tagsValid = $true
+            }
+            elseif ($tagsInput.Trim() -match '^(true|yes|y|1)$') {
+                $script:ConfigData['ResourceTagsEnabled'] = $true
+                $tagsValid = $true
+            }
+            elseif ($tagsInput.Trim() -match '^(false|no|n|0)$') {
+                $script:ConfigData['ResourceTagsEnabled'] = $false
+                $tagsValid = $true
+            }
+            else {
+                Write-Host "  Invalid value. Enter true or false. Please try again." -ForegroundColor Red
+            }
+        }
+        if ($script:ConfigData['ResourceTagsEnabled']) {
+            Write-Host "  Using: true (resources are tagged at creation)" -ForegroundColor Green
+        }
+        else {
+            Write-Host "  Using: false (no tags are applied)" -ForegroundColor Green
+        }
+
+        # Optional customer tags, only when tagging is enabled. Comma-separated key=value
+        # pairs; custom pairs override the Neologik defaults on key collision.
+        $script:ConfigData['ResourceTagsCustom'] = @{}
+        if ($script:ConfigData['ResourceTagsEnabled']) {
+            $customPrefill = ''
+            $customAns = Get-Answer 'resourceTagsCustom'
+            if ($null -ne $customAns) {
+                try {
+                    $prefillTags = ConvertTo-NeologikCustomTags $customAns
+                    $customPrefill = (@($prefillTags.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ',')
+                }
+                catch {
+                    Write-Host "  Ignoring invalid resourceTagsCustom from answer file: $($_.Exception.Message)" -ForegroundColor Yellow
+                }
+            }
+            $customValid = $false
+            while (-not $customValid) {
+                Write-Host ""
+                Write-Host "Custom resource tags (optional):" -ForegroundColor Cyan
+                Write-Host "  Comma-separated key=value pairs; keys may use letters, digits, '.', '_'" -ForegroundColor Gray
+                Write-Host "  and '-'. Custom tags override the Neologik defaults on key collision." -ForegroundColor Gray
+                Write-Host "  Example: " -NoNewline -ForegroundColor Gray
+                Write-Host "CostCentre=IT123,Owner=Platform Team" -ForegroundColor Yellow
+                if ($customPrefill) {
+                    Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
+                    Write-Host $customPrefill -ForegroundColor Yellow
+                    Write-Host "  Press Enter to use pre-filled value, 'none' for no custom tags, or type new pairs: " -NoNewline -ForegroundColor Gray
+                }
+                else {
+                    Write-Host "  Press Enter for none, or type key=value pairs: " -NoNewline -ForegroundColor Gray
+                }
+                $customInput = Read-Host
+
+                if ([string]::IsNullOrWhiteSpace($customInput)) {
+                    $customInput = $customPrefill
+                }
+                elseif ($customInput.Trim() -match '^(none)$') {
+                    $customInput = ''
+                }
+
+                try {
+                    $script:ConfigData['ResourceTagsCustom'] = ConvertTo-NeologikCustomTags $customInput
+                    $customValid = $true
+                }
+                catch {
+                    Write-Host "  $($_.Exception.Message) Please try again." -ForegroundColor Red
+                    continue
+                }
+
+                if ($script:ConfigData['ResourceTagsCustom'].Count -gt 0) {
+                    $customSummary = (@($script:ConfigData['ResourceTagsCustom'].GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ', ')
+                    Write-Host "  Using custom tags: $customSummary" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "  No custom tags" -ForegroundColor Green
+                }
+            }
+        }
+
         # Solution names were resolved before the resource-name prompts above
         # (they drive every computed default).
             }
@@ -4833,6 +5066,12 @@ function Start-NeologikOnboarding {
         Write-Host "  Cost-Report Email:    " -NoNewline; Write-Host $budgetEmailSummary -ForegroundColor Yellow
         $providerSummary = if ($script:ConfigData['RegisterAllProviders']) { 'All providers' } else { 'Minimal set (run Register-NeologikResourceProviders.ps1 before deploying)' }
         Write-Host "  Provider Registration:" -NoNewline; Write-Host " $providerSummary" -ForegroundColor Yellow
+        $tagsSummary = if ($script:ConfigData['ResourceTagsEnabled']) {
+            $customCount = @($script:ConfigData['ResourceTagsCustom'].Keys).Count
+            if ($customCount -gt 0) { "Yes ($customCount custom)" } else { 'Yes' }
+        }
+        else { 'No' }
+        Write-Host "  Apply Resource Tags:  " -NoNewline; Write-Host $tagsSummary -ForegroundColor Yellow
         $guestSummary = if ($script:ConfigData['SkipGuestInvitation']) { 'No (skipped)' } else { 'Yes' }
         Write-Host "  Invite Neologik Guests:" -NoNewline; Write-Host " $guestSummary" -ForegroundColor Yellow
         if ($script:ConfigData['UseExistingServicePrincipal']) {
@@ -4882,6 +5121,12 @@ function Start-NeologikOnboarding {
             }
             if (-not $script:ConfigData.ContainsKey('RegisterAllProviders')) {
                 $script:ConfigData['RegisterAllProviders'] = $false
+            }
+            # Resource tagging (project#1173) may be absent on older checkpoints - default to
+            # disabled so a resumed pre-feature run keeps its original untagged behaviour.
+            if (-not $script:ConfigData.ContainsKey('ResourceTagsEnabled')) {
+                $script:ConfigData['ResourceTagsEnabled'] = $false
+                $script:ConfigData['ResourceTagsCustom'] = @{}
             }
             # Provisioning decisions may be absent on older checkpoints — default them. The SP
             # secret is not persisted, so a resumed run cannot re-store it in Key Vault (the

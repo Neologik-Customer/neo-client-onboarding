@@ -167,11 +167,17 @@ Questions you'll be asked:
    - Can contain letters, numbers, underscores, hyphens, periods, and parentheses
    - Cannot end with a period
 
-8. **Bot Count**: How many bots will there be? (1-10)
+8. **Apply Azure Resource Tags**: "Apply Azure resource tags to created resources? (true/false)"
+   - Default is true
+   - When true, every resource the script creates (resource group, Key Vault, storage account, managed identities) is tagged at creation with Vendor, ApplicationName, ManagedBy, Environment, Solution and DeploymentDate - required by tenants whose Azure Policies deny creation of untagged resources
+   - When true, you can optionally add custom tags as comma-separated key=value pairs (keys use letters, digits, '.', '_' and '-'; custom tags override the defaults)
+   - When false, no tags are applied
+
+9. **Bot Count**: How many bots will there be? (1-10)
    - Default is 1
    - Used to create separate user groups for each bot
 
-9. **Bot Configuration**: For each bot, you'll be asked:
+10. **Bot Configuration**: For each bot, you'll be asked:
     - **Full Bot Name**: Descriptive name for the bot (e.g., "Customer Service Bot")
       - Letters (upper or lower case), numbers, spaces, dashes and underscores; 30 character limit
       - Used in security group names

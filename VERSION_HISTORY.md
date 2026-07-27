@@ -14,6 +14,25 @@ This document tracks the version history of the Neologik customer onboarding scr
 **Ticket**: https://github.com/Neologik-AI/project/issues/1063
 
 ### Changes
+- **Gated Azure resource tagging at onboarding (project#1173,
+  https://github.com/Neologik-AI/project/issues/1173)**: new Step 6 prompt
+  "Apply Azure resource tags to created resources? (true/false)", default
+  true (answer-file keys `applyResourceTags` / `resourceTagsCustom`), with an
+  optional follow-up prompt for customer tags as comma-separated key=value
+  pairs (keys letters/digits/`._-`; keys and values must not contain `,` or
+  `=`). When enabled, the resource group, Key Vault, deployment storage
+  account and both user-assigned managed identities are tagged AT CREATION
+  (`New-Az* -Tag`) with Vendor, ApplicationName, ManagedBy, Environment
+  (`{org}{envtype}`), Solution (solution short name) and DeploymentDate,
+  plus the custom pairs (custom overrides defaults on key collision) - so
+  tenants whose Azure Policies DENY creation of untagged resources accept
+  them. When disabled, the create calls pass no `-Tag` parameter at all
+  (behaviour unchanged). Choices are exported as `ResourceTagsEnabled` /
+  `ResourceTagsCustom` in the Configuration JSON for the later environment
+  setup to carry forward, and participate in checkpoint/resume (checkpoints
+  written before this feature default to disabled on resume). Entra objects
+  (security groups, app registrations, service principals) are not taggable
+  ARM resources and are untouched.
 - **Naming convention alignment (project#1063)**: all computed names now follow
   the platform Neologik-standard convention; the environment type (dev/prd)
   NEVER appears in names (it only drives sizing/defaults). Canonical tokens:
@@ -66,6 +85,9 @@ This document tracks the version history of the Neologik customer onboarding scr
   as this change's base.
 
 ### Files Changed
+- Modified: [Install-NeologikEnvironment.ps1](Install-NeologikEnvironment.ps1) - resource tagging (project#1173): `Get-NeologikResourceTags` / `ConvertTo-NeologikCustomTags` helpers, Step 6 tagging prompts + summary line, `-Tag` splatting on the four create calls, `Set-ConfigFromAnswerFile` keys, checkpoint back-compat default, `ResourceTagsEnabled` / `ResourceTagsCustom` in the config export
+- Modified: [inputs-example.json](inputs-example.json) - `applyResourceTags` / `resourceTagsCustom` keys + note (project#1173)
+- Modified: [README.md](README.md) - resource-tags prompt documented in the script inputs list (project#1173)
 - Modified: [Install-NeologikEnvironment.ps1](Install-NeologikEnvironment.ps1) — `Test-ManagedIdentityNameError` validator; answer-file + interactive resolution into `ConfigData['ScriptRunnerIdentityName']`; summary line; `New-NeologikManagedIdentities -ScriptRunnerIdentityName` parameter (falls back to the computed name for pre-existing checkpoints)
 - Modified: [.github/workflows/prepare-onboarding-zip.yml](.github/workflows/prepare-onboarding-zip.yml) — `scriptRunnerIdentityName` input, validation, inputs.json emission
 - Modified: [inputs-example.json](inputs-example.json) — `scriptRunnerIdentityName` field + naming note
