@@ -2473,7 +2473,7 @@ function New-NeologikKeyVault {
 function New-NeologikNceAuthApp {
     <#
     .SYNOPSIS
-        Creates the 'Neologik NCE Auth' app registration and assigns the
+        Creates the 'Neologik Platform Sign-in' app registration and assigns the
         Harness user group to it (project#1084).
 
     .DESCRIPTION
@@ -2506,7 +2506,7 @@ function New-NeologikNceAuthApp {
         [string]$KeyVaultName
     )
 
-    Write-Log "Creating the Neologik NCE Auth app registration (NCE login)..." -Level Info
+    Write-Log "Creating the Neologik Platform Sign-in app registration (NCE + App portal login)..." -Level Info
 
     try {
         Import-Module Microsoft.Graph.Applications -ErrorAction Stop
@@ -2519,15 +2519,30 @@ function New-NeologikNceAuthApp {
         # resolves the app by uniqueName ('sp-admin-<solutionName>') and the
         # Key Vault secret name derives from it.
         $uniqueName = "sp-admin-$solutionName"
-        $displayName = "Neologik NCE Auth - $shortName"
+        $displayName = "Neologik Platform Sign-in - $shortName"
         $redirectUri = "https://$hostName/nce"
 
-        $existingApp = Get-MgApplication -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
+        # Resolve by the immutable Graph uniqueName - the same key the
+        # deployment pipeline (ensure-app-regs.sh) uses. A display-name
+        # lookup would miss an app the pipeline has since renamed and
+        # attempt a duplicate create.
+        $existingApp = $null
+        try {
+            $found = Invoke-MgGraphRequest -Method GET -Uri "v1.0/applications(uniqueName='$uniqueName')" -ErrorAction Stop
+            $existingApp = Get-MgApplication -ApplicationId $found.id -ErrorAction Stop
+        }
+        catch {
+            $existingApp = $null   # 404 = not found = create below
+        }
         $secretText = $null
 
         if ($existingApp) {
-            Write-Log "App Registration '$displayName' already exists (Client ID: $($existingApp.AppId))" -Level Info
+            Write-Log "App Registration '$($existingApp.DisplayName)' already exists (Client ID: $($existingApp.AppId))" -Level Info
             $app = $existingApp
+            if ($app.DisplayName -ne $displayName) {
+                Update-MgApplication -ApplicationId $app.Id -DisplayName $displayName -ErrorAction Stop
+                Write-Log "App Registration renamed to '$displayName'" -Level Info
+            }
         }
         else {
             Write-Log "Creating App Registration: $displayName..." -Level Info

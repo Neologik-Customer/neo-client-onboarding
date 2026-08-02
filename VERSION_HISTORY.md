@@ -14,6 +14,28 @@ This document tracks the version history of the Neologik customer onboarding scr
 **Ticket**: https://github.com/Neologik-AI/project/issues/1063
 
 ### Changes
+- **Update-NeologikEnvironmentAccess.ps1 - the single Global Administrator
+  script for v5 migration windows (project#1258,
+  https://github.com/Neologik-AI/project/issues/1258)**: idempotent,
+  verification-first, run by the customer GA. `-Phase Window` (default):
+  grants/verifies the deployment SP's 8 Microsoft Graph app roles, assigns
+  the NCE user group to the 'Neologik Platform Sign-in' enterprise app
+  (with direct-membership warning), verifies tenant-wide admin consent and
+  prints the two-parameter consent URL when missing. `-Phase PostWindow`
+  (pre-#774 environments, only after verified migration): ensures the
+  7-role RG-scoped set first, then removes subscription-scoped
+  Contributor + User Access Administrator and the Application
+  Administrator directory role. Inputs from the onboarding Configuration
+  JSON (`-ConfigurationFile`) or explicit parameters.
+- **Sign-in app renamed 'Neologik Platform Sign-in - <shortname>'
+  (owner decision 2026-08-02, project#1239)**: it fronts NCE and every
+  bespoke App portal, so the NCE-specific name was misleading on
+  Microsoft sign-in/consent screens. New-NeologikNceAuthApp now resolves
+  an existing app by its immutable Graph uniqueName (`sp-admin-
+  <solutionName>`) instead of display name - a display-name lookup would
+  miss a pipeline-renamed app and attempt a duplicate - and renames a
+  found app to the current standard. Cosmetic only: clientId, uniqueName,
+  scopes and consent untouched.
 - **Gated Azure resource tagging at onboarding (project#1173,
   https://github.com/Neologik-AI/project/issues/1173)**: new Step 6 prompt
   "Apply Azure resource tags to created resources? (true/false)", default
