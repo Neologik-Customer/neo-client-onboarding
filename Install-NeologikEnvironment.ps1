@@ -2085,15 +2085,21 @@ function Set-AppRegistrationRoles {
             }
         }
 
-        # Subscription-scoped roles for the deployment SP. Every WRITE operation is RG-scoped
-        # (cost-management email, provider/feature registration and the resource group are
-        # handled by this onboarding script run as Owner; RG-scoped Contributor plus 'Role
-        # Based Access Control Administrator' below cover the deployment writes). 'Reader' is
-        # the one subscription-scoped role required: the infrastructure deploy's SKU/quota
-        # pre-flight reads subscription/location-level usage APIs (e.g. az search usage list =
-        # Microsoft.Search/locations/usages/read) that RG scope does not grant. Reader is
-        # read-only, so it stays within the least-privilege intent.
-        $roles = @('Reader')
+        # Subscription-scoped roles for the deployment SP. Resource writes are RG-scoped
+        # (provider/feature registration and the resource group are handled by this
+        # onboarding script run as Owner; RG-scoped Contributor plus 'Role Based Access
+        # Control Administrator' below cover the deployment writes). Two subscription-scoped
+        # roles are required:
+        #   - 'Reader': the infrastructure deploy's SKU/quota pre-flight reads
+        #     subscription/location-level usage APIs (e.g. az search usage list =
+        #     Microsoft.Search/locations/usages/read) that RG scope does not grant.
+        #   - 'Cost Management Contributor': lets the deployment pipeline keep the
+        #     subscription-scoped cost report emails current after onboarding creates
+        #     them (see Set-NeologikCostManagementEmail and neo-infrastructure
+        #     scripts/ensure-cost-report-emails.sh, project#1215). It manages cost
+        #     configuration only (budgets, views, scheduled actions) and grants no
+        #     control over resources, staying within the least-privilege intent.
+        $roles = @('Reader', 'Cost Management Contributor')
 
         foreach ($roleName in $roles) {
             Write-Log "Assigning $roleName role..." -Level Info
@@ -2844,6 +2850,12 @@ function Set-NeologikCostManagementEmail {
         subscription-scoped Contributor (Resources/deployments write at subscription scope).
         Creating it here removes that requirement. Mirrors the Bicep: skips Sponsorship/Student
         subscriptions, creates one private cost view plus one scheduled action per recipient.
+
+        After onboarding, the deployment pipeline keeps these resources current on every infra
+        deploy (neo-infrastructure scripts/ensure-cost-report-emails.sh, same resource names,
+        idempotent PUTs) via the deployment SP's subscription-scoped 'Cost Management
+        Contributor' grant assigned by this script (project#1215). Recipient changes after
+        onboarding are therefore an env-file edit plus a redeploy, not an Owner action.
     #>
     [CmdletBinding()]
     param(

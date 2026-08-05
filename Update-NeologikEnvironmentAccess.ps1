@@ -33,12 +33,16 @@
          interactive so you see exactly what you are approving.
 
     Phase 'PostWindow' - run ONLY after Neologik confirms the migration is
-    verified (older environments only; no-op on the current permission
-    model):
+    verified (on an already-hardened environment the only change it makes
+    is the new 'Cost Management Contributor' grant below):
       4. Permission reduction: first ensures the deployment identity holds
-         the narrow resource-group-scoped role set, then removes its legacy
-         broad grants - the Application Administrator directory role and
-         the subscription-scoped Contributor and User Access Administrator
+         the narrow resource-group-scoped role set and the two retained
+         subscription-scoped roles (read-only Reader for SKU/quota
+         pre-flight; Cost Management Contributor so the deployment
+         pipeline can keep the cost report emails current - cost
+         configuration only), then removes its legacy broad grants - the
+         Application Administrator directory role and the
+         subscription-scoped Contributor and User Access Administrator
          assignments. Narrow roles are applied before broad ones are
          removed so deployments never lose access in between.
 
@@ -116,7 +120,7 @@ $ErrorActionPreference = 'Stop'
 
 # The eight Microsoft Graph application roles the deployment identity needs.
 # Canonical inventory (names, ids, where each is used):
-# neo-bot-service/docs/NEOLOGIK_HARNESS_DEPLOYMENT_SP_PERMISSIONS.md.
+# neo-bot-service/docs/NEOLOGIK_PLATFORM_DEPLOYMENT_SP_PERMISSIONS.md.
 # Matched by role value against the Graph service principal at runtime.
 $script:RequiredGraphRoles = @(
     'Application.Read.All',
@@ -139,6 +143,18 @@ $script:RequiredRgRoles = @(
     'Azure Kubernetes Service RBAC Cluster Admin',
     'Monitoring Contributor',
     'Role Based Access Control Administrator'
+)
+
+# The two subscription-scoped roles the deployment identity keeps under the
+# least-privilege model. Must match Install-NeologikEnvironment.ps1.
+# 'Reader': the infrastructure deploy's SKU/quota pre-flight reads
+# subscription/location-level usage APIs that RG scope does not grant.
+# 'Cost Management Contributor': lets the deployment pipeline keep the
+# subscription-scoped cost report emails current (project#1215) - cost
+# configuration only, no control over resources.
+$script:RequiredSubRoles = @(
+    'Reader',
+    'Cost Management Contributor'
 )
 
 $script:GraphSpAppId = '00000003-0000-0000-c000-000000000000'
@@ -352,6 +368,24 @@ else {
             New-AzRoleAssignment -ObjectId $deploySp.Id -RoleDefinitionName $roleName -Scope $rgScope | Out-Null
             Write-Log "  RG role '$roleName' - CREATED" -Level Success
             Add-Summary "RG role: $roleName" 'Created'
+        }
+    }
+
+    # 4a2. ensure the retained subscription-scoped roles (still before any
+    # removal - narrow before broad). 'Cost Management Contributor' is new at
+    # v5 (project#1215): on an already-hardened environment this is the one
+    # assignment this phase creates.
+    foreach ($roleName in $script:RequiredSubRoles) {
+        $assignment = Get-AzRoleAssignment -ObjectId $deploySp.Id -RoleDefinitionName $roleName -Scope $subScope -ErrorAction SilentlyContinue |
+            Where-Object { $_.Scope -eq $subScope }
+        if ($assignment) {
+            Write-Log "  subscription role '$roleName' - already in place" -Level Success
+            Add-Summary "Sub role: $roleName" 'Already in place'
+        }
+        else {
+            New-AzRoleAssignment -ObjectId $deploySp.Id -RoleDefinitionName $roleName -Scope $subScope | Out-Null
+            Write-Log "  subscription role '$roleName' - CREATED" -Level Success
+            Add-Summary "Sub role: $roleName" 'Created'
         }
     }
 
