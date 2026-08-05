@@ -27,7 +27,6 @@ Up-front, before any prompts (`Test-RequiredPermissions`):
 | Storage account + blob container | For certificates |
 | Managed identities | Script Runner Service Connection; SQL Managed Identity |
 | Azure resource providers | Registered subscription-wide |
-| Cost Management email | Subscription-scoped scheduled report (created here as Owner; kept current afterwards by the deployment pipeline via the SP's Cost Management Contributor grant) |
 | Config export | `NeologikConfiguration_<timestamp>.json` handoff artifact |
 
 ## Azure access it grants
@@ -36,7 +35,7 @@ All grants are **resource-group-scoped** unless noted. The pipeline SP holds two
 
 | Principal | Scope | Roles |
 |---|---|---|
-| **Deployment SP** (app reg) | Subscription | Reader (SKU/quota pre-flight reads) · Cost Management Contributor (pipeline keeps the cost report emails current — cost configuration only, no resource control) |
+| **Deployment SP** (app reg) | Subscription | Reader (SKU/quota pre-flight reads) · Cost Management Contributor (the deployment pipeline creates and maintains the subscription-scoped cost report emails — cost configuration only, no resource control) |
 | **Deployment SP** (app reg) | Resource group | Contributor · Key Vault Certificates Officer · Key Vault Secrets Officer · Storage Blob Data Contributor · AKS RBAC Cluster Admin · Monitoring Contributor · **Role Based Access Control Administrator** |
 | **Deployment SP** | Entra / Graph | `Application.Read.All` + `Application.ReadWrite.OwnedBy` (replaces tenant-wide *Application Administrator*) |
 | **Admin User Group** | Resource group | Contributor · AKS Cluster Admin Role · AKS RBAC Cluster Admin · Key Vault Administrator · Storage Blob Data Owner · Storage Table Data Contributor · Cognitive Services Data Reader · Cognitive Services OpenAI Contributor · Search Index Data Reader · Azure AI Developer |

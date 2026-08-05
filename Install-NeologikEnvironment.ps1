@@ -2093,12 +2093,12 @@ function Set-AppRegistrationRoles {
         #   - 'Reader': the infrastructure deploy's SKU/quota pre-flight reads
         #     subscription/location-level usage APIs (e.g. az search usage list =
         #     Microsoft.Search/locations/usages/read) that RG scope does not grant.
-        #   - 'Cost Management Contributor': lets the deployment pipeline keep the
-        #     subscription-scoped cost report emails current after onboarding creates
-        #     them (see Set-NeologikCostManagementEmail and neo-infrastructure
-        #     scripts/ensure-cost-report-emails.sh, project#1215). It manages cost
-        #     configuration only (budgets, views, scheduled actions) and grants no
-        #     control over resources, staying within the least-privilege intent.
+        #   - 'Cost Management Contributor': lets the deployment pipeline create and
+        #     maintain the subscription-scoped cost report emails (neo-infrastructure
+        #     scripts/ensure-cost-report-emails.sh, project#1215; onboarding only
+        #     collects the recipients). It manages cost configuration only (budgets,
+        #     views, scheduled actions) and grants no control over resources, staying
+        #     within the least-privilege intent.
         $roles = @('Reader', 'Cost Management Contributor')
 
         foreach ($roleName in $roles) {
@@ -2836,141 +2836,6 @@ function Register-AllResourceProviders {
         }
     } catch {
         Write-Log "Failed to register Microsoft.ContainerService/AzureLinuxCVMPreview feature: $_" -Level Warning
-    }
-}
-
-function Set-NeologikCostManagementEmail {
-    <#
-    .SYNOPSIS
-        Creates the subscription-scoped Cost Management scheduled email (daily cost report) for
-        the environment, run as the subscription Owner during onboarding.
-    .DESCRIPTION
-        Previously provisioned by neo-infrastructure (modCostManagementScheduledEmail.bicep) as a
-        subscription-scoped Bicep module, which forced the deployment service connection to hold
-        subscription-scoped Contributor (Resources/deployments write at subscription scope).
-        Creating it here removes that requirement. Mirrors the Bicep: skips Sponsorship/Student
-        subscriptions, creates one private cost view plus one scheduled action per recipient.
-
-        After onboarding, the deployment pipeline keeps these resources current on every infra
-        deploy (neo-infrastructure scripts/ensure-cost-report-emails.sh, same resource names,
-        idempotent PUTs) via the deployment SP's subscription-scoped 'Cost Management
-        Contributor' grant assigned by this script (project#1215). Recipient changes after
-        onboarding are therefore an env-file edit plus a redeploy, not an Owner action.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]  [string]$SubscriptionId,
-        [Parameter(Mandatory = $true)]  [string]$SolutionName,
-        [Parameter(Mandatory = $false)] [string[]]$EmailAddresses = @(),
-        [Parameter(Mandatory = $false)] [string]$Frequency = 'Daily'
-    )
-
-    if (-not $EmailAddresses -or $EmailAddresses.Count -eq 0) {
-        Write-Log "No budget cost-report email addresses configured - skipping Cost Management scheduled email" -Level Info
-        return
-    }
-
-    # Cost Management scheduled actions are not supported on Sponsorship/Student subscriptions
-    $subName = (Get-AzContext).Subscription.Name
-    if ($subName -and ($subName.ToLower() -match 'sponsorship|student')) {
-        Write-Log "Subscription '$subName' is Sponsorship/Student - Cost Management schedules not supported, skipping" -Level Warning
-        return
-    }
-
-    Write-Log "Configuring Cost Management scheduled email report..." -Level Info
-
-    $subScope   = "/subscriptions/$SubscriptionId"
-    $apiVersion = '2023-11-01'
-
-    # Private cost view (names truncated to 25 chars to match the Bicep)
-    $viewName = "daily-costs-$SolutionName"
-    if ($viewName.Length -gt 25) { $viewName = $viewName.Substring(0, 25) }
-    $viewDisplay = "Costs - $SolutionName"
-    if ($viewDisplay.Length -gt 25) { $viewDisplay = $viewDisplay.Substring(0, 25) }
-
-    $viewBody = @{
-        properties = @{
-            displayName = $viewDisplay
-            scope       = $subScope
-            chart       = 'StackedColumn'
-            accumulated = 'false'
-            metric      = 'ActualCost'
-            kpis        = @()
-            pivots      = @(
-                @{ type = 'Dimension'; name = 'ServiceName' },
-                @{ type = 'Dimension'; name = 'ResourceGroupName' },
-                @{ type = 'Dimension'; name = 'ResourceLocation' }
-            )
-            dateRange   = 'MonthToDate'
-            query       = @{
-                type    = 'ActualCost'
-                dataSet = @{
-                    granularity = 'Daily'
-                    aggregation = @{ totalCost = @{ name = 'Cost'; function = 'Sum' } }
-                    grouping    = @(@{ type = 'Dimension'; name = 'ResourceId' })
-                }
-                timeframe = 'MonthToDate'
-            }
-        }
-    } | ConvertTo-Json -Depth 12
-
-    $viewPath = "$subScope/providers/Microsoft.CostManagement/views/$viewName`?api-version=$apiVersion"
-    try {
-        $resp = Invoke-AzRestMethod -Method PUT -Path $viewPath -Payload $viewBody -ErrorAction Stop
-        if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) {
-            Write-Log "Cost Management view '$viewName' created/updated" -Level Success
-        }
-        else {
-            Write-Log "Cost Management view creation returned HTTP $($resp.StatusCode): $($resp.Content)" -Level Warning
-            return
-        }
-    }
-    catch {
-        Write-Log "Failed to create Cost Management view: $_" -Level Warning
-        return
-    }
-
-    $viewId    = "$subScope/providers/Microsoft.CostManagement/views/$viewName"
-    $startDate = (Get-Date).ToString('yyyy-MM-dd')
-    $endDate   = (Get-Date).AddDays(364).ToString('yyyy-MM-dd')
-
-    $index = 0
-    foreach ($email in $EmailAddresses) {
-        $index++
-        $actionName = "schedule-cost-email-$SolutionName-$index"
-        $actionBody = @{
-            kind       = 'Email'
-            properties = @{
-                displayName       = "$Frequency Cost Report - $SolutionName ($index)"
-                status            = 'Enabled'
-                viewId            = $viewId
-                schedule          = @{
-                    frequency = $Frequency
-                    startDate = "${startDate}T00:00:00Z"
-                    endDate   = "${endDate}T23:59:59Z"
-                }
-                notificationEmail = $email
-                notification      = @{
-                    to      = @($email)
-                    subject = "Azure $Frequency Cost Report - $SolutionName"
-                }
-                scope             = $subScope
-            }
-        } | ConvertTo-Json -Depth 12
-
-        $actionPath = "$subScope/providers/Microsoft.CostManagement/scheduledActions/$actionName`?api-version=$apiVersion"
-        try {
-            $resp = Invoke-AzRestMethod -Method PUT -Path $actionPath -Payload $actionBody -ErrorAction Stop
-            if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) {
-                Write-Log "Cost report scheduled action '$actionName' created for $email" -Level Success
-            }
-            else {
-                Write-Log "Scheduled action creation returned HTTP $($resp.StatusCode): $($resp.Content)" -Level Warning
-            }
-        }
-        catch {
-            Write-Log "Failed to create scheduled action for ${email}: $_" -Level Warning
-        }
     }
 }
 
@@ -4050,7 +3915,8 @@ function Set-ConfigFromAnswerFile {
     # created post-deployment in the Harness admin tool.
 
     # Budget / cost-report email recipients (optional list; falls back to the built-in default).
-    # An empty list disables the scheduled cost-report email (see Set-NeologikCostManagementEmail).
+    # An empty list disables the scheduled cost-report email (created and maintained
+    # by the infrastructure deployment - neo-infrastructure scripts/ensure-cost-report-emails.sh).
     $bcrAns = Get-Answer 'budgetCostReportEmailRecipients'
     if ($null -ne $bcrAns) {
         $script:ConfigData['BudgetEmailAddresses'] = @(Resolve-BudgetEmailRecipients $bcrAns)
@@ -4827,12 +4693,13 @@ function Start-NeologikOnboarding {
         # (the deployment SP holds Group.Create for this).
 
         # Get Budget Cost-Report Email Recipient(s)
-        # A daily Azure Cost Management report is emailed to these addresses. This used to be
-        # provisioned by the infrastructure deployment as a subscription-scoped Bicep module; it
-        # is now created here (run as Owner, at Step 13b) so the deployment service connection
-        # needs no subscription-scoped role. Pre-filled from inputs.json
-        # 'budgetCostReportEmailRecipients' when present. Leave blank for the default, or 'none'
-        # to disable.
+        # A daily Azure Cost Management report is emailed to these addresses. The report
+        # (cost view + scheduled actions) is created and maintained by the infrastructure
+        # deployment (neo-infrastructure scripts/ensure-cost-report-emails.sh), authorised
+        # by the deployment SP's subscription-scoped 'Cost Management Contributor' grant
+        # assigned by this script (project#1215); onboarding only collects the recipients.
+        # Pre-filled from inputs.json 'budgetCostReportEmailRecipients' when present.
+        # Leave blank for the default, or 'none' to disable.
         $defaultBudgetEmail = @($script:DefaultBudgetCostReportEmailRecipients)
         $budgetAns = Get-Answer 'budgetCostReportEmailRecipients'
         if ($null -ne $budgetAns) {
@@ -5257,12 +5124,11 @@ function Start-NeologikOnboarding {
         Register-AllResourceProviders -RegisterAll:$script:ConfigData['RegisterAllProviders']
         Complete-OnboardingStep 'ResourceProviders'
 
-        # Step 13b: Configure subscription-scoped Cost Management scheduled email (run as Owner)
-        Set-NeologikCostManagementEmail -SubscriptionId $script:ConfigData['SubscriptionId'] `
-            -SolutionName $script:ConfigData['SolutionName'] `
-            -EmailAddresses $script:ConfigData['BudgetEmailAddresses'] `
-            -Frequency $script:ConfigData['BudgetEmailFrequency']
-        Complete-OnboardingStep 'CostManagementEmail'
+        # (The subscription-scoped Cost Management scheduled email is created and
+        # maintained by the infrastructure deployment - neo-infrastructure
+        # scripts/ensure-cost-report-emails.sh - authorised by the SP's
+        # 'Cost Management Contributor' grant above, project#1215. Onboarding only
+        # collects the recipients, exported via the Configuration JSON.)
 
         # Step 14: Create Storage Account and blob container for certificates.
         # Name was resolved during configuration gathering (answer file / prompt / computed).

@@ -14,20 +14,26 @@ This document tracks the version history of the Neologik customer onboarding scr
 **Ticket**: https://github.com/Neologik-AI/project/issues/1063
 
 ### Changes
-- **Deployment SP gains subscription-scoped 'Cost Management Contributor'
-  (project#1215, https://github.com/Neologik-AI/project/issues/1215)**:
-  Install-NeologikEnvironment.ps1 now assigns it alongside the existing
-  subscription-scoped Reader, and Update-NeologikEnvironmentAccess.ps1
-  -Phase PostWindow ensures both retained subscription-scoped roles
-  (before removing the legacy broad grants) so existing environments pick
-  the grant up at their v5 migration. It authorises the deployment
-  pipeline (neo-infrastructure scripts/ensure-cost-report-emails.sh) to
-  keep the subscription-scoped cost report emails current after
-  onboarding creates them - recipient changes become an env-file edit
-  plus redeploy instead of a manual subscription-Owner action. The role
-  manages cost configuration only (budgets, views, scheduled actions),
-  no resource control. secure-overview.md updated to document both
-  subscription-scoped roles.
+- **Cost report emails move to the deployment pipeline; deployment SP
+  gains subscription-scoped 'Cost Management Contributor' (project#1215,
+  https://github.com/Neologik-AI/project/issues/1215)**:
+  Install-NeologikEnvironment.ps1 no longer creates the subscription-
+  scoped Cost Management scheduled email (Set-NeologikCostManagementEmail
+  and onboarding step 13b removed; old checkpoints resume unaffected -
+  the step list is record-only). Instead it assigns the deployment SP
+  'Cost Management Contributor' at subscription scope alongside the
+  existing Reader, and the infrastructure deployment creates and
+  maintains the report (neo-infrastructure
+  scripts/ensure-cost-report-emails.sh) - one owner of the resource
+  definition, and recipient changes become an env-file edit plus
+  redeploy instead of a manual subscription-Owner action. Onboarding
+  still collects the recipients (Configuration JSON export unchanged).
+  Update-NeologikEnvironmentAccess.ps1 -Phase PostWindow ensures both
+  retained subscription-scoped roles (before removing the legacy broad
+  grants) so existing environments pick the grant up at their v5
+  migration. The role manages cost configuration only (budgets, views,
+  scheduled actions), no resource control. secure-overview.md updated
+  to document both subscription-scoped roles.
 - **Update-NeologikEnvironmentAccess.ps1 - the single Global Administrator
   script for v5 migration windows (project#1258,
   https://github.com/Neologik-AI/project/issues/1258)**: idempotent,
