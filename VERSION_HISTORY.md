@@ -9,6 +9,27 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - NCE delegation model groups (project#1341)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1341
+**Date**: 2026-08-06
+
+- Group creation (Step 10): the NCE group is now created as
+  `Neologik NCE Contributors - {org}-{env}` (NCE contributor role); a
+  pre-existing `Neologik NCE User Group`/legacy-named group is RENAMED in
+  place (object id and memberships unchanged). New group
+  `Neologik NCE Admins - {org}-{env}` (NCE admin role - Blueprints,
+  Audit, Admin page), seeded with the current user + Neologik guests
+  like the contributors group.
+- Auth app (Step 14b): BOTH NCE role groups are assigned to the
+  `Neologik Platform Sign-in` enterprise app so members' tokens carry
+  the groups claim; `NceAuthApp.AssignedGroups` (list) replaces
+  `AssignedGroup`.
+- Post-onboarding: put the admins group object id in `NEO_NCE_ADMINS`
+  and the contributors group id in `NEO_NCE_USERS` in the environment's
+  neo-env-config variables file (bootstrap-if-empty seeding at database
+  deploy).
+
 ## Unreleased
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1063

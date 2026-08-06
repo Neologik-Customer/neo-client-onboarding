@@ -1482,18 +1482,25 @@ function New-NeologikSecurityGroups {
                      else { "neo$($OrganizationCode.ToLower())$EnvironmentIndex" }
         $groupSuffix = if ([string]::IsNullOrWhiteSpace($shortName)) { "" } else { " - $shortName" }
 
-        # v5 (Neologik Harness): one default user group. Per-agent groups are
-        # created later by channel provisioning in the Harness admin tool (the
-        # deployment SP holds Group.Create).
+        # v5: one default user group. Per-agent groups are created later by
+        # channel provisioning in the NCE (the deployment SP holds
+        # Group.Create).
         $groups = @()
         $groups += @{
             Name = "Neologik User Group$groupSuffix"
-            Description = 'Default Neologik users group - assign to agent channels created in the Neologik Harness admin tool'
+            Description = 'Default Neologik users group - assign to agent channels created in the NCE'
         }
-        # Add NCE and Admin groups (unchanged)
+        # NCE delegation model (project#1341): contributors (the pre-v5 NCE
+        # group renamed - object id keyed everywhere, so renaming on sight is
+        # safe) and the new admins group gating Blueprints/Audit/Admin.
         $groups += @{
-            Name = "Neologik Harness User Group$groupSuffix"
-            Description = 'Users who need access to the Neologik Harness admin tool'
+            Name = "Neologik NCE Contributors$groupSuffix"
+            Description = 'NCE contributor role - create and change platform configuration in the Neologik Context Engine'
+            PreviousNames = @("Neologik NCE User Group$groupSuffix", "Neologik Harness User Group$groupSuffix")
+        }
+        $groups += @{
+            Name = "Neologik NCE Admins$groupSuffix"
+            Description = 'NCE admin role - full access including Blueprints, Audit and the Admin page'
         }
         $groups += @{
             Name = "Neologik Admin User Group$groupSuffix"
@@ -1505,8 +1512,21 @@ function New-NeologikSecurityGroups {
         foreach ($groupDef in $groups) {
             Write-Log "Processing group: $($groupDef.Name)..." -Level Info
 
-            # Check if group exists
+            # Check if group exists (current name first, then any previous
+            # name - found legacy groups are renamed in place so existing
+            # environments keep their object ids and memberships)
             $existingGroup = Get-MgGroup -Filter "displayName eq '$($groupDef.Name)'" -ErrorAction SilentlyContinue
+            if (-not $existingGroup -and $groupDef.PreviousNames) {
+                foreach ($previousName in $groupDef.PreviousNames) {
+                    $existingGroup = Get-MgGroup -Filter "displayName eq '$previousName'" -ErrorAction SilentlyContinue
+                    if ($existingGroup) {
+                        Write-Log "Renaming group '$previousName' -> '$($groupDef.Name)' (display name only; object id unchanged)" -Level Info
+                        Update-MgGroup -GroupId $existingGroup.Id -DisplayName $groupDef.Name -Description $groupDef.Description -ErrorAction Stop
+                        $existingGroup = Get-MgGroup -GroupId $existingGroup.Id -ErrorAction Stop
+                        break
+                    }
+                }
+            }
 
             if ($existingGroup) {
                 Write-Log "Group '$($groupDef.Name)' already exists (ID: $($existingGroup.Id))" -Level Info
@@ -2677,28 +2697,32 @@ function New-NeologikNceAuthApp {
             Write-Log "Client secret stored in Key Vault as '$kvSecretName'" -Level Success
         }
 
-        # Assign the Harness user group so its members' tokens carry the
-        # groups claim NCE authorizes from. Default app role, direct groups
-        # only (nested membership does not expand into the claim).
-        $harnessGroup = $SecurityGroups | Where-Object { $_.Name -like 'Neologik Harness User Group*' } | Select-Object -First 1
-        if (-not $harnessGroup) {
-            Write-Log "Warning: Harness user group not found among the created security groups - NCE group assignment skipped. A Global Admin must assign it manually (runsheet step 7b)." -Level Warning
-        }
-        else {
-            $defaultAppRole = '00000000-0000-0000-0000-000000000000'
-            $alreadyAssigned = Get-MgGroupAppRoleAssignment -GroupId $harnessGroup.Id -ErrorAction SilentlyContinue |
+        # Assign the NCE role groups so their members' tokens carry the
+        # groups claim NCE authorizes from (project#1341: contributors AND
+        # admins). Default app role, direct groups only (nested membership
+        # does not expand into the claim).
+        $defaultAppRole = '00000000-0000-0000-0000-000000000000'
+        $assignedGroups = @()
+        foreach ($rolePattern in @('Neologik NCE Contributors*', 'Neologik NCE Admins*')) {
+            $roleGroup = $SecurityGroups | Where-Object { $_.Name -like $rolePattern } | Select-Object -First 1
+            if (-not $roleGroup) {
+                Write-Log "Warning: no security group matches '$rolePattern' - NCE group assignment skipped. A Global Admin must assign it manually (runsheet steps 7b/7c)." -Level Warning
+                continue
+            }
+            $alreadyAssigned = Get-MgGroupAppRoleAssignment -GroupId $roleGroup.Id -ErrorAction SilentlyContinue |
                 Where-Object { $_.ResourceId -eq $sp.Id }
             if ($alreadyAssigned) {
-                Write-Log "Group '$($harnessGroup.Name)' is already assigned to the auth app" -Level Info
+                Write-Log "Group '$($roleGroup.Name)' is already assigned to the auth app" -Level Info
             }
             else {
-                $null = New-MgGroupAppRoleAssignment -GroupId $harnessGroup.Id `
-                    -PrincipalId $harnessGroup.Id `
+                $null = New-MgGroupAppRoleAssignment -GroupId $roleGroup.Id `
+                    -PrincipalId $roleGroup.Id `
                     -ResourceId $sp.Id `
                     -AppRoleId $defaultAppRole `
                     -ErrorAction Stop
-                Write-Log "Group '$($harnessGroup.Name)' assigned to the auth app - NCE login will carry the groups claim" -Level Success
+                Write-Log "Group '$($roleGroup.Name)' assigned to the auth app - NCE login will carry the groups claim" -Level Success
             }
+            $assignedGroups += $roleGroup.Name
         }
 
         $script:ConfigData['NceAuthApp'] = @{
@@ -2708,7 +2732,7 @@ function New-NeologikNceAuthApp {
             ServicePrincipalId = $sp.Id
             UniqueName = $uniqueName
             KeyVaultSecretName = $kvSecretName
-            AssignedGroup = if ($harnessGroup) { $harnessGroup.Name } else { $null }
+            AssignedGroups = $assignedGroups
         }
 
         return $script:ConfigData['NceAuthApp']

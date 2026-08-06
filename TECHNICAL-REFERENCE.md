@@ -265,7 +265,8 @@ All resources are named to include your organization code and environment type f
   - **paramSolutionName**: `neo-<org>-<env>-<region>-<index>` (e.g., neo-abc-dev-uks-01)
   - **paramSolutionShortName** (no hyphens): `neo<org><env><region><index>` (e.g., neoabcdevuks01)
 - **Bot User Groups**: `Neologik User Group <agent-name> - abc-dev` (one per bot)
-- **NCE User Group**: `Neologik NCE User Group - abc-dev`
+- **NCE Contributors Group**: `Neologik NCE Contributors - abc-dev` (renamed in place from the pre-v5 `Neologik NCE User Group` where one exists)
+- **NCE Admins Group**: `Neologik NCE Admins - abc-dev` (project#1341 - NCE admin role)
 - **Admin User Group**: `Neologik Admin User Group - abc-dev`
 - **App Registration**: `Neologik GitHub Service Connection - abc-dev`
 - **Managed Identities**: `neologik-[type]-abc-dev`
@@ -314,7 +315,8 @@ Creates or validates:
     - Neologik User Group <agent-name> - abc-dev (e.g., "Neologik User Group bot - abc-dev")
     - Each bot gets its own dedicated user group based on the agent name provided
   - **Standard Groups**:
-    - Neologik NCE User Group - abc-dev
+    - Neologik NCE Contributors - abc-dev
+    - Neologik NCE Admins - abc-dev
     - Neologik Admin User Group - abc-dev
 
 ### 5. App Registration

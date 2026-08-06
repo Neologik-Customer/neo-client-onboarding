@@ -94,7 +94,8 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 **Standard Groups** (always created):
 | Group Name | Members |
 |------------|----------|
-| `Neologik NCE User Group - {org}-{env}` | Current user + Neologik guests |
+| `Neologik NCE Contributors - {org}-{env}` | Current user + Neologik guests (NCE contributor role) |
+| `Neologik NCE Admins - {org}-{env}` | Current user + Neologik guests (NCE admin role - Blueprints/Audit/Admin) |
 | `Neologik Admin User Group - {org}-{env}` | Current user + Neologik guests |
 
 **Scope:** Entra ID tenant level
