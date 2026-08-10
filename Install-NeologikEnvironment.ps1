@@ -227,7 +227,7 @@ $script:GuestUsersFile = Join-Path $PSScriptRoot "NeologikGuestUsers.txt"
 if (Test-Path $script:GuestUsersFile) {
     $script:NeologikGuestUsers = @(Get-Content $script:GuestUsersFile | Where-Object { $_.Trim() -ne '' -and $_ -notmatch '^\s*#' })
 } else {
-    Write-Warning "Guest users file not found at: $script:GuestUsersFile. No guest users will be invited."
+    Write-Warning "Guest users file not found at: $script:GuestUsersFile. It ships in the onboarding zip package - interactive runs will offer to locate it during configuration; otherwise no guest users will be invited."
     $script:NeologikGuestUsers = @()
 }
 
@@ -1469,6 +1469,87 @@ function New-NeologikResourceGroup {
 #endregion
 
 #region Guest User Management
+
+function Resolve-GuestUsersFile {
+    <#
+    .SYNOPSIS
+        Interactively locates NeologikGuestUsers.txt when it was not found next to the
+        script (customers sometimes download only the .ps1 instead of unzipping the full
+        onboarding package). Offers a file-browse dialog, manual path entry, or an
+        explicit continue-without-guests choice.
+    .OUTPUTS
+        $true when a valid file was selected ($script:GuestUsersFile and
+        $script:NeologikGuestUsers updated); $false when the user chose to continue
+        without guest users.
+    #>
+    [CmdletBinding()]
+    param()
+
+    Write-Host ""
+    Write-Host "  NeologikGuestUsers.txt was not found next to the script:" -ForegroundColor Yellow
+    Write-Host "    $script:GuestUsersFile" -ForegroundColor Gray
+    Write-Host "  The file ships in the onboarding zip package (one Neologik email per line)." -ForegroundColor Gray
+    Write-Host "  If you downloaded only the .ps1, unzip the full package or locate the file now." -ForegroundColor Gray
+
+    while ($true) {
+        Write-Host ""
+        Write-Host "  [B] Browse for the file   [S] Skip guest invitations   or type the full path" -ForegroundColor Cyan
+        Write-Host "  Your choice: " -NoNewline -ForegroundColor Yellow
+        $choice = (Read-Host).Trim()
+
+        if ($choice -match '^(s|skip)$') {
+            Write-Log "User chose to continue without a guest users file - no guest users will be invited" -Level Warning
+            return $false
+        }
+
+        $candidate = $null
+        if ($choice -match '^(b|browse)$') {
+            try {
+                Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+                $dialog = [System.Windows.Forms.OpenFileDialog]::new()
+                $dialog.Title = 'Select NeologikGuestUsers.txt'
+                $dialog.InitialDirectory = $PSScriptRoot
+                $dialog.Filter = 'Text files (*.txt)|*.txt|All files (*.*)|*.*'
+                # Topmost owner form so the dialog cannot open hidden behind the console.
+                $owner = [System.Windows.Forms.Form]::new()
+                $owner.TopMost = $true
+                try {
+                    if ($dialog.ShowDialog($owner) -ne [System.Windows.Forms.DialogResult]::OK) { continue }
+                    $candidate = $dialog.FileName
+                }
+                finally {
+                    $owner.Dispose()
+                }
+            }
+            catch {
+                Write-Host "  A file dialog is not available in this session; type the full path instead." -ForegroundColor Yellow
+                continue
+            }
+        }
+        elseif ($choice) {
+            $candidate = $choice.Trim('"')
+        }
+        else {
+            continue
+        }
+
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            Write-Host "  File not found: $candidate" -ForegroundColor Red
+            continue
+        }
+
+        $emails = @(Get-Content -LiteralPath $candidate | Where-Object { $_.Trim() -ne '' -and $_ -notmatch '^\s*#' })
+        if ($emails.Count -eq 0) {
+            Write-Host "  $candidate contains no guest entries (blank lines and # comments are ignored)." -ForegroundColor Red
+            continue
+        }
+
+        $script:GuestUsersFile = $candidate
+        $script:NeologikGuestUsers = $emails
+        Write-Log "Guest users file selected: $candidate ($($emails.Count) guest(s))" -Level Success
+        return $true
+    }
+}
 
 function Invoke-GuestUserInvitation {
     <#
@@ -5141,6 +5222,11 @@ function Start-NeologikOnboarding {
             }
             else {
                 Write-Host ""
+                # Recover a missing guest users file before asking - customers sometimes
+                # download only the .ps1 instead of unzipping the full onboarding package.
+                if ($script:NeologikGuestUsers.Count -eq 0 -and -not (Test-Path $script:GuestUsersFile) -and -not $script:NonInteractiveMode) {
+                    Resolve-GuestUsersFile | Out-Null
+                }
                 Write-Host "Invite Neologik guest users into this tenant?" -ForegroundColor Cyan
                 if ($script:NeologikGuestUsers.Count -gt 0) {
                     Write-Host "  The following $($script:NeologikGuestUsers.Count) guest(s) from NeologikGuestUsers.txt will be invited:" -ForegroundColor Gray

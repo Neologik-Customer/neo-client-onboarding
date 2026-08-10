@@ -9,6 +9,27 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Recover a missing NeologikGuestUsers.txt interactively (project#1383)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1383
+**Date**: 2026-08-10
+
+Customers who download only `Install-NeologikEnvironment.ps1` (instead of
+unzipping the full onboarding package) previously got a single startup warning
+and a run that silently invited no Neologik guest users. Interactive runs now
+recover at the guest-invitation configuration prompt via the new
+`Resolve-GuestUsersFile`:
+
+- Explains that the file ships in the onboarding zip (one email per line) and
+  offers: [B] browse (Windows file-open dialog, topmost so it cannot hide
+  behind the console), typing the full path, or [S] explicitly skipping guest
+  invitations.
+- The selected file is validated (exists, contains at least one non-comment
+  entry) before being accepted; invalid choices re-prompt.
+- Startup warning reworded to say interactive runs will offer to locate the
+  file. Non-interactive (CI) mode behaviour unchanged (warn and continue;
+  governed by `-SkipGuestInvitation` / answer file).
+
 ## Unreleased - Azure mandatory MFA: claims-challenge handling (project#1381)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1381
