@@ -9,6 +9,35 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Azure mandatory MFA: claims-challenge handling (project#1381)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1381
+**Date**: 2026-08-10
+
+Azure now enforces MFA at the ARM layer for all resource create/update/delete
+operations (mandatory MFA Phase 2, enforced since 1 October 2025; postponement
+window closed 1 July 2026). A cached or freshly minted token without MFA passes
+sign-in but fails the first resource write - observed in the field as
+"Failed to create/validate resource group: ... disallowed by Azure ...
+without authenticating through MFA" during a v4.5.0 onboarding.
+
+- Interactive sign-in (`Invoke-AzConnect`) now requests the ARM 'p1'
+  authentication-context claim via `Connect-AzAccount -ClaimsChallenge`, so the
+  first token satisfies the enforcement (browser and device-code paths).
+- Cached-context reuse inspects the ARM access token (new
+  `Get-ArmTokenMfaClaimStatus`) and re-authenticates up front when a user token
+  carries neither 'acrs' p1 nor 'amr' mfa.
+- Reactive backstop: resource group creation catches the ARM MFA
+  claims-challenge error, re-authenticates and retries once.
+- Non-interactive (CI) mode never re-authenticates; it logs a clear warning
+  when the supplied user token lacks the claim. Service principal tokens are
+  exempt from mandatory MFA and unaffected.
+- Same proactive claims challenge applied to the standalone sign-ins in
+  `Register-NeologikResourceProviders.ps1` and
+  `Update-NeologikEnvironmentAccess.ps1`.
+- Dependencies: `Az.Accounts` minimum raised 3.0.0 -> 5.2.0 (first version
+  with `Connect-AzAccount -ClaimsChallenge`).
+
 ## Unreleased - NCE delegation model groups (project#1341)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1341

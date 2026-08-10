@@ -81,6 +81,10 @@
     automation where the Az and Microsoft Graph contexts are established by the caller
     before invoking this script (e.g. Connect-AzAccount -AccessToken / Connect-MgGraph
     -AccessToken). Run under 'pwsh -NonInteractive' so any unexpected prompt throws.
+    Azure mandatory MFA: a pre-established USER context must carry the ARM 'p1'
+    authentication-context claim (sign in with Connect-AzAccount -ClaimsChallenge) or
+    resource create/update/delete calls are rejected by Azure; service principal
+    contexts are exempt. The script warns but never re-authenticates in this mode.
 
 .PARAMETER AcceptTerms
     Non-interactive acknowledgement of the Neologik Terms of Use and Privacy Policy
@@ -229,7 +233,9 @@ if (Test-Path $script:GuestUsersFile) {
 
 # Required PowerShell modules
 $script:RequiredModules = @(
-    @{ Name = 'Az.Accounts'; MinVersion = '3.0.0' },
+    # Az.Accounts 5.2.0 is the first version with Connect-AzAccount -ClaimsChallenge,
+    # needed to satisfy Azure mandatory MFA (ARM-layer enforcement) at sign-in.
+    @{ Name = 'Az.Accounts'; MinVersion = '5.2.0' },
     @{ Name = 'Az.Resources'; MinVersion = '7.0.0' },
     @{ Name = 'Az.Compute'; MinVersion = '7.0.0' },
     @{ Name = 'Az.KeyVault'; MinVersion = '5.0.0' },
@@ -237,6 +243,13 @@ $script:RequiredModules = @(
     @{ Name = 'Az.ManagedServiceIdentity'; MinVersion = '1.0.0' },
     @{ Name = 'Microsoft.Graph'; MinVersion = '2.0.0' }
 )
+
+# Azure mandatory MFA (ARM-layer Phase 2, enforced for all create/update/delete since
+# 1 October 2025): static claims challenge requesting the 'p1' authentication-context
+# claim. Decodes to {"access_token":{"acrs":{"essential":true,"values":["p1"]}}}.
+# Passed at sign-in it forces interactive MFA so the resulting ARM token satisfies the
+# enforcement. It is a public, well-known instruction to Entra ID - not a secret.
+$script:ArmMfaClaimsChallenge = 'eyJhY2Nlc3NfdG9rZW4iOnsiYWNycyI6eyJlc3NlbnRpYWwiOnRydWUsInZhbHVlcyI6WyJwMSJdfX19'
 
 #region Logging Functions
 
@@ -734,6 +747,17 @@ function Invoke-AzConnect {
         $connectParams['TenantId'] = $TenantId
     }
 
+    # Azure mandatory MFA (ARM-layer): request the 'p1' authentication-context claim at
+    # sign-in so the first token already satisfies create/update/delete enforcement.
+    # Without it, a non-MFA token passes sign-in and the run fails at the first resource
+    # write with a claims-challenge error. Requires Az.Accounts >= 5.2.0.
+    if ((Get-Command Connect-AzAccount).Parameters.ContainsKey('ClaimsChallenge')) {
+        $connectParams['ClaimsChallenge'] = $script:ArmMfaClaimsChallenge
+    }
+    else {
+        Write-Log "Az.Accounts predates -ClaimsChallenge (< 5.2.0): sign-in may not satisfy Azure mandatory MFA and resource writes may be rejected" -Level Warning
+    }
+
     try {
         Write-Host "`nℹ️  A browser window will open for Azure login.`n" -ForegroundColor Cyan
         return Connect-AzAccount @connectParams
@@ -743,6 +767,51 @@ function Invoke-AzConnect {
         Write-Log "Falling back to device code authentication" -Level Info
         Write-Host "`nℹ️  A code will be displayed. Visit the URL and enter the code to authenticate.`n" -ForegroundColor Cyan
         return Connect-AzAccount @connectParams -UseDeviceAuthentication
+    }
+}
+
+function Get-ArmTokenMfaClaimStatus {
+    <#
+    .SYNOPSIS
+        Inspects the current ARM access token for the 'p1' authentication-context claim
+        ('acrs') that Azure mandatory MFA requires on create/update/delete operations.
+    .OUTPUTS
+        'Present' - user token carrying the claim
+        'Missing' - user token without the claim (resource writes will be rejected)
+        'Exempt'  - application (service principal) token; exempt from mandatory MFA
+        'Unknown' - token could not be acquired or inspected
+    #>
+    [CmdletBinding()]
+    param()
+
+    try {
+        if ((Get-Command Get-AzAccessToken).Parameters.ContainsKey('AsSecureString')) {
+            $secureToken = (Get-AzAccessToken -AsSecureString -ErrorAction Stop).Token
+            $token = [System.Net.NetworkCredential]::new('', $secureToken).Password
+        }
+        else {
+            $token = (Get-AzAccessToken -ErrorAction Stop).Token
+        }
+
+        # Decode the JWT payload (base64url)
+        $payload = $token.Split('.')[1].Replace('-', '+').Replace('_', '/')
+        switch ($payload.Length % 4) {
+            2 { $payload += '==' }
+            3 { $payload += '=' }
+        }
+        $claims = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json
+
+        # Delegated (user) tokens carry 'scp'; app-only tokens do not and are exempt.
+        if (-not $claims.scp) { return 'Exempt' }
+        # 'acrs' p1 is only emitted when the claims challenge was requested at sign-in;
+        # a token minted through an ordinary MFA sign-in instead carries 'amr' mfa.
+        # Either satisfies the ARM enforcement.
+        if (($claims.acrs -contains 'p1') -or ($claims.amr -contains 'mfa')) { return 'Present' }
+        return 'Missing'
+    }
+    catch {
+        Write-Log "Could not inspect the ARM access token for the MFA claim: $($_.Exception.Message)" -Level Warning
+        return 'Unknown'
     }
 }
 
@@ -788,10 +857,23 @@ function Connect-AzureEnvironment {
                 $azContext = Invoke-AzConnect -TenantId $TenantId
             }
             else {
-                $azContext = [PSCustomObject]@{
-                    Context = $currentContext
+                # Azure mandatory MFA (ARM-layer): a cached token minted without MFA passes
+                # this reuse path but fails the first create/update/delete with a
+                # claims-challenge error - verify the 'p1' claim up front instead.
+                $mfaClaimStatus = Get-ArmTokenMfaClaimStatus
+                if ($mfaClaimStatus -eq 'Missing' -and -not $script:NonInteractiveMode) {
+                    Write-Log "Cached Azure token lacks the MFA claim required for resource management; re-authenticating..." -Level Warning
+                    $azContext = Invoke-AzConnect -TenantId $currentContext.Tenant.Id
                 }
-                Write-Log "Using existing Azure connection" -Level Success
+                else {
+                    if ($mfaClaimStatus -eq 'Missing') {
+                        Write-Log "Non-interactive: the supplied ARM user token lacks the mandatory-MFA claim ('acrs' p1); resource create/update/delete will be rejected. Establish the context with Connect-AzAccount -ClaimsChallenge or a service principal." -Level Warning
+                    }
+                    $azContext = [PSCustomObject]@{
+                        Context = $currentContext
+                    }
+                    Write-Log "Using existing Azure connection" -Level Success
+                }
             }
         }
 
@@ -1317,7 +1399,11 @@ function New-NeologikResourceGroup {
         [string]$ResourceGroupName,
 
         [Parameter(Mandatory = $true)]
-        [string]$Location
+        [string]$Location,
+
+        # Internal: set on the single retry after an MFA claims-challenge re-authentication.
+        [Parameter(Mandatory = $false)]
+        [switch]$IsMfaRetry
     )
 
     Write-Log "Checking for resource group: $ResourceGroupName..." -Level Info
@@ -1356,6 +1442,14 @@ function New-NeologikResourceGroup {
         return $rg
     }
     catch {
+        # Azure mandatory MFA (ARM-layer): a token minted without MFA fails create/update/
+        # delete with a claims-challenge error. Re-authenticate (Invoke-AzConnect requests
+        # the 'p1' claim) and retry once - backstop for tokens the up-front check missed.
+        if (-not $IsMfaRetry -and -not $script:NonInteractiveMode -and $_.Exception.Message -match 'authenticat\w+ through MFA') {
+            Write-Log "Azure rejected the operation because the token lacks the mandatory-MFA claim; re-authenticating and retrying..." -Level Warning
+            Invoke-AzConnect -TenantId $script:ConfigData['TenantId'] | Out-Null
+            return New-NeologikResourceGroup -ResourceGroupName $ResourceGroupName -Location $Location -IsMfaRetry
+        }
         # Detect Azure RBAC authorization failures and surface them with a clear message
         if ($_.Exception.Message -match 'AuthorizationFailed|does not have authorization|does not have.*permission|Forbidden') {
             Write-Host "`n❌ PERMISSION ERROR: Cannot create resource group '$ResourceGroupName'" -ForegroundColor Red

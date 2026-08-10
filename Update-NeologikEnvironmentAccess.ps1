@@ -351,7 +351,14 @@ else {
         }
     }
     Write-Log 'Signing in to Azure (device code - same administrator account)...' -Level Info
-    Connect-AzAccount -Tenant $TenantId -Subscription $SubscriptionId -UseDeviceAuthentication | Out-Null
+    $connectParams = @{ Tenant = $TenantId; Subscription = $SubscriptionId; UseDeviceAuthentication = $true }
+    # Azure mandatory MFA (ARM-layer): request the 'p1' authentication-context claim so the
+    # role-assignment writes below are not rejected with a claims-challenge error.
+    # Decodes to {"access_token":{"acrs":{"essential":true,"values":["p1"]}}}; needs Az.Accounts >= 5.2.0.
+    if ((Get-Command Connect-AzAccount).Parameters.ContainsKey('ClaimsChallenge')) {
+        $connectParams['ClaimsChallenge'] = 'eyJhY2Nlc3NfdG9rZW4iOnsiYWNycyI6eyJlc3NlbnRpYWwiOnRydWUsInZhbHVlcyI6WyJwMSJdfX19'
+    }
+    Connect-AzAccount @connectParams | Out-Null
 
     $rgScope = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName"
     $subScope = "/subscriptions/$SubscriptionId"

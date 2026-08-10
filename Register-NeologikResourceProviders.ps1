@@ -135,8 +135,15 @@ function Register-Feature {
 $context = Get-AzContext -ErrorAction SilentlyContinue
 if (-not $context) {
     Write-Host "No Azure context found - signing in..." -ForegroundColor Yellow
-    if ($TenantId) { Connect-AzAccount -TenantId $TenantId | Out-Null }
-    else { Connect-AzAccount | Out-Null }
+    $connectParams = @{}
+    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
+    # Azure mandatory MFA (ARM-layer): request the 'p1' authentication-context claim so
+    # provider registration (an ARM write) is not rejected with a claims-challenge error.
+    # Decodes to {"access_token":{"acrs":{"essential":true,"values":["p1"]}}}; needs Az.Accounts >= 5.2.0.
+    if ((Get-Command Connect-AzAccount).Parameters.ContainsKey('ClaimsChallenge')) {
+        $connectParams['ClaimsChallenge'] = 'eyJhY2Nlc3NfdG9rZW4iOnsiYWNycyI6eyJlc3NlbnRpYWwiOnRydWUsInZhbHVlcyI6WyJwMSJdfX19'
+    }
+    Connect-AzAccount @connectParams | Out-Null
 }
 
 if ($SubscriptionId) {
