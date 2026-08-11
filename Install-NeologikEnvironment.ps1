@@ -15,7 +15,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.9.0
+    v5.0.0
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -109,7 +109,7 @@
 
 .NOTES
     Author: Neologik
-    Version: 1.0.0
+    Version: v5.0.0 (keep in step with $script:Version below)
     Requires: PowerShell 7.4+ (script will update if needed)
     Requires: Subscription Owner and Global Administrator roles
 #>
