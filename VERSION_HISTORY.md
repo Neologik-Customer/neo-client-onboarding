@@ -12,6 +12,9 @@ This document tracks the version history of the Neologik customer onboarding scr
 ## Unreleased
 
 ### Changes
+- **Pooja Pandey added to `NeologikGuestUsers.txt`** (project#1448): future
+  onboarding runs invite Pooja.Pandey@neologik.ai as a B2B guest and seed
+  her into the per-environment security groups.
 - **Onboarding-kit zip builder moved out of this repo** (owner decision
   2026-07-16): this repository is customer-facing and carries no customer
   data - contents, history, or Actions. `prepare-onboarding-zip.yml`
