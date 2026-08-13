@@ -83,7 +83,7 @@ Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) ten
 #### A. Grant Access to Bot Application
 
 1. **Open the Bot consent URL** provided by Neologik in your browser
-   - Format: `https://login.microsoftonline.com/common/adminconsent?client_id={bot-id}&redirect_uri=https://{hostName}/nce`
+   - Format: `https://login.microsoftonline.com/common/adminconsent?client_id={bot-id}&redirect_uri=https://{hostName}/nce/consent-complete`
    - `{hostName}` = Your full qualified hostname
    - `{bot-id}` = Bot application ID provided by Neologik
 
@@ -96,12 +96,14 @@ Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) ten
 
 4. **Click "Accept"** to grant tenant-wide consent
 
-5. **Confirmation:** You should see a success message
+5. **Confirmation:** the browser lands on the consent confirmation page
+   (`https://{hostName}/nce/consent-complete`), which reports success or the
+   Microsoft error message
 
 #### B. Grant Access to NCE Admin Tool Application
 
 1. **Open the Admin Tool consent URL** provided by Neologik in your browser
-   - Format: `https://login.microsoftonline.com/common/adminconsent?client_id={nce-admin-id}&redirect_uri=https://{hostName}/nce`
+   - Format: `https://login.microsoftonline.com/common/adminconsent?client_id={nce-admin-id}&redirect_uri=https://{hostName}/nce/consent-complete`
    - `{hostName}` = Your full qualified hostname (same as above)
    - `{nce-admin-id}` = NCE Admin Tool application ID provided by Neologik
 
@@ -114,7 +116,9 @@ Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) ten
 
 4. **Click "Accept"** to grant tenant-wide consent
 
-5. **Confirmation:** You should see a success message
+5. **Confirmation:** the browser lands on the consent confirmation page
+   (`https://{hostName}/nce/consent-complete`), which reports success or the
+   Microsoft error message
 
 ### Verify Consent
 
