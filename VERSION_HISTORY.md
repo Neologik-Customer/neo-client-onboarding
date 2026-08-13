@@ -9,6 +9,14 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Pooja Pandey added to Neologik guest users (project#1448)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1448
+**Date**: 2026-08-13
+
+- Pooja.Pandey@neologik.ai added to `NeologikGuestUsers.txt`, matching the
+  hotfix already landed on main (7f1363d) and develop (d648d2d).
+
 ## Unreleased - Recover a missing NeologikGuestUsers.txt interactively (project#1383)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1383
