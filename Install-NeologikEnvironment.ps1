@@ -47,8 +47,20 @@
 .PARAMETER SkipGuestInvitation
     Skip inviting Neologik guest users. Use when the client provisions its own
     accounts within its own tenant (no B2B guests). Security groups are still
-    created, seeded with the signed-in user only. May also be set from the answer file
-    ('skipGuestInvitation': true/false); this switch, when passed, takes precedence.
+    created, seeded with the signed-in user only - unless the follow-up
+    add-existing-accounts step is used (see below). May also be set from the answer
+    file ('skipGuestInvitation': true/false); this switch, when passed, takes
+    precedence.
+
+    When invitations are skipped, a follow-up question offers to add EXISTING
+    accounts (pre-created B2B guests or member accounts) to the security groups
+    without sending any invitation. Answer-file keys: 'addExistingAccountsToGroups'
+    (true/false) and optionally 'existingAccountEmails' (array or comma-separated
+    string; defaults to the NeologikGuestUsers.txt entries, or addresses typed at
+    the prompt). Each address must match the account's mail or userPrincipalName;
+    an address with no matching account is reported and skipped - the run always
+    continues. Accounts added this way join ALL Neologik groups, including the
+    Admin User Group.
 
 .PARAMETER ExistingServicePrincipalObjectId
     Object ID (enterprise-application / service-principal object ID, not the app/client
@@ -1616,6 +1628,63 @@ function Invoke-GuestUserInvitation {
         Write-Log "Failed to invite guest users: $_" -Level Error
         throw
     }
+}
+
+function Invoke-ExistingAccountResolution {
+    <#
+    .SYNOPSIS
+        Resolves pre-created accounts (guests or members) by email address so they can be
+        added to the security groups. Never sends invitations.
+    .DESCRIPTION
+        Used when the operator declined B2B guest invitations but chose to add existing
+        accounts to the groups. Each address is looked up by mail or userPrincipalName;
+        a match joins the group-membership list, and an address with no matching account
+        is reported and SKIPPED - this step is best-effort by design and the script
+        always continues (the operator can add the account in Entra ID later).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$Emails
+    )
+
+    if ($Emails.Count -eq 0) {
+        Write-Log "No existing-account addresses to resolve - no accounts will be added to the groups." -Level Info
+        return @()
+    }
+
+    Write-Log "Resolving existing accounts for group membership (no invitations will be sent)..." -Level Info
+
+    try {
+        Import-Module Microsoft.Graph.Users -ErrorAction Stop
+    }
+    catch {
+        Write-Log "Could not load the Microsoft Graph Users module - existing accounts will not be added to the groups (continuing): $_" -Level Warning
+        return @()
+    }
+
+    $resolvedUsers = @()
+    foreach ($email in $Emails) {
+        Write-Log "Looking up existing account: $email..." -Level Info
+        $existingUser = Get-MgUser -Filter "mail eq '$email' or userPrincipalName eq '$email'" -ErrorAction SilentlyContinue
+
+        if ($existingUser) {
+            Write-Log "Account $email exists (ID: $($existingUser.Id)) - it will be added to the security groups" -Level Success
+            $resolvedUsers += @{
+                Email = $email
+                UserId = $existingUser.Id
+                Status = 'ExistingResolved'
+            }
+        }
+        else {
+            Write-Log "Account $email does not exist in this tenant (no user with that mail or user principal name) - skipped, continuing. Create the account and add it to the groups in Entra ID later." -Level Warning
+        }
+    }
+
+    Write-Log "Existing accounts resolved: $($resolvedUsers.Count) of $($Emails.Count) address(es) matched." -Level Info
+    $script:ConfigData['ExistingAccountsAdded'] = $resolvedUsers
+    return $resolvedUsers
 }
 
 #endregion
@@ -3613,6 +3682,7 @@ function Export-ConfigurationData {
             'ResourceTagsEnabled' = [bool]$script:ConfigData['ResourceTagsEnabled']
             'ResourceTagsCustom' = $exportCustomTags
             'InvitedGuestUsers' = $script:ConfigData['InvitedGuestUsers']
+            'ExistingAccountsAdded' = $script:ConfigData['ExistingAccountsAdded']
             'SecurityGroups' = $script:ConfigData['SecurityGroups']
             'AppRegistration' = $script:ConfigData['AppRegistration']
             'NceAuthApp' = $script:ConfigData['NceAuthApp']
@@ -5242,6 +5312,75 @@ function Start-NeologikOnboarding {
             }
         }
 
+        # Existing accounts into the groups (asked only when invitations were declined):
+        # the client may have pre-created the Neologik team's accounts (B2B guests or
+        # member accounts) and want them added to the security groups without any
+        # invitation being sent. Precedence: answer file, then an interactive prompt.
+        # Address source precedence: answer file 'existingAccountEmails', then
+        # NeologikGuestUsers.txt or interactively typed addresses.
+        $script:ConfigData['AddExistingAccountsToGroups'] = $false
+        $script:ConfigData['ExistingAccountEmails'] = @()
+        if ($script:ConfigData['SkipGuestInvitation']) {
+            $addAns = Get-AnswerBool 'addExistingAccountsToGroups'
+            if ($null -ne $addAns) {
+                $script:ConfigData['AddExistingAccountsToGroups'] = $addAns
+                Write-Log "Add-existing-accounts decision from answer file: addExistingAccountsToGroups=$addAns." -Level Info
+            }
+            elseif (-not $script:NonInteractiveMode) {
+                Write-Host ""
+                Write-Host "Add existing accounts to the security groups?" -ForegroundColor Cyan
+                Write-Host "  Choose Y if you have already created the Neologik team's accounts in this" -ForegroundColor Gray
+                Write-Host "  tenant (as guests or full members) and want them added to the security" -ForegroundColor Gray
+                Write-Host "  groups now. No invitations are sent. NOTE: accounts added here go into ALL" -ForegroundColor Gray
+                Write-Host "  Neologik groups, including the Admin User Group (Azure admin access) -" -ForegroundColor Gray
+                Write-Host "  only list accounts that should hold Neologik admin/support access." -ForegroundColor Gray
+                Write-Host "  (y/N, default: N): " -NoNewline -ForegroundColor Yellow
+                $addAnswer = Read-Host
+                $script:ConfigData['AddExistingAccountsToGroups'] = ($addAnswer -match '^(y|yes)$')
+            }
+
+            if ($script:ConfigData['AddExistingAccountsToGroups']) {
+                $emails = @()
+                $ansEmails = Get-Answer 'existingAccountEmails'
+                if ($null -ne $ansEmails) {
+                    foreach ($entry in @($ansEmails)) {
+                        $emails += @(([string]$entry) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                    }
+                    Write-Log "Existing-account addresses from answer file: $($emails.Count)." -Level Info
+                }
+                elseif ($script:NonInteractiveMode) {
+                    # Unattended with no answer-file list: the guest users file is the source.
+                    $emails = @($script:NeologikGuestUsers)
+                    Write-Log "Non-interactive: existing-account addresses taken from NeologikGuestUsers.txt ($($emails.Count))." -Level Info
+                }
+                else {
+                    $useFile = $false
+                    if ($script:NeologikGuestUsers.Count -gt 0) {
+                        Write-Host ""
+                        Write-Host "  Where should the account addresses come from?" -ForegroundColor Cyan
+                        Write-Host "  NeologikGuestUsers.txt contains $($script:NeologikGuestUsers.Count) address(es):" -ForegroundColor Gray
+                        $script:NeologikGuestUsers | ForEach-Object { Write-Host "    - $_" -ForegroundColor Gray }
+                        Write-Host "  [F] Use the file   [T] Type the addresses   (F/t, default: F): " -NoNewline -ForegroundColor Yellow
+                        $srcAnswer = Read-Host
+                        $useFile = ($srcAnswer -notmatch '^(t|type)$')
+                    }
+                    if ($useFile) {
+                        $emails = @($script:NeologikGuestUsers)
+                    }
+                    else {
+                        Write-Host "  Enter the email addresses, comma-separated. Each must exactly match the" -ForegroundColor Gray
+                        Write-Host "  account's mail or user principal name: " -NoNewline -ForegroundColor Gray
+                        $typed = Read-Host
+                        $emails = @($typed -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                        if ($emails.Count -eq 0) {
+                            Write-Host "  No addresses entered - no accounts will be added to the groups." -ForegroundColor Yellow
+                        }
+                    }
+                }
+                $script:ConfigData['ExistingAccountEmails'] = $emails
+            }
+        }
+
         # Existing (client-provided) deployment service principal.
         $spChoice = Read-ExistingServicePrincipalChoice `
             -CliObjectId $ExistingServicePrincipalObjectId `
@@ -5286,7 +5425,9 @@ function Start-NeologikOnboarding {
         }
         else { 'No' }
         Write-Host "  Apply Resource Tags:  " -NoNewline; Write-Host $tagsSummary -ForegroundColor Yellow
-        $guestSummary = if ($script:ConfigData['SkipGuestInvitation']) { 'No (skipped)' } else { 'Yes' }
+        $guestSummary = if (-not $script:ConfigData['SkipGuestInvitation']) { 'Yes' }
+                        elseif ($script:ConfigData['AddExistingAccountsToGroups']) { "No - adding $(@($script:ConfigData['ExistingAccountEmails']).Count) existing account(s) to the groups" }
+                        else { 'No (skipped)' }
         Write-Host "  Invite Neologik Guests:" -NoNewline; Write-Host " $guestSummary" -ForegroundColor Yellow
         if ($script:ConfigData['UseExistingServicePrincipal']) {
             Write-Host "  Deployment SP:        " -NoNewline; Write-Host "Existing: $($script:ConfigData['ExistingServicePrincipalObjectId'])" -ForegroundColor Yellow
@@ -5371,11 +5512,16 @@ function Start-NeologikOnboarding {
         $null = New-NeologikResourceGroup -ResourceGroupName $script:ResourceGroupName -Location $script:AzureRegion
 
         # Step 8: Invite guest users (skipped when the client uses its own-tenant
-        # accounts and takes no B2B guests). The decision was made during configuration
-        # gathering and shown in the summary.
+        # accounts and takes no B2B guests). When invitations were declined but the
+        # operator chose to add existing accounts, resolve those instead - lookup only,
+        # never inviting; unresolvable addresses warn and the run continues. Both
+        # decisions were made during configuration gathering and shown in the summary.
         if ($script:ConfigData['SkipGuestInvitation']) {
             Write-Log "Guest user invitation skipped (per configuration)." -Level Info
             $guestUsers = @()
+            if ($script:ConfigData['AddExistingAccountsToGroups']) {
+                $guestUsers = @(Invoke-ExistingAccountResolution -Emails @($script:ConfigData['ExistingAccountEmails']))
+            }
         }
         else {
             $guestUsers = Invoke-GuestUserInvitation -GuestEmails $script:NeologikGuestUsers

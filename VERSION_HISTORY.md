@@ -9,6 +9,29 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Add existing accounts to groups when invitations are declined (project#1064)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1064
+**Date**: 2026-08-17
+
+- Declining guest invitations now offers a follow-up question: "Add
+  existing accounts to the security groups?". Yes resolves pre-created
+  accounts (B2B guests or members) by mail/userPrincipalName and adds
+  them to the groups with NO invitation sent - for clients who provision
+  the Neologik team's accounts themselves.
+- Address sources, in precedence order: answer-file
+  `existingAccountEmails` (array or comma string), NeologikGuestUsers.txt,
+  or addresses typed at the prompt ([F]ile / [T]ype choice). New
+  answer-file key `addExistingAccountsToGroups` (true/false); in
+  -NonInteractive mode the file is the default source.
+- Unresolvable addresses are reported ("does not exist in this tenant -
+  skipped, continuing") and never stop the run.
+- Prompt and docs warn that accounts added this way join ALL Neologik
+  groups including the Admin User Group; configuration JSON gains an
+  `ExistingAccountsAdded` section.
+- Docs: README, TECHNICAL-REFERENCE, QUICK-REFERENCE (+ PDF),
+  PRE-ONBOARDING-INFO-GATHERING, inputs-example.json.
+
 ## Unreleased - v5 documentation alignment (project#1527)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1527

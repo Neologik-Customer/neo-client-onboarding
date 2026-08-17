@@ -34,7 +34,7 @@ This repository contains a robust PowerShell script that automates the complete 
 - **Platform naming convention**: resource names are driven by two naming tokens - the solution name and solution short name - and the environment type no longer appears in any name (see Resource Naming Convention below).
 - **Client naming conventions**: every script-created resource name can be overridden from the answer file, so a client-mandated naming convention can be applied without editing the script.
 - **Client-provided service principal**: you may create the deployment service principal yourself and give the script its object ID; the script then assigns the required roles to it instead of creating one.
-- **Skippable guest invitations**: `-SkipGuestInvitation` (or the answer file) skips inviting Neologik staff, for clients who provision accounts in their own tenant.
+- **Skippable guest invitations**: `-SkipGuestInvitation` (or the answer file) skips inviting Neologik staff, for clients who provision accounts in their own tenant. Declining invitations offers a follow-up: add existing pre-created accounts to the security groups (from the guest file or typed addresses) with no invitation sent; non-existent addresses are reported and skipped without stopping the run.
 - **Platform Sign-in app**: the script creates the 'Neologik Platform Sign-in' app registration and assigns the NCE role groups to it, so NCE login works without a separate manual step.
 - **Non-interactive (CI) mode**: `-NonInteractive` runs the script unattended from a fully-populated answer file.
 - **Entra Agent ID permissions**: the deployment service principal is granted the granular Microsoft Entra Agent ID Graph roles needed to provision agent identities, instead of any broad directory role.
@@ -213,7 +213,7 @@ The chosen name is saved to the checkpoint, so if a run fails and you resume it,
 
 ## Interactive Configuration Flow
 
-The script asks for, in order: Organization Name, Bot Hostname (FQDN), Organization Code, Environment Type, Azure Region, Environment Index, resource tagging (with optional custom tags), then the five resource names (Resource Group, Key Vault, Deployment Storage Account, Script Runner Managed Identity, SQL Managed Identity - each pre-filled with the computed standard name or your answer-file override), the budget cost-report email recipients, the guest-invitation decision, and the service-principal decision (create one, or use one you already created). A configuration summary is shown for confirmation before anything is created.
+The script asks for, in order: Organization Name, Bot Hostname (FQDN), Organization Code, Environment Type, Azure Region, Environment Index, resource tagging (with optional custom tags), then the five resource names (Resource Group, Key Vault, Deployment Storage Account, Script Runner Managed Identity, SQL Managed Identity - each pre-filled with the computed standard name or your answer-file override), the budget cost-report email recipients, the guest-invitation decision (declining it offers a follow-up: add existing pre-created accounts to the security groups, from the guest file or typed addresses), and the service-principal decision (create one, or use one you already created). A configuration summary is shown for confirmation before anything is created.
 
 ## Input Validation
 
@@ -282,6 +282,10 @@ Invites Neologik team members as guests based on email addresses in the `Neologi
 - File must be in the same directory as the script
 
 Users are only invited if no account with that email already exists in the tenant - accounts you have pre-created (B2B guests or full member accounts whose mail or UPN matches the listed address) are detected and used as-is. Skip invitations entirely with `-SkipGuestInvitation` or the `skipGuestInvitation` answer-file key.
+
+**Adding pre-created accounts without any invitations**: when you decline invitations, a follow-up question asks "Add existing accounts to the security groups?". Answer Y to add accounts you have already created (guests or full members) to the groups with no invitation sent. The addresses come from `NeologikGuestUsers.txt`, or you can type them at the prompt (comma-separated), or supply them in the answer file (`addExistingAccountsToGroups`: true, `existingAccountEmails`: array). Each address must exactly match the account's mail or user principal name; an address with no matching account is reported as not existing and skipped - the script always continues.
+
+**Important**: accounts processed through this flow (invited or pre-existing) are added to **all four security groups**, including the Admin User Group, which carries Azure administration rights on the resource group. List only accounts that should hold Neologik admin/support access - your own end users are added to the specific group they need after deployment instead.
 
 ### 4. Resource Creation
 
