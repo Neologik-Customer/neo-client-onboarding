@@ -9,6 +9,23 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Group.Create removed from the deployment SP grant set (project#1519)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1519
+**Date**: 2026-08-17
+
+- The Microsoft Graph `Group.Create` application permission is no longer
+  granted to the deployment SP (owner decision 2026-08-17, amending the
+  2026-07-14 dedicated-group decision). The platform never creates Entra
+  groups: agent channels reuse the onboarding default user group, or an
+  admin supplies an existing group id at channel attach
+  (`awaiting_user_group` create-and-paste path). Grant now matches
+  exercised capability, continuing the issue #774 least-privilege model.
+- Script comments claiming channel provisioning creates per-agent groups
+  corrected to the reuse/paste model.
+- Tenants already granted `Group.Create` keep the assignment until revoked
+  as a separate operational action (tracked on the ticket).
+
 ## Unreleased - Pooja Pandey added to Neologik guest users (project#1448)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1448

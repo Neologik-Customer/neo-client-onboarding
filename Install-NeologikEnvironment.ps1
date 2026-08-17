@@ -1657,9 +1657,9 @@ function New-NeologikSecurityGroups {
                      else { "neo$($OrganizationCode.ToLower())$EnvironmentIndex" }
         $groupSuffix = if ([string]::IsNullOrWhiteSpace($shortName)) { "" } else { " - $shortName" }
 
-        # v5: one default user group. Per-agent groups are created later by
-        # channel provisioning in the NCE (the deployment SP holds
-        # Group.Create).
+        # v5: one default user group. Agent channels created in the NCE reuse
+        # this group (or an admin supplies another existing group id at channel
+        # attach); the platform never creates groups (project#1519).
         $groups = @()
         $groups += @{
             Name = "Neologik User Group$groupSuffix"
@@ -2211,8 +2211,6 @@ function Grant-GraphAppRolePermissions {
         'AgentIdentity.Create.All'                       = 'ad25cc1d-84d8-47df-a08e-b34c2e800819'
         # Create the agent USER (directory user) hung off an agent identity.
         'AgentIdUser.ReadWrite.All'                      = 'b782c9ad-6f2b-4894-a21b-72bf22417f0a'
-        # v5: channel provisioning creates per-agent user groups at channel attach.
-        'Group.Create'                                   = 'bf7b1a76-6e77-406b-b258-bf5c7720e98f'
     }
 
     Write-Log "Granting Microsoft Graph app permissions ($($AppRoles -join ', ')) to $PrincipalDescription..." -Level Info
@@ -2510,6 +2508,8 @@ function Set-AppRegistrationRoles {
         # Also grants the granular Microsoft Entra Agent ID permissions so the deployment SP
         # can provision agent identity blueprints (+ principal + FIC) for autonomous agents,
         # without the broad 'Agent ID Administrator' directory role (keeps the reduced model).
+        # No Group.Create: the platform never creates Entra groups - channels reuse the
+        # onboarding group or an admin-supplied existing group id (project#1519).
         Grant-GraphAppRolePermissions -PrincipalId $ServicePrincipalId -PrincipalDescription 'App Registration service principal' `
             -AppRoles @(
                 'Application.Read.All',
@@ -2519,8 +2519,7 @@ function Set-AppRegistrationRoles {
                 'AgentIdentityBlueprint.UpdateAuthProperties.All',
                 'AgentIdentityBlueprintPrincipal.Create',
                 'AgentIdentity.Create.All',
-                'AgentIdUser.ReadWrite.All',
-                'Group.Create'
+                'AgentIdUser.ReadWrite.All'
             )
 
         # Update ConfigData with group membership
@@ -5002,10 +5001,11 @@ function Start-NeologikOnboarding {
             -DefaultValue $sqlDefault -Validator ${function:Test-ManagedIdentityNameError} `
             -LabelPrefix (Get-PromptLabel $sqlDefault $sqlComputed)
 
-        # v5 (Neologik Harness): no bots are created at onboarding. Agents and
-        # their channels are created post-deployment in the Neologik Harness
-        # admin tool; channel provisioning creates the per-agent user groups
-        # (the deployment SP holds Group.Create for this).
+        # v5: no bots are created at onboarding. Agents and their channels are
+        # created post-deployment in the NCE admin tool; channels reuse the
+        # default user group created above (or an admin supplies another
+        # existing group id at channel attach) - the platform never creates
+        # groups (project#1519).
 
         # Get Budget Cost-Report Email Recipient(s)
         # A daily Azure Cost Management report is emailed to these addresses. The report
