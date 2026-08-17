@@ -75,6 +75,6 @@ Note: you will **not** be asked about bots or agents - agents and their channels
 
 - [ ] **Deployment service principal** (create vs. bring your own)
   - Default: the script creates the deployment service principal for you
-  - If you prefer to create it yourself, have ready: its **object ID** (the enterprise-application / service-principal object ID, not the client/app ID) and, optionally, its client secret (or add the secret to Key Vault yourself before the first deployment)
+  - If you prefer to create it yourself, follow [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md) and have ready: its **object ID** (the enterprise-application / service-principal object ID, not the client/app ID) and, optionally, its client secret (or add the secret to Key Vault yourself before the first deployment)
 
 ---

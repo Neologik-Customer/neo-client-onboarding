@@ -197,7 +197,7 @@ This sets the organization code to "ABC" and prompts for other values.
     -ExistingServicePrincipalSecret $env:SP_CLIENT_SECRET
 ```
 
-Supply the **enterprise-application (service principal) object ID**, not the app/client ID - the script resolves the client ID from it. The secret is optional; if omitted, add it to Key Vault manually before the first deployment (secret name `neologik-deployment-service-principle-secret`).
+Supply the **enterprise-application (service principal) object ID**, not the app/client ID - the script resolves the client ID from it. The secret is optional; if omitted, add it to Key Vault manually before the first deployment (secret name `neologik-deployment-service-principle-secret`). Step-by-step creation instructions: [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md).
 
 ### Example 6: Override the Key Vault Name
 

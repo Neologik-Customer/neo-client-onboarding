@@ -25,8 +25,15 @@ This document tracks the version history of the Neologik customer onboarding scr
   demands `bots[]` (validation requires organizationCode, organizationName,
   fqdn only) and the `-KeyVaultName` help shows the v5 default name shape.
   No behaviour change.
-- QUICK-REFERENCE.pdf and secure-overview.pdf still need regenerating from
-  the updated markdown (manual step, tracked on the ticket).
+- QUICK-REFERENCE.pdf and secure-overview.pdf regenerated from the updated
+  markdown (markdown -> HTML -> Edge headless print-to-PDF, A4;
+  text-verified).
+- New CREATE-SP-GUIDE.md: customer step-by-step for creating their own
+  deployment service principal (portal + az CLI), the
+  enterprise-application-object-ID distinction, secret-rotation
+  responsibility, and the what-you-do-NOT-need-to-do list; linked from
+  README, PRE-ONBOARDING-INFO-GATHERING, QUICK-REFERENCE and
+  TECHNICAL-REFERENCE.
 
 ## Unreleased - Group.Create removed from the deployment SP grant set (project#1519)
 **Branch**: `feature/agent-platform`

@@ -18,6 +18,7 @@ Welcome! This repository contains everything you need to set up your Neologik en
 **Main Files:**
 - **Install-NeologikEnvironment.ps1** - The PowerShell script that creates your Azure resources
 - **PFX-CERT-GUIDE.md** - Instructions for creating your TLS/SSL certificate
+- **CREATE-SP-GUIDE.md** - Optional: how to create the deployment service principal yourself instead of letting the script create it
 - **FINISHING-STEPS-GUIDE.md** - Final steps after Neologik completes the deployment
 - **Upgrade-TeamsAppInstallations.ps1** + **TEAMS-APP-UPGRADE-GUIDE.md** - Bulk-upgrade every user's installed Neologik Teams bot to the latest version (run periodically, after onboarding)
 
@@ -187,6 +188,7 @@ Questions you'll be asked:
 12. **Use a service principal you have already created?**: Whether to reuse your own deployment service principal
     - Default is No (the script creates one for you)
     - If Yes, have its **object ID** (the enterprise-application object ID, not the client/app ID) ready, plus optionally its client secret
+    - See **[CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md)** for step-by-step instructions on creating the service principal and finding the correct ID
 
 ### 7. Confirm and Continue
 

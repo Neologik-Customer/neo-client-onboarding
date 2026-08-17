@@ -131,7 +131,7 @@ The environment type (`dev`/`prd`) is collected for classification but never app
 
 ### 5. App Registration & Service Principal (Entra ID)
 
-**Action:** Create app registration for GitHub deployments - or reuse a service principal you have already created (`-ExistingServicePrincipalObjectId` / `useExistingServicePrincipal` in `inputs.json`; roles below are assigned either way)
+**Action:** Create app registration for GitHub deployments - or reuse a service principal you have already created (`-ExistingServicePrincipalObjectId` / `useExistingServicePrincipal` in `inputs.json`; roles below are assigned either way; creation steps in [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md))
 
 | Property | Value |
 |----------|-------|
