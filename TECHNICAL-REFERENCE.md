@@ -213,7 +213,7 @@ The chosen name is saved to the checkpoint, so if a run fails and you resume it,
 
 ## Interactive Configuration Flow
 
-The script asks for, in order: Organization Name, Bot Hostname (FQDN), Organization Code, Environment Type, Azure Region, Environment Index, resource tagging (with optional custom tags), then the five resource names (Resource Group, Key Vault, Deployment Storage Account, Script Runner Managed Identity, SQL Managed Identity - each pre-filled with the computed standard name or your answer-file override), the budget cost-report email recipients, the guest-invitation decision (declining it offers a follow-up: add existing pre-created accounts to the security groups, from the guest file or typed addresses), and the service-principal decision (create one, or use one you already created). A configuration summary is shown for confirmation before anything is created.
+The script asks for, in order: Organization Name, Bot Hostname (FQDN), Organization Code, Environment Type, Azure Region, Environment Index, resource tagging (with optional custom tags), then the five resource names (Resource Group, Key Vault, Deployment Storage Account, Script Runner Managed Identity, SQL Managed Identity - each pre-filled with the computed standard name or your answer-file override), the budget cost-report email recipients, the guest-invitation decision (accepting it lists the file's addresses and offers to add more, typed line-by-line; declining it offers a follow-up: add existing pre-created accounts to the security groups, from the guest file or typed addresses), and the service-principal decision (create one, or use one you already created). A configuration summary is shown for confirmation before anything is created.
 
 ## Input Validation
 
@@ -282,6 +282,8 @@ Invites Neologik team members as guests based on email addresses in the `Neologi
 - File must be in the same directory as the script
 
 Users are only invited if no account with that email already exists in the tenant - accounts you have pre-created (B2B guests or full member accounts whose mail or UPN matches the listed address) are detected and used as-is. Skip invitations entirely with `-SkipGuestInvitation` or the `skipGuestInvitation` answer-file key.
+
+**Extending the invite list interactively**: the invite prompt lists the file's addresses first; answering Y then offers "Do you want to add any more addresses to invite?" - typed one per line (blank line to finish, commas accepted within a line, duplicates removed). When the file is empty or missing, answering Y goes straight to typed entry, so the whole invite list can be built by hand. Unattended (`-NonInteractive`) runs use the file only.
 
 **Adding pre-created accounts without any invitations**: when you decline invitations, a follow-up question asks "Add existing accounts to the security groups?". Answer Y to add accounts you have already created (guests or full members) to the groups with no invitation sent. The addresses come from `NeologikGuestUsers.txt`, or you can type them at the prompt - one address per line, Enter on an empty line to finish, with commas accepted within a line for pasting a ready-made list (duplicates are removed and the collected list is echoed back) - or supply them in the answer file (`addExistingAccountsToGroups`: true, `existingAccountEmails`: array). Each address must exactly match the account's mail or user principal name; an address with no matching account is reported as not existing and skipped - the script always continues.
 

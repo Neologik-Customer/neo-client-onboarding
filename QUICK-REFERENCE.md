@@ -77,6 +77,7 @@ The environment type (`dev`/`prd`) is collected for classification but never app
 
 **Notes:**
 - Accounts you have pre-created (B2B guests or full member accounts whose mail or UPN matches a listed address) are detected and used as-is - no duplicate invitation
+- Interactive runs list the file's addresses and offer to **add more to invite**, typed one per line (blank line finishes, commas accepted within a line); with an empty or missing file the whole invite list can be typed in
 - Skip invitations entirely with `-SkipGuestInvitation` (or `skipGuestInvitation` in `inputs.json`) when you provision accounts in your own tenant; groups are then seeded with the signed-in user only
 - Declining invitations offers a follow-up: **add existing pre-created accounts to the security groups** with no invitation sent - addresses from `NeologikGuestUsers.txt`, typed interactively, or `existingAccountEmails` in `inputs.json` (with `addExistingAccountsToGroups: true`). Addresses with no matching account are reported and skipped; the run continues
 - All accounts processed by this step (invited or pre-existing) join **all four groups**, including the Admin User Group and its Azure RBAC - Neologik admin/support accounts only

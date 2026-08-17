@@ -70,7 +70,7 @@ Note: you will **not** be asked about bots or agents - agents and their channels
   - If your organisation mandates its own Azure naming convention, prepare the names in advance (they can also be pre-filled via `inputs.json`) and share the convention with Neologik
 
 - [ ] **Neologik guest invitations** (yes/no)
-  - Default: yes - the Neologik team members listed in `NeologikGuestUsers.txt` are invited as B2B guests
+  - Default: yes - the Neologik team members listed in `NeologikGuestUsers.txt` are invited as B2B guests; the list is shown on screen and you can add further addresses at the prompt (typed one per line)
   - Choose no if you provision accounts for the Neologik team in your own tenant instead
   - If you choose no, a follow-up question offers to add your pre-created accounts (guests or full members) to the security groups with no invitation sent - prepare their exact email addresses (each must match the account's mail or user principal name); addresses can come from the file or be typed in
 

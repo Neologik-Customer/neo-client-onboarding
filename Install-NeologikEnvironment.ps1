@@ -52,6 +52,12 @@
     file ('skipGuestInvitation': true/false); this switch, when passed, takes
     precedence.
 
+    When invitations are ACCEPTED interactively, the file's addresses are listed
+    and a follow-up offers to add more addresses to invite, typed one per line
+    (blank line to finish, commas accepted within a line) - with an empty or
+    missing file the whole invite list can be typed. Unattended runs use the
+    file only.
+
     When invitations are skipped, a follow-up question offers to add EXISTING
     accounts (pre-created B2B guests or member accounts) to the security groups
     without sending any invitation. Answer-file keys: 'addExistingAccountsToGroups'
@@ -1629,6 +1635,31 @@ function Invoke-GuestUserInvitation {
         Write-Log "Failed to invite guest users: $_" -Level Error
         throw
     }
+}
+
+function Read-EmailAddressList {
+    <#
+    .SYNOPSIS
+        Reads email addresses interactively, one line per Enter with a running count.
+        A line may carry several comma-separated addresses (pasting a ready-made list
+        works); a blank line finishes. Returns the de-duplicated list.
+    #>
+    [CmdletBinding()]
+    param(
+        # Pre-collected addresses (e.g. the guest file's entries) - included in the
+        # running count and the returned list.
+        [Parameter(Mandatory = $false)]
+        [string[]]$Seed = @()
+    )
+
+    $collected = @($Seed)
+    while ($true) {
+        Write-Host "  Address ($($collected.Count) so far): " -NoNewline -ForegroundColor Gray
+        $line = Read-Host
+        if ([string]::IsNullOrWhiteSpace($line)) { break }
+        $collected += @($line -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
+    return @($collected | Select-Object -Unique)
 }
 
 function Invoke-ExistingAccountResolution {
@@ -5282,7 +5313,9 @@ function Start-NeologikOnboarding {
         # decision and never prompt again. (The SP secret is held in a script variable, not
         # ConfigData, so it is never written to the checkpoint or exported config.)
 
-        # Guest invitations.
+        # Guest invitations. Typed additions to the invite list are interactive-only;
+        # default to none so the summary and Step 8 can always read the key.
+        $script:ConfigData['AdditionalGuestEmails'] = @()
         if ($script:SkipGuestInvitationFromCli) {
             $script:ConfigData['SkipGuestInvitation'] = [bool]$SkipGuestInvitation
         }
@@ -5304,12 +5337,43 @@ function Start-NeologikOnboarding {
                     $script:NeologikGuestUsers | ForEach-Object { Write-Host "    - $_" -ForegroundColor Gray }
                 }
                 else {
-                    Write-Host "  NeologikGuestUsers.txt is empty or missing - no guests will be invited even if you choose Y." -ForegroundColor Gray
+                    Write-Host "  NeologikGuestUsers.txt is empty or missing - choose Y to type the addresses" -ForegroundColor Gray
+                    Write-Host "  to invite, or N to skip invitations." -ForegroundColor Gray
                 }
                 Write-Host "  (Y/n, default: Y - invite): " -NoNewline -ForegroundColor Yellow
                 $inviteAns = Read-Host
                 # Default (Enter) invites; only an explicit N/no skips.
                 $script:ConfigData['SkipGuestInvitation'] = ($inviteAns -match '^(n|no)$')
+
+                # Invitations accepted: offer to extend the file's list with typed
+                # addresses (or build the whole list by hand when the file is empty or
+                # missing). Interactive path only - unattended runs use the file.
+                if (-not $script:ConfigData['SkipGuestInvitation']) {
+                    $addMore = $false
+                    if ($script:NeologikGuestUsers.Count -gt 0) {
+                        Write-Host "  Do you want to add any more addresses to invite? (y/N, default: N): " -NoNewline -ForegroundColor Yellow
+                        $moreAns = Read-Host
+                        $addMore = ($moreAns -match '^(y|yes)$')
+                    }
+                    else {
+                        $addMore = $true
+                        Write-Host "  Enter the addresses to invite." -ForegroundColor Gray
+                    }
+                    if ($addMore) {
+                        Write-Host "  One address per line (a line may also hold several, comma-separated)." -ForegroundColor Gray
+                        Write-Host "  Press Enter on an empty line to finish." -ForegroundColor Gray
+                        $combined = @(Read-EmailAddressList -Seed @($script:NeologikGuestUsers))
+                        $additional = @($combined | Where-Object { $script:NeologikGuestUsers -notcontains $_ })
+                        $script:ConfigData['AdditionalGuestEmails'] = $additional
+                        if ($additional.Count -gt 0) {
+                            Write-Host "  $($additional.Count) additional address(es) will be invited alongside the $($script:NeologikGuestUsers.Count) from the file:" -ForegroundColor Gray
+                            $additional | ForEach-Object { Write-Host "    - $_" -ForegroundColor Gray }
+                        }
+                        elseif ($script:NeologikGuestUsers.Count -eq 0) {
+                            Write-Host "  No addresses entered - no guests will be invited." -ForegroundColor Yellow
+                        }
+                    }
+                }
             }
         }
 
@@ -5369,19 +5433,12 @@ function Start-NeologikOnboarding {
                         $emails = @($script:NeologikGuestUsers)
                     }
                     else {
-                        # Line-by-line entry: one address per Enter; a line may also carry
-                        # several, comma-separated (pasting a ready-made list works); a
-                        # blank line finishes.
+                        # Line-by-line entry via the shared reader: one address per Enter,
+                        # commas accepted within a line, blank line finishes.
                         Write-Host "  Enter the email addresses, one per line (a line may also hold several," -ForegroundColor Gray
                         Write-Host "  comma-separated). Each must exactly match the account's mail or user" -ForegroundColor Gray
                         Write-Host "  principal name. Press Enter on an empty line to finish." -ForegroundColor Gray
-                        while ($true) {
-                            Write-Host "  Address ($($emails.Count) so far): " -NoNewline -ForegroundColor Gray
-                            $line = Read-Host
-                            if ([string]::IsNullOrWhiteSpace($line)) { break }
-                            $emails += @($line -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-                        }
-                        $emails = @($emails | Select-Object -Unique)
+                        $emails = @(Read-EmailAddressList)
                         if ($emails.Count -eq 0) {
                             Write-Host "  No addresses entered - no accounts will be added to the groups." -ForegroundColor Yellow
                         }
@@ -5439,7 +5496,10 @@ function Start-NeologikOnboarding {
         }
         else { 'No' }
         Write-Host "  Apply Resource Tags:  " -NoNewline; Write-Host $tagsSummary -ForegroundColor Yellow
-        $guestSummary = if (-not $script:ConfigData['SkipGuestInvitation']) { 'Yes' }
+        $guestSummary = if (-not $script:ConfigData['SkipGuestInvitation']) {
+                            $typedCount = @($script:ConfigData['AdditionalGuestEmails'] | Where-Object { $_ }).Count
+                            if ($typedCount -gt 0) { "Yes ($($script:NeologikGuestUsers.Count) from file + $typedCount typed)" } else { 'Yes' }
+                        }
                         elseif ($script:ConfigData['AddExistingAccountsToGroups']) { "No - adding $(@($script:ConfigData['ExistingAccountEmails']).Count) existing account(s) to the groups" }
                         else { 'No (skipped)' }
         Write-Host "  Invite Neologik Guests:" -NoNewline; Write-Host " $guestSummary" -ForegroundColor Yellow
@@ -5538,7 +5598,10 @@ function Start-NeologikOnboarding {
             }
         }
         else {
-            $guestUsers = Invoke-GuestUserInvitation -GuestEmails $script:NeologikGuestUsers
+            # File entries plus any addresses typed at the invite prompt (existing
+            # accounts are matched, the rest receive B2B invitations).
+            $inviteEmails = @(@($script:NeologikGuestUsers) + @($script:ConfigData['AdditionalGuestEmails'] | Where-Object { $_ }) | Select-Object -Unique)
+            $guestUsers = Invoke-GuestUserInvitation -GuestEmails $inviteEmails
         }
 
         # Step 9: Create security groups (includes logged-in user + guest users)

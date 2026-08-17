@@ -9,6 +9,23 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Invite list extendable at the prompt (project#1064)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1064
+**Date**: 2026-08-17
+
+- Accepting guest invitations interactively now lists the file's
+  addresses and asks "Do you want to add any more addresses to invite?" -
+  typed via the shared line-by-line reader (one per Enter, blank line to
+  finish, commas accepted within a line, duplicates removed). With an
+  empty or missing NeologikGuestUsers.txt, answering Y goes straight to
+  typed entry, so the whole invite list can be built by hand.
+- Existing accounts among the combined list are matched (no email), the
+  rest receive B2B invitations, and everyone joins the groups - the
+  invitation flow itself is unchanged.
+- Configuration summary shows "Yes (N from file + M typed)"; unattended
+  (-NonInteractive) runs use the file only.
+
 ## Unreleased - Add existing accounts to groups when invitations are declined (project#1064)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1064
