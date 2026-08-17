@@ -57,7 +57,8 @@
     without sending any invitation. Answer-file keys: 'addExistingAccountsToGroups'
     (true/false) and optionally 'existingAccountEmails' (array or comma-separated
     string; defaults to the NeologikGuestUsers.txt entries, or addresses typed at
-    the prompt). Each address must match the account's mail or userPrincipalName;
+    the prompt one per line - blank line to finish, commas accepted within a
+    line). Each address must match the account's mail or userPrincipalName;
     an address with no matching account is reported and skipped - the run always
     continues. Accounts added this way join ALL Neologik groups, including the
     Admin User Group.
@@ -5368,12 +5369,25 @@ function Start-NeologikOnboarding {
                         $emails = @($script:NeologikGuestUsers)
                     }
                     else {
-                        Write-Host "  Enter the email addresses, comma-separated. Each must exactly match the" -ForegroundColor Gray
-                        Write-Host "  account's mail or user principal name: " -NoNewline -ForegroundColor Gray
-                        $typed = Read-Host
-                        $emails = @($typed -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                        # Line-by-line entry: one address per Enter; a line may also carry
+                        # several, comma-separated (pasting a ready-made list works); a
+                        # blank line finishes.
+                        Write-Host "  Enter the email addresses, one per line (a line may also hold several," -ForegroundColor Gray
+                        Write-Host "  comma-separated). Each must exactly match the account's mail or user" -ForegroundColor Gray
+                        Write-Host "  principal name. Press Enter on an empty line to finish." -ForegroundColor Gray
+                        while ($true) {
+                            Write-Host "  Address ($($emails.Count) so far): " -NoNewline -ForegroundColor Gray
+                            $line = Read-Host
+                            if ([string]::IsNullOrWhiteSpace($line)) { break }
+                            $emails += @($line -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                        }
+                        $emails = @($emails | Select-Object -Unique)
                         if ($emails.Count -eq 0) {
                             Write-Host "  No addresses entered - no accounts will be added to the groups." -ForegroundColor Yellow
+                        }
+                        else {
+                            Write-Host "  $($emails.Count) address(es) collected:" -ForegroundColor Gray
+                            $emails | ForEach-Object { Write-Host "    - $_" -ForegroundColor Gray }
                         }
                     }
                 }

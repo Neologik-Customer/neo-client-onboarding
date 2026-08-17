@@ -21,9 +21,12 @@ This document tracks the version history of the Neologik customer onboarding scr
   the Neologik team's accounts themselves.
 - Address sources, in precedence order: answer-file
   `existingAccountEmails` (array or comma string), NeologikGuestUsers.txt,
-  or addresses typed at the prompt ([F]ile / [T]ype choice). New
-  answer-file key `addExistingAccountsToGroups` (true/false); in
-  -NonInteractive mode the file is the default source.
+  or addresses typed at the prompt ([F]ile / [T]ype choice). Typed entry
+  is line-by-line: one address per Enter, blank line to finish, commas
+  accepted within a line for pasting a list; duplicates removed and the
+  collected list echoed back with a count. New answer-file key
+  `addExistingAccountsToGroups` (true/false); in -NonInteractive mode
+  the file is the default source.
 - Unresolvable addresses are reported ("does not exist in this tenant -
   skipped, continuing") and never stop the run.
 - Prompt and docs warn that accounts added this way join ALL Neologik

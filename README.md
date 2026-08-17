@@ -184,7 +184,7 @@ Questions you'll be asked:
 
 11. **Invite Neologik guest users?**: Whether to invite the Neologik team members listed in `NeologikGuestUsers.txt` as guests
     - Default is Yes; choose No if you provision accounts for the Neologik team in your own tenant instead
-    - If you choose No, a follow-up question asks: **"Add existing accounts to the security groups?"** - answer Yes to add accounts you have already created (guests or full members) with no invitation sent. The addresses come from `NeologikGuestUsers.txt` or you can type them in, comma-separated. An address with no matching account is reported and skipped - the script carries on
+    - If you choose No, a follow-up question asks: **"Add existing accounts to the security groups?"** - answer Yes to add accounts you have already created (guests or full members) with no invitation sent. The addresses come from `NeologikGuestUsers.txt`, or you can type them in one per line - press Enter after each address and press Enter on an empty line when you have finished (a line may also hold several addresses separated by commas). An address with no matching account is reported and skipped - the script carries on
     - Note: accounts added here go into ALL Neologik groups, including the Admin User Group (Azure admin access) - only list accounts that should hold Neologik admin/support access
 
 12. **Use a service principal you have already created?**: Whether to reuse your own deployment service principal
