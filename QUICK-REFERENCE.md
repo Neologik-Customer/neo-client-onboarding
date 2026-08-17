@@ -12,10 +12,10 @@ This script creates resources and assigns permissions for Neologik deployment in
 ### Required Permissions to Run Script
 
 **User must have:**
-- ✅ **Owner** role at subscription level
-- ✅ **Global Administrator** role in Entra ID
+- **Owner** role at subscription level
+- **Global Administrator** role in Entra ID
 
-**Reason:** Script assigns Azure RBAC roles (requires Owner) and Entra ID directory roles (requires Global Administrator)
+**Reason:** Script assigns Azure RBAC roles (requires Owner) and Microsoft Graph app-role assignments plus enterprise-application group assignments (require Global Administrator)
 
 ---
 
@@ -53,50 +53,46 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 ## Variables Used
 
 - `{org}` = Organization code (3 characters, lowercase)
-- `{env}` = Environment type (`dev` or `prd`, lowercase)
 - `{region}` = Azure region abbreviation (e.g., `uks`, `eus`, lowercase)
 - `{index}` = Environment index (e.g., `01`, `02`)
-- `{agent-name}` = Full bot name (letters, numbers, spaces, dashes and underscores; no length limit). Each bot also has a short name (lowercase, 1–4 characters, must start with a letter, letters/numbers/dashes only)
+- `{short}` = Solution short name: `neo{org}{index}` (e.g., `neoabc01`)
 
-**Example:** Organization "ABC", dev environment, UK South, index 01, bot agent name "support"
-- Resource Group: `rg-neo-abc-dev-uks-01`
-- Key Vault: `kvneoabcdev01`
-- Storage Account: `stneodeployabcdevuks01`
-- User Group: `Neologik User Group support - abc-dev`
+The environment type (`dev`/`prd`) is collected for classification but never appears in resource names. Every computed name below can be overridden from the answer file (`inputs.json`) to match a client-mandated naming convention.
+
+**Example:** Organization "ABC", UK South, index 01
+- Resource Group: `rg-neo-neoabc-uks-01`
+- Key Vault: `kvneoabc01`
+- Storage Account: `stneodeployneoabcuks01`
+- Default User Group: `Neologik User Group - neoabc01`
 
 ---
 
 ## Changes Applied by Script
 
-### 1. Guest User Invitations (Entra ID)
+### 1. Guest User Invitations (Entra ID) - optional
 
-**Action:** Invite Neologik users as B2B guests (if not already invited)
+**Action:** Invite Neologik users as B2B guests (if no account with that email already exists)
 
 **Source:** Email addresses loaded from `NeologikGuestUsers.txt` file
 
-**Note:** Guest users will only be invited if they don't already exist in the tenant
+**Notes:**
+- Accounts you have pre-created (B2B guests or full member accounts whose mail or UPN matches a listed address) are detected and used as-is - no duplicate invitation
+- Skip invitations entirely with `-SkipGuestInvitation` (or `skipGuestInvitation` in `inputs.json`) when you provision accounts in your own tenant; groups are then seeded with the signed-in user only
 
 ---
 
 ### 2. Security Groups (Entra ID)
 
-**Action:** Create security groups (3+ groups depending on bot count)
+**Action:** Create four security groups
 
-**Bot User Groups** (one per bot):
-| Group Name | Members |
-|------------|----------|
-| `Neologik User Group {agent-name} - {org}-{env}` | Current user + Neologik guests |
+| Group Name | Purpose | Members |
+|------------|---------|---------|
+| `Neologik User Group - {short}` | Default users group - assigned to agent channels created post-deployment in the Neologik admin tool (NCE). The platform never creates groups; channels reuse this group or another existing group you supply | Current user + Neologik users |
+| `Neologik NCE Contributors - {short}` | NCE contributor role (create and change platform configuration). Renamed in place from the pre-v5 `Neologik NCE User Group` where one exists | Current user + Neologik users |
+| `Neologik NCE Admins - {short}` | NCE admin role (Blueprints, Audit, Admin page) | Current user + Neologik users |
+| `Neologik Admin User Group - {short}` | Azure resource administration | Current user + Neologik users |
 
-**Note:** If you configure 2 bots with agent names "bot" and "support", you'll get:
-- `Neologik User Group bot - {org}-{env}`
-- `Neologik User Group support - {org}-{env}`
-
-**Standard Groups** (always created):
-| Group Name | Members |
-|------------|----------|
-| `Neologik NCE Contributors - {org}-{env}` | Current user + Neologik guests (NCE contributor role) |
-| `Neologik NCE Admins - {org}-{env}` | Current user + Neologik guests (NCE admin role - Blueprints/Audit/Admin) |
-| `Neologik Admin User Group - {org}-{env}` | Current user + Neologik guests |
+**Note:** No per-bot groups are created - agents and their channels are created after deployment in the NCE.
 
 **Scope:** Entra ID tenant level
 
@@ -108,7 +104,7 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 
 | Name | Location |
 |------|----------|
-| `rg-neo-{org}-{env}-{region}-{index}` | Customer specified (e.g., uksouth) |
+| `rg-neo-neo{org}-{region}-{index}` | Customer specified (e.g., uksouth) |
 
 **Scope:** Subscription
 
@@ -116,38 +112,48 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 
 ### 4. Role Assignments - Security Groups
 
-**Action:** Assign roles to Neologik Admin User Group
+**Action:** Assign roles to Neologik Admin User Group (all at **resource group** scope; no subscription-scoped roles)
 
 | Role | Scope | Principal |
 |------|-------|-----------|
 | **Contributor** | Resource Group | Neologik Admin User Group |
+| **Azure Kubernetes Service Cluster Admin Role** | Resource Group | Neologik Admin User Group |
+| **Azure Kubernetes Service RBAC Cluster Admin** | Resource Group | Neologik Admin User Group |
+| **Key Vault Administrator** | Resource Group | Neologik Admin User Group |
+| **Storage Blob Data Owner** | Resource Group | Neologik Admin User Group |
+| **Storage Table Data Contributor** | Resource Group | Neologik Admin User Group |
+| **Cognitive Services Data Reader** | Resource Group | Neologik Admin User Group |
+| **Cognitive Services OpenAI Contributor** | Resource Group | Neologik Admin User Group |
+| **Search Index Data Reader** | Resource Group | Neologik Admin User Group |
+| **Azure AI Developer** | Resource Group | Neologik Admin User Group |
 
 ---
 
 ### 5. App Registration & Service Principal (Entra ID)
 
-**Action:** Create app registration for GitHub deployments
+**Action:** Create app registration for GitHub deployments - or reuse a service principal you have already created (`-ExistingServicePrincipalObjectId` / `useExistingServicePrincipal` in `inputs.json`; roles below are assigned either way)
 
 | Property | Value |
 |----------|-------|
-| **Name** | `Neologik GitHub Service Connection - {org}-{env}` |
+| **Name** | `Neologik GitHub Service Connection - {short}` |
 | **Type** | Multi-tenant (AzureADMultipleOrgs) |
-| **Client Secret** | Created (365-day expiration) |
-| **Secret Storage** | Stored in Key Vault |
+| **Client Secret** | Created (365-day expiration); with a client-provided SP the secret is optional and client-managed |
+| **Secret Storage** | Stored in Key Vault (`neologik-deployment-service-principle-secret`) |
 
 ### Group Membership
-- Added to: `Neologik Admin User Group - {org}-{env}`
+- Added to: `Neologik Admin User Group - {short}`
 
 ---
 
 ### 6. Role Assignments - Service Principal
 
-**Action:** Assign roles to service principal
+**Action:** Assign roles to the deployment service principal
 
 | Role | Scope | Principal |
 |------|-------|-----------|
-| **Contributor** | Subscription | Service Principal |
+| **Reader** | Subscription | Service Principal |
 | **Cost Management Contributor** | Subscription | Service Principal |
+| **Contributor** | Resource Group | Service Principal |
 | **Key Vault Certificates Officer** | Resource Group | Service Principal |
 | **Key Vault Secrets Officer** | Resource Group | Service Principal |
 | **Storage Blob Data Contributor** | Resource Group | Service Principal |
@@ -160,21 +166,34 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 | **AgentIdentityBlueprint.AddRemoveCreds.All** | Microsoft Graph (app role) | Service Principal |
 | **AgentIdentityBlueprint.UpdateAuthProperties.All** | Microsoft Graph (app role) | Service Principal |
 | **AgentIdentityBlueprintPrincipal.Create** | Microsoft Graph (app role) | Service Principal |
+| **AgentIdentity.Create.All** | Microsoft Graph (app role) | Service Principal |
 | **AgentIdUser.ReadWrite.All** | Microsoft Graph (app role) | Service Principal |
 
-> The five **AgentIdentity\*/AgentIdUser** roles let the deployment service principal provision **Microsoft
-> Entra Agent ID** blueprints, principals, and agent users for autonomous bots — scoped to agent-id only,
-> rather than granting the broad "Agent ID Administrator" directory role.
+> The subscription-scoped roles are read-only (**Reader**, for SKU/quota pre-flight checks) and cost-configuration-only (**Cost Management Contributor**, for the scheduled cost-report emails) - all resource writes are resource-group-scoped. The six **AgentIdentity\*/AgentIdUser** roles let the deployment service principal provision **Microsoft Entra Agent ID** blueprints, principals, and agent users for autonomous agents - scoped to agent-id only, rather than granting the broad "Agent ID Administrator" directory role. No group-management permission is granted: the platform never creates Entra groups.
 
 ---
 
-### 7. Key Vault
+### 7. Platform Sign-in App Registration (Entra ID)
+
+**Action:** Create the sign-in app used by the Neologik admin tool (NCE) and App portal login
+
+| Property | Value |
+|----------|-------|
+| **Name** | `Neologik Platform Sign-in - {short}` |
+| **Type** | Multi-tenant (AzureADMultipleOrgs), web redirect URI on your hostname |
+| **Client Secret** | Created (365-day expiration), stored in Key Vault |
+| **Owner** | Deployment service principal (so the pipeline can manage/rotate it) |
+| **Group Assignments** | `Neologik NCE Contributors - {short}` and `Neologik NCE Admins - {short}` assigned to the enterprise application, so members' tokens carry the groups claim NCE authorizes from |
+
+---
+
+### 8. Key Vault
 
 **Action:** Create Key Vault with RBAC authorization
 
 | Property | Value |
 |----------|-------|
-| **Name** | `kvneo{org}{env}{index}` (override with `-KeyVaultName`) |
+| **Name** | `kvneo{org}{index}` (override with `-KeyVaultName` or `keyVaultName` in `inputs.json`) |
 | **Authorization** | Microsoft Entra ID RBAC (no access policies) |
 | **Public Access** | Enabled |
 | **Soft Delete** | Enabled (Azure default) |
@@ -182,7 +201,8 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 ### Secrets Stored
 | Secret Name | Content |
 |-------------|---------|
-| `neologik-deployment-service-principle-secret` | Service Principal client secret |
+| `neologik-deployment-service-principle-secret` | Deployment service principal client secret |
+| `sp-admin-{solution-name}-auth-secret` | Platform Sign-in app client secret |
 
 ### Role Assignments
 | Role | Scope | Principal |
@@ -193,17 +213,17 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 
 ---
 
-### 8. Storage Account
+### 9. Storage Account
 
-**Action:** Create storage account for certificate storage
+**Action:** Create storage account for the certificate and configuration handoff
 
 | Property | Value |
 |----------|-------|
-| **Name** | `stneodeploy{org}{env}{region}{index}` |
+| **Name** | `stneodeployneo{org}{region}{index}` (truncated to 24 characters; override with `storageAccountName` in `inputs.json`) |
 | **Authentication** | Microsoft Entra ID only |
 | **Shared Key Access** | Disabled |
 | **Public Access** | Enabled |
-| **Blob Container** | `certificate` |
+| **Blob Containers** | `certificate` (TLS certificate), `json` (configuration JSON handoff), `logs` |
 
 ### Role Assignments
 | Role | Scope | Principal |
@@ -214,15 +234,15 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 
 ---
 
-### 9. Managed Identities (User-Assigned)
+### 10. Managed Identities (User-Assigned)
 
 **Action:** Create 2 managed identities
 
 ### Identity 1: Script Runner Service Connection
 | Property | Value |
 |----------|-------|
-| **Name** | `neologik-script-runner-service-connection-{org}-{env}` |
-| **Display Name** | `Neologik Script Runner Service Connection - {org}-{env}` |
+| **Name** | `neologik-script-runner-service-connection-{short}` (override with `scriptRunnerIdentityName`) |
+| **Display Name** | `Neologik Script Runner Service Connection - {short}` |
 
 **Role Assignments:**
 | Role | Scope |
@@ -234,8 +254,8 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 ### Identity 2: SQL Managed Identity
 | Property | Value |
 |----------|-------|
-| **Name** | `neologik-sql-managed-identity-{org}-{env}` |
-| **Display Name** | `Neologik SQL Managed Identity - {org}-{env}` |
+| **Name** | `neologik-sql-managed-identity-{short}` (override with `sqlIdentityName`) |
+| **Display Name** | `Neologik SQL Managed Identity - {short}` |
 
 **Role Assignments:**
 | Role | Scope |
@@ -249,13 +269,14 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 ### Subscription Level
 | Principal | Role |
 |-----------|------|
-| Service Principal (GitHub) | Contributor |
+| Service Principal (GitHub) | Reader |
 | Service Principal (GitHub) | Cost Management Contributor |
 | Managed Identity (Script Runner) | Contributor |
 
 ### Resource Group Level
 | Principal | Role |
 |-----------|------|
+| Service Principal (GitHub) | Contributor |
 | Service Principal (GitHub) | Key Vault Certificates Officer |
 | Service Principal (GitHub) | Key Vault Secrets Officer |
 | Service Principal (GitHub) | Storage Blob Data Contributor |
@@ -264,9 +285,7 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 | Service Principal (GitHub) | Role Based Access Control Administrator |
 | Managed Identity (Script Runner) | Key Vault Secrets Officer |
 | Managed Identity (Script Runner) | Azure Bot Service Contributor Role |
-| Neologik Admin User Group | Contributor |
-| Neologik Admin User Group | Key Vault Secrets Officer |
-| Neologik Admin User Group | Storage Blob Data Contributor |
+| Neologik Admin User Group | Contributor + the administration role set in section 4 |
 
 ### Microsoft Graph (App Roles)
 | Principal | Role |
@@ -277,6 +296,7 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 | Service Principal (GitHub) | AgentIdentityBlueprint.AddRemoveCreds.All |
 | Service Principal (GitHub) | AgentIdentityBlueprint.UpdateAuthProperties.All |
 | Service Principal (GitHub) | AgentIdentityBlueprintPrincipal.Create |
+| Service Principal (GitHub) | AgentIdentity.Create.All |
 | Service Principal (GitHub) | AgentIdUser.ReadWrite.All |
 
 ### Entra ID (Directory Roles)

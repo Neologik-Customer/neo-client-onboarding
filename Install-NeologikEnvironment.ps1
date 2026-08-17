@@ -34,9 +34,9 @@
 
 .PARAMETER KeyVaultName
     Override the Key Vault name. If omitted, the standard name
-    'kvneo<org><env><index>' is generated automatically. Must be 3-24
-    characters, start with a letter, end with a letter or digit, and
-    contain only letters, digits and hyphens.
+    'kv<solution short name>' (kvneo<org><index>, e.g. kvneoabc01) is
+    generated automatically. Must be 3-24 characters, start with a letter,
+    end with a letter or digit, and contain only letters, digits and hyphens.
 
 .PARAMETER SkipPowerShellUpdate
     Skip PowerShell version check and update.
@@ -4309,7 +4309,7 @@ function Start-NeologikOnboarding {
         # Non-interactive mode requires a fully-populated answer file — fail before any
         # prompt could fire, with a clearer error than a Read-Host failure mid-run.
         if ($script:NonInteractiveMode -and -not (Test-AnswerFileComplete)) {
-            throw "Non-interactive mode requires a fully-populated answer file (organizationCode, organizationName, fqdn, and complete bots[]). Supply -AnswerFile or fix the missing keys."
+            throw "Non-interactive mode requires a fully-populated answer file (organizationCode, organizationName, fqdn). Supply -AnswerFile or fix the missing keys."
         }
 
         # Check for an existing checkpoint and offer to resume

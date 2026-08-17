@@ -61,30 +61,20 @@ Before running the script, prepare the following information. You will be prompt
   - Default: "uksouth"
   - Will be automatically converted to lowercase
 
-### 6. Bot Configuration
+### 6. Provisioning Decisions
 
-- [ ] **Bot Count**
-  - How many bots will be deployed? (1-10)
-  - Default: 1
-  - Used to create separate user groups for each bot
+Note: you will **not** be asked about bots or agents - agents and their channels are created after deployment in the Neologik admin tool.
 
-For **each bot**, prepare:
+- [ ] **Resource naming** (optional)
+  - The script computes Neologik-standard names for everything it creates (resource group, Key Vault, storage account, managed identities) and shows each as a default you can accept with Enter
+  - If your organisation mandates its own Azure naming convention, prepare the names in advance (they can also be pre-filled via `inputs.json`) and share the convention with Neologik
 
-- [ ] **Full Bot Name** (descriptive name)
-  - Example: "bot", "RAMS Agent", "Customer Service Bot"
-  - Letters (upper or lower case), numbers, spaces, dashes and underscores
-  - No length limit
-  - Used in security group names
+- [ ] **Neologik guest invitations** (yes/no)
+  - Default: yes - the Neologik team members listed in `NeologikGuestUsers.txt` are invited as B2B guests
+  - Choose no if you provision accounts for the Neologik team in your own tenant instead (accounts you pre-create with matching email addresses are picked up automatically)
 
-- [ ] **Short Name** (short identifier)
-  - Example: "bot", "sup", "rams"
-  - Lowercase
-  - 1–4 characters
-  - Must start with a letter, letters/numbers/dashes only
-  - Used internally for identification
-
-- [ ] **Authentication type** (select "anonymous" or "Teams")
-  - Select "anonymous" to use in public web chats that do not require login
-  - Select "Teams" to use as an app that is integrated into your Teams workspace
+- [ ] **Deployment service principal** (create vs. bring your own)
+  - Default: the script creates the deployment service principal for you
+  - If you prefer to create it yourself, have ready: its **object ID** (the enterprise-application / service-principal object ID, not the client/app ID) and, optionally, its client secret (or add the secret to Key Vault yourself before the first deployment)
 
 ---

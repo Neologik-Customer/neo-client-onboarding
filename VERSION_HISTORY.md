@@ -9,6 +9,25 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - v5 documentation alignment (project#1527)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1527
+**Date**: 2026-08-17
+
+- Customer-facing docs aligned with the v5.0.0 script: TECHNICAL-REFERENCE
+  rewritten (v5 naming convention, no bots at onboarding, Platform Sign-in
+  app, client-provided SP, CI mode, Reader/Cost Management Contributor
+  subscription roles, Agent ID Graph roles, `Neologik_<org><index>_...`
+  config filename, correct repo URL); QUICK-REFERENCE and secure-overview
+  brought to the same facts; README, PRE-ONBOARDING-INFO-GATHERING and
+  FINISHING-STEPS-GUIDE purged of bot-count / per-bot-group flow.
+- Script text-only fixes: the non-interactive answer-file error no longer
+  demands `bots[]` (validation requires organizationCode, organizationName,
+  fqdn only) and the `-KeyVaultName` help shows the v5 default name shape.
+  No behaviour change.
+- QUICK-REFERENCE.pdf and secure-overview.pdf still need regenerating from
+  the updated markdown (manual step, tracked on the ticket).
+
 ## Unreleased - Group.Create removed from the deployment SP grant set (project#1519)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1519
