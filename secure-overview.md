@@ -30,7 +30,7 @@ Up-front, before any prompts (`Test-RequiredPermissions`):
 | Azure resource providers | Registered subscription-wide |
 | Config export | `Neologik_<org><index>_Configuration_<timestamp>.json` handoff artifact (also uploaded to the `json` container in interactive runs) |
 
-Naming: all names derive from two tokens — solution name `neo-neo<org>-<region>-<index>` and short name `neo<org><index>`; the environment type never appears in names. Every computed name is overridable from `inputs.json` for client-mandated naming conventions.
+Naming: all names derive from two tokens — solution name `neo-<org><env>-<region>-<index>` and short name `<org><env><index>`. Every computed name is overridable from `inputs.json` for client-mandated naming conventions.
 
 ## Azure access it grants
 

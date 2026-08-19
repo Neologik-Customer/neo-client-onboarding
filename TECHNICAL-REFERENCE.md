@@ -114,7 +114,7 @@ Or specify several parameters:
 | `AzureRegion` | String | `"uksouth"` | Azure region for resource deployment |
 | `TenantId` | String | (current) | Azure Tenant ID (optional, uses current context) |
 | `SubscriptionName` | String | `"Neologik-Development-01"` | Name of the Azure subscription to use |
-| `KeyVaultName` | String | (auto: `kvneo<org><index>`) | Override the Key Vault name. 3-24 chars; start with a letter, end with a letter or digit; letters, digits and hyphens only |
+| `KeyVaultName` | String | (auto: `kv<org><env><index>`) | Override the Key Vault name. 3-24 chars; start with a letter, end with a letter or digit; letters, digits and hyphens only |
 | `SkipPowerShellUpdate` | Switch | `false` | Skip PowerShell version check and update |
 | `SkipModuleInstall` | Switch | `false` | Skip Azure module installation check |
 | `SkipGuestInvitation` | Switch | `false` | Skip inviting Neologik guest users. Use when the client provisions its own accounts in its own tenant. Security groups are still created, seeded with the signed-in user only |
@@ -207,7 +207,7 @@ Supply the **enterprise-application (service principal) object ID**, not the app
     -KeyVaultName "kv-abc-shared"
 ```
 
-By default the Key Vault is named `kvneo<org><index>` (e.g. `kvneoabc01`). Supply `-KeyVaultName` (or the `keyVaultName` answer-file key) to use a name of your choosing instead.
+By default the Key Vault is named `kv<org><env><index>` (e.g. `kvabcprd01`). Supply `-KeyVaultName` (or the `keyVaultName` answer-file key) to use a name of your choosing instead.
 
 The chosen name is saved to the checkpoint, so if a run fails and you resume it, the same name is reused automatically - you do **not** need to pass `-KeyVaultName` again. If you *do* pass `-KeyVaultName` on a resume, the command-line value takes precedence over the saved one.
 
@@ -236,12 +236,12 @@ The script will keep prompting until valid input is provided, ensuring all resou
 
 Two naming tokens drive every computed name (the environment type never appears in names):
 
-- **Solution name**: `neo-neo<org>-<region>-<index>` (e.g. `neo-neoabc-uks-01`)
-- **Solution short name**: `neo<org><index>` (e.g. `neoabc01`)
+- **Solution name**: `neo-<org><env>-<region>-<index>` (e.g. `neo-abcprd-uks-01`)
+- **Solution short name**: `<org><env><index>` (e.g. `abcprd01`)
 
 Computed standard names (example: organization code `abc`, UK South, index `01`):
 
-- **Resource Group**: `rg-<solution-name>` (e.g. `rg-neo-neoabc-uks-01`)
+- **Resource Group**: `rg-<solution-name>` (e.g. `rg-neo-abcprd-uks-01`)
 - **Key Vault**: `kv<short-name>` (e.g. `kvneoabc01`)
 - **Deployment Storage Account**: `stneodeployneo<org><region><index>` truncated to 24 characters (e.g. `stneodeployneoabcuks01`)
 - **Security Groups** (suffix = short name):
@@ -547,7 +547,7 @@ Complete these steps in the Azure Portal:
 4. Use **Microsoft Entra ID** authentication (not access key)
 
 #### Store Certificate Password
-1. Navigate to the Key Vault (default `kvneo<org><index>`)
+1. Navigate to the Key Vault (default `kv<org><env><index>`)
 2. Go to Secrets
 3. Create new secret:
    - **Name**: `neologik-deployment-certificate-pfx-secret`

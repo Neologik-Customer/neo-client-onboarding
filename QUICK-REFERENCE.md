@@ -55,12 +55,12 @@ Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). R
 - `{org}` = Organization code (3 characters, lowercase)
 - `{region}` = Azure region abbreviation (e.g., `uks`, `eus`, lowercase)
 - `{index}` = Environment index (e.g., `01`, `02`)
-- `{short}` = Solution short name: `neo{org}{index}` (e.g., `neoabc01`)
+- `{short}` = Solution short name: `{org}{env}{index}` (e.g., `abcprd01`)
 
 The environment type (`dev`/`prd`) is collected for classification but never appears in resource names. Every computed name below can be overridden from the answer file (`inputs.json`) to match a client-mandated naming convention.
 
 **Example:** Organization "ABC", UK South, index 01
-- Resource Group: `rg-neo-neoabc-uks-01`
+- Resource Group: `rg-neo-abcprd-uks-01`
 - Key Vault: `kvneoabc01`
 - Storage Account: `stneodeployneoabcuks01`
 - Default User Group: `Neologik User Group - neoabc01`
@@ -107,7 +107,7 @@ The environment type (`dev`/`prd`) is collected for classification but never app
 
 | Name | Location |
 |------|----------|
-| `rg-neo-neo{org}-{region}-{index}` | Customer specified (e.g., uksouth) |
+| `rg-neo-{org}{env}-{region}-{index}` | Customer specified (e.g., uksouth) |
 
 **Scope:** Subscription
 
@@ -196,7 +196,7 @@ The environment type (`dev`/`prd`) is collected for classification but never app
 
 | Property | Value |
 |----------|-------|
-| **Name** | `kvneo{org}{index}` (override with `-KeyVaultName` or `keyVaultName` in `inputs.json`) |
+| **Name** | `kv{org}{env}{index}` (override with `-KeyVaultName` or `keyVaultName` in `inputs.json`) |
 | **Authorization** | Microsoft Entra ID RBAC (no access policies) |
 | **Public Access** | Enabled |
 | **Soft Delete** | Enabled (Azure default) |
