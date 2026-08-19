@@ -329,6 +329,15 @@ without authenticating through MFA" during a v4.5.0 onboarding.
 
 ---
 
+## Version NEXT - deployment SP owns the sign-in service principal (project#1579)
+
+- Date: 2026-08-19
+- Summary: The sign-in (NCE auth) app setup now adds the deployment SP as
+  owner of the service principal object as well as the application object.
+  Application.ReadWrite.OwnedBy only covers owned objects, so without this
+  the pipeline's servicePrincipal updates were denied on every deploy.
+  Idempotent - re-running onboarding backfills existing environments.
+
 ## Version NEXT - summary alignment (project#1577)
 
 - Date: 2026-08-19
