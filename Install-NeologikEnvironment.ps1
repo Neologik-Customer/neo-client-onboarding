@@ -4249,16 +4249,16 @@ function Set-ConfigFromAnswerFile {
 
     # Solution names FIRST (answer-file override, else Neologik-standard) - the
     # short name is the naming token for every other computed default. Standard
-    # construction (project#1063): org token = "neo{org}", environment type
-    # never appears in names.
-    #   SolutionName      neo-neo{org}-{region}-{index}   e.g. neo-neodmo-cus-01
-    #   SolutionShortName neo{org}{index}                 e.g. neodmo01
+    # construction (project#1576, supersedes project#1063): the environment
+    # type joins the organisation code in every name.
+    #   SolutionName      neo-{org}{env}-{region}-{index}   e.g. neo-neodev-cus-01
+    #   SolutionShortName {org}{env}{index}                 e.g. neodev01
     $snAns = [string](Get-Answer 'solutionName')
     $script:ConfigData['SolutionName'] = if (-not [string]::IsNullOrWhiteSpace($snAns)) { $snAns.Trim().ToLower() }
-                                         else { "neo-neo$($script:OrganizationCode)-$regionAbbrev-$($script:EnvironmentIndex)" }
+                                         else { "neo-$($script:OrganizationCode)$($script:EnvironmentType.ToLower())-$regionAbbrev-$($script:EnvironmentIndex)" }
     $ssnAns = [string](Get-Answer 'solutionShortName')
     $script:ConfigData['SolutionShortName'] = if (-not [string]::IsNullOrWhiteSpace($ssnAns)) { $ssnAns.Trim().ToLower() }
-                                              else { "neo$($script:OrganizationCode)$($script:EnvironmentIndex)" }
+                                              else { "$($script:OrganizationCode)$($script:EnvironmentType.ToLower())$($script:EnvironmentIndex)" }
 
     # Resource group name (answer-file override, else computed).
     $rgComputed = "rg-$($script:ConfigData['SolutionName'])"
@@ -4277,7 +4277,7 @@ function Set-ConfigFromAnswerFile {
     if ($kvErr) { throw "keyVaultName '$($script:KeyVaultNameOverride)': $kvErr" }
 
     # Deployment storage account name (answer-file override, else computed and truncated to 24).
-    $saComputed = "stneodeployneo$($script:OrganizationCode)$regionAbbrev$($script:EnvironmentIndex)"
+    $saComputed = "stneodeploy$($script:OrganizationCode)$($script:EnvironmentType.ToLower())$regionAbbrev$($script:EnvironmentIndex)"
     if ($saComputed.Length -gt 24) { $saComputed = $saComputed.Substring(0, 24) }
     $saAns = [string](Get-Answer 'storageAccountName')
     $script:ConfigData['DeployStorageAccountName'] = if (-not [string]::IsNullOrWhiteSpace($saAns)) { $saAns.Trim().ToLower() } else { $saComputed }
@@ -5053,13 +5053,13 @@ function Start-NeologikOnboarding {
         # Resource group name.
         # Solution names FIRST (answer-file override, else Neologik-standard) - the
         # short name is the naming token for every other computed default
-        # (project#1063; environment type never appears in names).
+        # (project#1576: the environment type joins the organisation code).
         $snAns = [string](Get-Answer 'solutionName')
         $script:ConfigData['SolutionName'] = if (-not [string]::IsNullOrWhiteSpace($snAns)) { $snAns.Trim().ToLower() }
-                                             else { "neo-neo$($script:OrganizationCode.ToLower())-$regionAbbrev-$($script:EnvironmentIndex)" }
+                                             else { "neo-$($script:OrganizationCode.ToLower())$($script:EnvironmentType.ToLower())-$regionAbbrev-$($script:EnvironmentIndex)" }
         $ssnAns = [string](Get-Answer 'solutionShortName')
         $script:ConfigData['SolutionShortName'] = if (-not [string]::IsNullOrWhiteSpace($ssnAns)) { $ssnAns.Trim().ToLower() }
-                                                  else { "neo$($script:OrganizationCode.ToLower())$($script:EnvironmentIndex)" }
+                                                  else { "$($script:OrganizationCode.ToLower())$($script:EnvironmentType.ToLower())$($script:EnvironmentIndex)" }
 
         $rgComputed = "rg-$($script:ConfigData['SolutionName'])"
         $rgAns = [string](Get-Answer 'resourceGroupName')
@@ -5079,7 +5079,7 @@ function Start-NeologikOnboarding {
             -LabelPrefix (Get-PromptLabel $kvDefault $kvComputed)
 
         # Deployment storage account name (holds the certificate blob container).
-        $saComputed = "stneodeployneo$($script:OrganizationCode.ToLower())$regionAbbrev$($script:EnvironmentIndex)"
+        $saComputed = "stneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType.ToLower())$regionAbbrev$($script:EnvironmentIndex)"
         if ($saComputed.Length -gt 24) { $saComputed = $saComputed.Substring(0, 24) }
         $saAns = [string](Get-Answer 'storageAccountName')
         $saDefault = if (-not [string]::IsNullOrWhiteSpace($saAns)) { $saAns.Trim().ToLower() } else { $saComputed }
@@ -5683,7 +5683,7 @@ function Start-NeologikOnboarding {
         # Fall back to the computed name for checkpoints written before this field existed.
         $storageAccountName = [string]$script:ConfigData['DeployStorageAccountName']
         if ([string]::IsNullOrWhiteSpace($storageAccountName)) {
-            $storageAccountName = "stneodeployneo$($script:OrganizationCode.ToLower())$regionAbbrev$($script:EnvironmentIndex)"
+            $storageAccountName = "stneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType.ToLower())$regionAbbrev$($script:EnvironmentIndex)"
         }
 
         # Storage account names must be 3-24 characters, lowercase alphanumeric only

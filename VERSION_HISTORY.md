@@ -329,6 +329,19 @@ without authenticating through MFA" during a v4.5.0 onboarding.
 
 ---
 
+## Version NEXT - naming formula fix (project#1576)
+
+- Date: 2026-08-19
+- Summary: Computed solution names now follow the estate formula
+  neo-{org}{env}-{region}-{index} (short name {org}{env}{index}); the
+  previous computation hard-coded neo-neo{org} and omitted the environment
+  type, so the correct internal organisation code 'neo' produced
+  rg-neo-neoneo-cus-01. Deployment storage account default follows suit
+  (stneodeploy{org}{env}{region}{index}). Answer-file and CLI overrides
+  unchanged. Docs updated (QUICK-REFERENCE, TECHNICAL-REFERENCE,
+  secure-overview, inputs-example naming note); QUICK-REFERENCE.pdf not
+  regenerated. Found live during the dev01 v5 onboarding.
+
 ## Version NEXT
 **Branch**: `feature/ideas-agent`
 **Status**: Pending

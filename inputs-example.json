@@ -15,7 +15,7 @@
   "applyResourceTags": true,
   "resourceTagsCustom": {},
 
-  "_naming_note": "Optional resource-name overrides for client-specific naming conventions (see neo-env-config naming/templates). Remove any of these to accept the computed Neologik-standard name: solution neo-neo{org}-{region}-{index} (e.g. neo-neoabc-uks-01), short name neo{org}{index} (e.g. neoabc01); environment type never appears in names. solutionShortName also drives the security-group, app-registration, and managed-identity name suffixes. keyVaultName: 3-24 chars, letters/digits/hyphens, starts with a letter. storageAccountName: 3-24 chars, lowercase letters/digits only. scriptRunnerIdentityName/sqlIdentityName: 3-128 chars, letters/digits/hyphens/underscores, starts with a letter or digit.",
+  "_naming_note": "Optional resource-name overrides for client-specific naming conventions (see neo-env-config naming/templates). Remove any of these to accept the computed Neologik-standard name: solution neo-{org}{env}-{region}-{index} (e.g. neo-abcprd-uks-01; internal neo-neodev-cus-01), short name {org}{env}{index} (e.g. abcprd01; internal neodev01). solutionShortName also drives the security-group, app-registration, and managed-identity name suffixes. keyVaultName: 3-24 chars, letters/digits/hyphens, starts with a letter. storageAccountName: 3-24 chars, lowercase letters/digits only. scriptRunnerIdentityName/sqlIdentityName: 3-128 chars, letters/digits/hyphens/underscores, starts with a letter or digit.",
   "solutionName": "",
   "solutionShortName": "",
   "resourceGroupName": "",
