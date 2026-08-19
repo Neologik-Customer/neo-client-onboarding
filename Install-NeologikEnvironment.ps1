@@ -15,7 +15,7 @@
     - Configuration output and logging
 
 .VERSION
-    v1.9.0
+    v5.0.0
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -34,9 +34,9 @@
 
 .PARAMETER KeyVaultName
     Override the Key Vault name. If omitted, the standard name
-    'kvneo<org><env><index>' is generated automatically. Must be 3-24
-    characters, start with a letter, end with a letter or digit, and
-    contain only letters, digits and hyphens.
+    'kv<solution short name>' (kvneo<org><index>, e.g. kvneoabc01) is
+    generated automatically. Must be 3-24 characters, start with a letter,
+    end with a letter or digit, and contain only letters, digits and hyphens.
 
 .PARAMETER SkipPowerShellUpdate
     Skip PowerShell version check and update.
@@ -47,8 +47,27 @@
 .PARAMETER SkipGuestInvitation
     Skip inviting Neologik guest users. Use when the client provisions its own
     accounts within its own tenant (no B2B guests). Security groups are still
-    created, seeded with the signed-in user only. May also be set from the answer file
-    ('skipGuestInvitation': true/false); this switch, when passed, takes precedence.
+    created, seeded with the signed-in user only - unless the follow-up
+    add-existing-accounts step is used (see below). May also be set from the answer
+    file ('skipGuestInvitation': true/false); this switch, when passed, takes
+    precedence.
+
+    When invitations are ACCEPTED interactively, the file's addresses are listed
+    and a follow-up offers to add more addresses to invite, typed one per line
+    (blank line to finish, commas accepted within a line) - with an empty or
+    missing file the whole invite list can be typed. Unattended runs use the
+    file only.
+
+    When invitations are skipped, a follow-up question offers to add EXISTING
+    accounts (pre-created B2B guests or member accounts) to the security groups
+    without sending any invitation. Answer-file keys: 'addExistingAccountsToGroups'
+    (true/false) and optionally 'existingAccountEmails' (array or comma-separated
+    string; defaults to the NeologikGuestUsers.txt entries, or addresses typed at
+    the prompt one per line - blank line to finish, commas accepted within a
+    line). Each address must match the account's mail or userPrincipalName;
+    an address with no matching account is reported and skipped - the run always
+    continues. Accounts added this way join ALL Neologik groups, including the
+    Admin User Group.
 
 .PARAMETER ExistingServicePrincipalObjectId
     Object ID (enterprise-application / service-principal object ID, not the app/client
@@ -81,6 +100,10 @@
     automation where the Az and Microsoft Graph contexts are established by the caller
     before invoking this script (e.g. Connect-AzAccount -AccessToken / Connect-MgGraph
     -AccessToken). Run under 'pwsh -NonInteractive' so any unexpected prompt throws.
+    Azure mandatory MFA: a pre-established USER context must carry the ARM 'p1'
+    authentication-context claim (sign in with Connect-AzAccount -ClaimsChallenge) or
+    resource create/update/delete calls are rejected by Azure; service principal
+    contexts are exempt. The script warns but never re-authenticates in this mode.
 
 .PARAMETER AcceptTerms
     Non-interactive acknowledgement of the Neologik Terms of Use and Privacy Policy
@@ -105,7 +128,7 @@
 
 .NOTES
     Author: Neologik
-    Version: 1.0.0
+    Version: v5.0.0 (keep in step with $script:Version below)
     Requires: PowerShell 7.4+ (script will update if needed)
     Requires: Subscription Owner and Global Administrator roles
 #>
@@ -178,7 +201,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v1.11.0'
+$script:Version = 'v5.0.0'
 
 # Initialize with timestamp - will be updated after org code and environment type are collected
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -189,6 +212,10 @@ $script:CompletedSteps = [System.Collections.Generic.List[string]]::new()
 $script:ProviderRegistrations = @{}
 $script:CheckpointFile = Join-Path $PSScriptRoot "NeologikCheckpoint.json"
 $script:CheckpointRegionAbbrev = $null
+
+# Cached resource tag set (project#1173). Built once by Get-NeologikResourceTags on first
+# use after configuration is confirmed; $null until then (and when tagging is disabled).
+$script:ResourceTagsCache = $null
 
 # Key Vault name override. Track whether the operator supplied -KeyVaultName on THIS
 # invocation so that, on resume, a value saved in the checkpoint is preferred unless the
@@ -219,13 +246,15 @@ $script:GuestUsersFile = Join-Path $PSScriptRoot "NeologikGuestUsers.txt"
 if (Test-Path $script:GuestUsersFile) {
     $script:NeologikGuestUsers = @(Get-Content $script:GuestUsersFile | Where-Object { $_.Trim() -ne '' -and $_ -notmatch '^\s*#' })
 } else {
-    Write-Warning "Guest users file not found at: $script:GuestUsersFile. No guest users will be invited."
+    Write-Warning "Guest users file not found at: $script:GuestUsersFile. It ships in the onboarding zip package - interactive runs will offer to locate it during configuration; otherwise no guest users will be invited."
     $script:NeologikGuestUsers = @()
 }
 
 # Required PowerShell modules
 $script:RequiredModules = @(
-    @{ Name = 'Az.Accounts'; MinVersion = '3.0.0' },
+    # Az.Accounts 5.2.0 is the first version with Connect-AzAccount -ClaimsChallenge,
+    # needed to satisfy Azure mandatory MFA (ARM-layer enforcement) at sign-in.
+    @{ Name = 'Az.Accounts'; MinVersion = '5.2.0' },
     @{ Name = 'Az.Resources'; MinVersion = '7.0.0' },
     @{ Name = 'Az.Compute'; MinVersion = '7.0.0' },
     @{ Name = 'Az.KeyVault'; MinVersion = '5.0.0' },
@@ -233,6 +262,13 @@ $script:RequiredModules = @(
     @{ Name = 'Az.ManagedServiceIdentity'; MinVersion = '1.0.0' },
     @{ Name = 'Microsoft.Graph'; MinVersion = '2.0.0' }
 )
+
+# Azure mandatory MFA (ARM-layer Phase 2, enforced for all create/update/delete since
+# 1 October 2025): static claims challenge requesting the 'p1' authentication-context
+# claim. Decodes to {"access_token":{"acrs":{"essential":true,"values":["p1"]}}}.
+# Passed at sign-in it forces interactive MFA so the resulting ARM token satisfies the
+# enforcement. It is a public, well-known instruction to Entra ID - not a secret.
+$script:ArmMfaClaimsChallenge = 'eyJhY2Nlc3NfdG9rZW4iOnsiYWNycyI6eyJlc3NlbnRpYWwiOnRydWUsInZhbHVlcyI6WyJwMSJdfX19'
 
 #region Logging Functions
 
@@ -280,8 +316,10 @@ function Initialize-ConfigurationFile {
     [CmdletBinding()]
     param()
 
-    # Generate configuration file name with org code, env type, and env index (e.g. xyzdev01)
-    $configFileName = "Neologik_$($script:OrganizationCode)$($script:EnvironmentType)$($script:EnvironmentIndex)_Configuration_$($script:FileTimestamp).json"
+    # Generate configuration file name from the environment name = org code + index
+    # (e.g. dmo01, abc01). Environment type never appears in names (naming
+    # convention alignment - project#1063).
+    $configFileName = "Neologik_$($script:OrganizationCode)$($script:EnvironmentIndex)_Configuration_$($script:FileTimestamp).json"
     $script:OutputFile = Join-Path $PSScriptRoot $configFileName
     
     Write-Host "  ✓ Configuration file initialized: $configFileName" -ForegroundColor Green
@@ -394,8 +432,6 @@ function Save-Checkpoint {
         HostName              = $script:HostName
         ResourceGroupName     = $script:ResourceGroupName
         EnvironmentIndex      = $script:EnvironmentIndex
-        BotCount              = $script:BotCount
-        BotConfigurations     = $script:BotConfigurations
         OutputFile            = $script:OutputFile
         KeyVaultNameOverride  = $script:KeyVaultNameOverride
     }
@@ -459,8 +495,6 @@ function Restore-Checkpoint {
                                      else { $data.HostName }
     $script:ResourceGroupName      = $data.ResourceGroupName
     $script:EnvironmentIndex       = $data.EnvironmentIndex
-    $script:BotCount               = [int]$data.BotCount
-    $script:BotConfigurations      = $data.BotConfigurations
     $script:CheckpointRegionAbbrev = $data.RegionAbbrev
     $script:OutputFile             = $data.OutputFile
 
@@ -482,6 +516,87 @@ function Complete-OnboardingStep {
         $script:CompletedSteps.Add($StepName)
     }
     Save-Checkpoint -Label $StepName
+}
+
+#endregion
+
+#region Resource Tagging
+
+function ConvertTo-NeologikCustomTags {
+    <#
+    .SYNOPSIS
+        Parses custom resource tags into a hashtable (project#1173). Accepts a
+        comma-separated 'key=value' string, or a dictionary/object (from the answer file or
+        a restored checkpoint). Throws on any invalid key or value so the caller can warn
+        or re-prompt. Keys: letters, digits, '.', '_' and '-' only; keys and values must
+        not contain ',' or '='.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]$Value
+    )
+
+    $tags = @{}
+    if ($null -eq $Value) { return $tags }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        foreach ($key in $Value.Keys) { $tags[[string]$key] = [string]$Value[$key] }
+    }
+    elseif ($Value -is [System.Management.Automation.PSCustomObject]) {
+        foreach ($prop in $Value.PSObject.Properties) { $tags[[string]$prop.Name] = [string]$prop.Value }
+    }
+    else {
+        $text = ([string]$Value).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($text)) {
+            foreach ($pair in ($text -split ',')) {
+                $trimmed = $pair.Trim()
+                if ([string]::IsNullOrWhiteSpace($trimmed)) { throw "Empty tag entry - use comma-separated key=value pairs." }
+                $parts = $trimmed -split '=', 2
+                if ($parts.Count -ne 2) { throw "Tag '$trimmed' must be in key=value form." }
+                $tags[$parts[0].Trim()] = $parts[1].Trim()
+            }
+        }
+    }
+
+    foreach ($key in @($tags.Keys)) {
+        if ($key -notmatch '^[a-zA-Z0-9._-]+$') { throw "Tag key '$key' is invalid - use letters, digits, '.', '_' and '-' only." }
+        if ("$($tags[$key])" -match '[,=]') { throw "Tag value for '$key' must not contain ',' or '='." }
+    }
+
+    return $tags
+}
+
+function Get-NeologikResourceTags {
+    <#
+    .SYNOPSIS
+        Returns the tag set applied to script-created Azure resources, or $null when
+        resource tagging is disabled (project#1173). Built once and cached so every
+        resource carries the identical set; the customer's custom tags override the
+        Neologik defaults on key collision.
+    #>
+    [CmdletBinding()]
+    param()
+
+    if (-not $script:ConfigData['ResourceTagsEnabled']) { return $null }
+    if ($null -ne $script:ResourceTagsCache) { return $script:ResourceTagsCache }
+
+    $tags = @{
+        'Vendor'          = 'Neologik'
+        'ApplicationName' = 'NeologikHarness'
+        'ManagedBy'       = 'NeologikOnboarding'
+        'Environment'     = "$($script:OrganizationCode)$($script:EnvironmentType)"
+        'Solution'        = [string]$script:ConfigData['SolutionShortName']
+        'DeploymentDate'  = (Get-Date -Format 'yyyy-MM-dd')
+    }
+
+    # Custom pairs override the defaults on key collision. A checkpoint round-trip stores
+    # the hashtable as an object - ConvertTo-NeologikCustomTags accepts both shapes.
+    foreach ($entry in (ConvertTo-NeologikCustomTags $script:ConfigData['ResourceTagsCustom']).GetEnumerator()) {
+        $tags[[string]$entry.Key] = [string]$entry.Value
+    }
+
+    $script:ResourceTagsCache = $tags
+    return $tags
 }
 
 #endregion
@@ -651,6 +766,17 @@ function Invoke-AzConnect {
         $connectParams['TenantId'] = $TenantId
     }
 
+    # Azure mandatory MFA (ARM-layer): request the 'p1' authentication-context claim at
+    # sign-in so the first token already satisfies create/update/delete enforcement.
+    # Without it, a non-MFA token passes sign-in and the run fails at the first resource
+    # write with a claims-challenge error. Requires Az.Accounts >= 5.2.0.
+    if ((Get-Command Connect-AzAccount).Parameters.ContainsKey('ClaimsChallenge')) {
+        $connectParams['ClaimsChallenge'] = $script:ArmMfaClaimsChallenge
+    }
+    else {
+        Write-Log "Az.Accounts predates -ClaimsChallenge (< 5.2.0): sign-in may not satisfy Azure mandatory MFA and resource writes may be rejected" -Level Warning
+    }
+
     try {
         Write-Host "`nℹ️  A browser window will open for Azure login.`n" -ForegroundColor Cyan
         return Connect-AzAccount @connectParams
@@ -660,6 +786,51 @@ function Invoke-AzConnect {
         Write-Log "Falling back to device code authentication" -Level Info
         Write-Host "`nℹ️  A code will be displayed. Visit the URL and enter the code to authenticate.`n" -ForegroundColor Cyan
         return Connect-AzAccount @connectParams -UseDeviceAuthentication
+    }
+}
+
+function Get-ArmTokenMfaClaimStatus {
+    <#
+    .SYNOPSIS
+        Inspects the current ARM access token for the 'p1' authentication-context claim
+        ('acrs') that Azure mandatory MFA requires on create/update/delete operations.
+    .OUTPUTS
+        'Present' - user token carrying the claim
+        'Missing' - user token without the claim (resource writes will be rejected)
+        'Exempt'  - application (service principal) token; exempt from mandatory MFA
+        'Unknown' - token could not be acquired or inspected
+    #>
+    [CmdletBinding()]
+    param()
+
+    try {
+        if ((Get-Command Get-AzAccessToken).Parameters.ContainsKey('AsSecureString')) {
+            $secureToken = (Get-AzAccessToken -AsSecureString -ErrorAction Stop).Token
+            $token = [System.Net.NetworkCredential]::new('', $secureToken).Password
+        }
+        else {
+            $token = (Get-AzAccessToken -ErrorAction Stop).Token
+        }
+
+        # Decode the JWT payload (base64url)
+        $payload = $token.Split('.')[1].Replace('-', '+').Replace('_', '/')
+        switch ($payload.Length % 4) {
+            2 { $payload += '==' }
+            3 { $payload += '=' }
+        }
+        $claims = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json
+
+        # Delegated (user) tokens carry 'scp'; app-only tokens do not and are exempt.
+        if (-not $claims.scp) { return 'Exempt' }
+        # 'acrs' p1 is only emitted when the claims challenge was requested at sign-in;
+        # a token minted through an ordinary MFA sign-in instead carries 'amr' mfa.
+        # Either satisfies the ARM enforcement.
+        if (($claims.acrs -contains 'p1') -or ($claims.amr -contains 'mfa')) { return 'Present' }
+        return 'Missing'
+    }
+    catch {
+        Write-Log "Could not inspect the ARM access token for the MFA claim: $($_.Exception.Message)" -Level Warning
+        return 'Unknown'
     }
 }
 
@@ -705,10 +876,23 @@ function Connect-AzureEnvironment {
                 $azContext = Invoke-AzConnect -TenantId $TenantId
             }
             else {
-                $azContext = [PSCustomObject]@{
-                    Context = $currentContext
+                # Azure mandatory MFA (ARM-layer): a cached token minted without MFA passes
+                # this reuse path but fails the first create/update/delete with a
+                # claims-challenge error - verify the 'p1' claim up front instead.
+                $mfaClaimStatus = Get-ArmTokenMfaClaimStatus
+                if ($mfaClaimStatus -eq 'Missing' -and -not $script:NonInteractiveMode) {
+                    Write-Log "Cached Azure token lacks the MFA claim required for resource management; re-authenticating..." -Level Warning
+                    $azContext = Invoke-AzConnect -TenantId $currentContext.Tenant.Id
                 }
-                Write-Log "Using existing Azure connection" -Level Success
+                else {
+                    if ($mfaClaimStatus -eq 'Missing') {
+                        Write-Log "Non-interactive: the supplied ARM user token lacks the mandatory-MFA claim ('acrs' p1); resource create/update/delete will be rejected. Establish the context with Connect-AzAccount -ClaimsChallenge or a service principal." -Level Warning
+                    }
+                    $azContext = [PSCustomObject]@{
+                        Context = $currentContext
+                    }
+                    Write-Log "Using existing Azure connection" -Level Success
+                }
             }
         }
 
@@ -815,7 +999,7 @@ function Connect-AzureEnvironment {
                 Write-Log "Azure token insufficient for Graph (consent may be required) — falling back to interactive login: $_" -Level Warning
                 Write-Host "`nℹ️  A browser window will open for Microsoft Graph login.`n" -ForegroundColor Cyan
                 Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
-                    -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory" `
+                    -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory", "AppRoleAssignment.ReadWrite.All" `
                     -ErrorAction Stop
                 Write-Log "Connected to Microsoft Graph via interactive login" -Level Success
             }
@@ -1234,7 +1418,11 @@ function New-NeologikResourceGroup {
         [string]$ResourceGroupName,
 
         [Parameter(Mandatory = $true)]
-        [string]$Location
+        [string]$Location,
+
+        # Internal: set on the single retry after an MFA claims-challenge re-authentication.
+        [Parameter(Mandatory = $false)]
+        [switch]$IsMfaRetry
     )
 
     Write-Log "Checking for resource group: $ResourceGroupName..." -Level Info
@@ -1258,7 +1446,12 @@ function New-NeologikResourceGroup {
         }
         else {
             Write-Log "Creating resource group: $ResourceGroupName in $Location..." -Level Info
-            $rg = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -ErrorAction Stop
+            # Resource tags (project#1173): applied on the create call itself so tenants whose
+            # Azure Policies deny untagged resources accept it; empty splat when disabled.
+            $tagParams = @{}
+            $resourceTags = Get-NeologikResourceTags
+            if ($resourceTags) { $tagParams['Tag'] = $resourceTags }
+            $rg = New-AzResourceGroup -Name $ResourceGroupName -Location $Location @tagParams -ErrorAction Stop
             Write-Log "Resource group created successfully" -Level Success
             
             $script:ConfigData['ResourceGroupName'] = $rg.ResourceGroupName
@@ -1268,6 +1461,14 @@ function New-NeologikResourceGroup {
         return $rg
     }
     catch {
+        # Azure mandatory MFA (ARM-layer): a token minted without MFA fails create/update/
+        # delete with a claims-challenge error. Re-authenticate (Invoke-AzConnect requests
+        # the 'p1' claim) and retry once - backstop for tokens the up-front check missed.
+        if (-not $IsMfaRetry -and -not $script:NonInteractiveMode -and $_.Exception.Message -match 'authenticat\w+ through MFA') {
+            Write-Log "Azure rejected the operation because the token lacks the mandatory-MFA claim; re-authenticating and retrying..." -Level Warning
+            Invoke-AzConnect -TenantId $script:ConfigData['TenantId'] | Out-Null
+            return New-NeologikResourceGroup -ResourceGroupName $ResourceGroupName -Location $Location -IsMfaRetry
+        }
         # Detect Azure RBAC authorization failures and surface them with a clear message
         if ($_.Exception.Message -match 'AuthorizationFailed|does not have authorization|does not have.*permission|Forbidden') {
             Write-Host "`n❌ PERMISSION ERROR: Cannot create resource group '$ResourceGroupName'" -ForegroundColor Red
@@ -1287,6 +1488,87 @@ function New-NeologikResourceGroup {
 #endregion
 
 #region Guest User Management
+
+function Resolve-GuestUsersFile {
+    <#
+    .SYNOPSIS
+        Interactively locates NeologikGuestUsers.txt when it was not found next to the
+        script (customers sometimes download only the .ps1 instead of unzipping the full
+        onboarding package). Offers a file-browse dialog, manual path entry, or an
+        explicit continue-without-guests choice.
+    .OUTPUTS
+        $true when a valid file was selected ($script:GuestUsersFile and
+        $script:NeologikGuestUsers updated); $false when the user chose to continue
+        without guest users.
+    #>
+    [CmdletBinding()]
+    param()
+
+    Write-Host ""
+    Write-Host "  NeologikGuestUsers.txt was not found next to the script:" -ForegroundColor Yellow
+    Write-Host "    $script:GuestUsersFile" -ForegroundColor Gray
+    Write-Host "  The file ships in the onboarding zip package (one Neologik email per line)." -ForegroundColor Gray
+    Write-Host "  If you downloaded only the .ps1, unzip the full package or locate the file now." -ForegroundColor Gray
+
+    while ($true) {
+        Write-Host ""
+        Write-Host "  [B] Browse for the file   [S] Skip guest invitations   or type the full path" -ForegroundColor Cyan
+        Write-Host "  Your choice: " -NoNewline -ForegroundColor Yellow
+        $choice = (Read-Host).Trim()
+
+        if ($choice -match '^(s|skip)$') {
+            Write-Log "User chose to continue without a guest users file - no guest users will be invited" -Level Warning
+            return $false
+        }
+
+        $candidate = $null
+        if ($choice -match '^(b|browse)$') {
+            try {
+                Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+                $dialog = [System.Windows.Forms.OpenFileDialog]::new()
+                $dialog.Title = 'Select NeologikGuestUsers.txt'
+                $dialog.InitialDirectory = $PSScriptRoot
+                $dialog.Filter = 'Text files (*.txt)|*.txt|All files (*.*)|*.*'
+                # Topmost owner form so the dialog cannot open hidden behind the console.
+                $owner = [System.Windows.Forms.Form]::new()
+                $owner.TopMost = $true
+                try {
+                    if ($dialog.ShowDialog($owner) -ne [System.Windows.Forms.DialogResult]::OK) { continue }
+                    $candidate = $dialog.FileName
+                }
+                finally {
+                    $owner.Dispose()
+                }
+            }
+            catch {
+                Write-Host "  A file dialog is not available in this session; type the full path instead." -ForegroundColor Yellow
+                continue
+            }
+        }
+        elseif ($choice) {
+            $candidate = $choice.Trim('"')
+        }
+        else {
+            continue
+        }
+
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            Write-Host "  File not found: $candidate" -ForegroundColor Red
+            continue
+        }
+
+        $emails = @(Get-Content -LiteralPath $candidate | Where-Object { $_.Trim() -ne '' -and $_ -notmatch '^\s*#' })
+        if ($emails.Count -eq 0) {
+            Write-Host "  $candidate contains no guest entries (blank lines and # comments are ignored)." -ForegroundColor Red
+            continue
+        }
+
+        $script:GuestUsersFile = $candidate
+        $script:NeologikGuestUsers = $emails
+        Write-Log "Guest users file selected: $candidate ($($emails.Count) guest(s))" -Level Success
+        return $true
+    }
+}
 
 function Invoke-GuestUserInvitation {
     <#
@@ -1355,6 +1637,88 @@ function Invoke-GuestUserInvitation {
     }
 }
 
+function Read-EmailAddressList {
+    <#
+    .SYNOPSIS
+        Reads email addresses interactively, one line per Enter with a running count.
+        A line may carry several comma-separated addresses (pasting a ready-made list
+        works); a blank line finishes. Returns the de-duplicated list.
+    #>
+    [CmdletBinding()]
+    param(
+        # Pre-collected addresses (e.g. the guest file's entries) - included in the
+        # running count and the returned list.
+        [Parameter(Mandatory = $false)]
+        [string[]]$Seed = @()
+    )
+
+    $collected = @($Seed)
+    while ($true) {
+        Write-Host "  Address ($($collected.Count) so far): " -NoNewline -ForegroundColor Gray
+        $line = Read-Host
+        if ([string]::IsNullOrWhiteSpace($line)) { break }
+        $collected += @($line -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
+    return @($collected | Select-Object -Unique)
+}
+
+function Invoke-ExistingAccountResolution {
+    <#
+    .SYNOPSIS
+        Resolves pre-created accounts (guests or members) by email address so they can be
+        added to the security groups. Never sends invitations.
+    .DESCRIPTION
+        Used when the operator declined B2B guest invitations but chose to add existing
+        accounts to the groups. Each address is looked up by mail or userPrincipalName;
+        a match joins the group-membership list, and an address with no matching account
+        is reported and SKIPPED - this step is best-effort by design and the script
+        always continues (the operator can add the account in Entra ID later).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$Emails
+    )
+
+    if ($Emails.Count -eq 0) {
+        Write-Log "No existing-account addresses to resolve - no accounts will be added to the groups." -Level Info
+        return @()
+    }
+
+    Write-Log "Resolving existing accounts for group membership (no invitations will be sent)..." -Level Info
+
+    try {
+        Import-Module Microsoft.Graph.Users -ErrorAction Stop
+    }
+    catch {
+        Write-Log "Could not load the Microsoft Graph Users module - existing accounts will not be added to the groups (continuing): $_" -Level Warning
+        return @()
+    }
+
+    $resolvedUsers = @()
+    foreach ($email in $Emails) {
+        Write-Log "Looking up existing account: $email..." -Level Info
+        $existingUser = Get-MgUser -Filter "mail eq '$email' or userPrincipalName eq '$email'" -ErrorAction SilentlyContinue
+
+        if ($existingUser) {
+            Write-Log "Account $email exists (ID: $($existingUser.Id)) - it will be added to the security groups" -Level Success
+            $resolvedUsers += @{
+                Email = $email
+                UserId = $existingUser.Id
+                Status = 'ExistingResolved'
+            }
+        }
+        else {
+            Write-Log "Account $email does not exist in this tenant (no user with that mail or user principal name) - skipped, continuing. Create the account and add it to the groups in Entra ID later." -Level Warning
+        }
+    }
+
+    Write-Log "Existing accounts resolved: $($resolvedUsers.Count) of $($Emails.Count) address(es) matched." -Level Info
+    $script:ConfigData['ExistingAccountsAdded'] = $resolvedUsers
+    return $resolvedUsers
+}
+
 #endregion
 
 #region Security Group Management
@@ -1377,10 +1741,7 @@ function New-NeologikSecurityGroups {
         [string]$EnvironmentType = "",
 
         [Parameter(Mandatory = $false)]
-        [string]$EnvironmentIndex = "",
-
-        [Parameter(Mandatory = $false)]
-        [array]$BotNames = @("bot")
+        [string]$EnvironmentIndex = ""
     )
 
     Write-Log "Creating Neologik security groups..." -Level Info
@@ -1388,26 +1749,34 @@ function New-NeologikSecurityGroups {
     try {
         Import-Module Microsoft.Graph.Groups -ErrorAction Stop
 
-        # Build group names with organization code and environment type (lowercase)
-        $orgLower = $OrganizationCode.ToLower()
-        $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "$($EnvironmentType.ToLower())" }
-        $groupSuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { " - $orgLower$envLower$EnvironmentIndex" }
+        # Group name suffix = the platform solution short name (neo{org}{index},
+        # e.g. neodmo01) so script-created groups match the platform naming
+        # convention (project#1063). SolutionShortName honours any override from
+        # the answer file; environment type never appears in names.
+        $shortName = if (-not [string]::IsNullOrWhiteSpace([string]$script:ConfigData['SolutionShortName'])) { [string]$script:ConfigData['SolutionShortName'] }
+                     elseif ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" }
+                     else { "neo$($OrganizationCode.ToLower())$EnvironmentIndex" }
+        $groupSuffix = if ([string]::IsNullOrWhiteSpace($shortName)) { "" } else { " - $shortName" }
 
-        # Build groups array starting with bot-specific user groups
+        # v5: one default user group. Agent channels created in the NCE reuse
+        # this group (or an admin supplies another existing group id at channel
+        # attach); the platform never creates groups (project#1519).
         $groups = @()
-        
-        # Create a user group for each bot
-        foreach ($botName in $BotNames) {
-            $groups += @{
-                Name = "Neologik User Group $botName$groupSuffix"
-                Description = "Neologik users for Teams app access - $botName bot"
-            }
-        }
-        
-        # Add NCE and Admin groups (unchanged)
         $groups += @{
-            Name = "Neologik NCE User Group$groupSuffix"
-            Description = 'Users who need access to NCE web tool'
+            Name = "Neologik User Group$groupSuffix"
+            Description = 'Default Neologik users group - assign to agent channels created in the NCE'
+        }
+        # NCE delegation model (project#1341): contributors (the pre-v5 NCE
+        # group renamed - object id keyed everywhere, so renaming on sight is
+        # safe) and the new admins group gating Blueprints/Audit/Admin.
+        $groups += @{
+            Name = "Neologik NCE Contributors$groupSuffix"
+            Description = 'NCE contributor role - create and change platform configuration in the Neologik Context Engine'
+            PreviousNames = @("Neologik NCE User Group$groupSuffix", "Neologik Harness User Group$groupSuffix")
+        }
+        $groups += @{
+            Name = "Neologik NCE Admins$groupSuffix"
+            Description = 'NCE admin role - full access including Blueprints, Audit and the Admin page'
         }
         $groups += @{
             Name = "Neologik Admin User Group$groupSuffix"
@@ -1419,8 +1788,21 @@ function New-NeologikSecurityGroups {
         foreach ($groupDef in $groups) {
             Write-Log "Processing group: $($groupDef.Name)..." -Level Info
 
-            # Check if group exists
+            # Check if group exists (current name first, then any previous
+            # name - found legacy groups are renamed in place so existing
+            # environments keep their object ids and memberships)
             $existingGroup = Get-MgGroup -Filter "displayName eq '$($groupDef.Name)'" -ErrorAction SilentlyContinue
+            if (-not $existingGroup -and $groupDef.PreviousNames) {
+                foreach ($previousName in $groupDef.PreviousNames) {
+                    $existingGroup = Get-MgGroup -Filter "displayName eq '$previousName'" -ErrorAction SilentlyContinue
+                    if ($existingGroup) {
+                        Write-Log "Renaming group '$previousName' -> '$($groupDef.Name)' (display name only; object id unchanged)" -Level Info
+                        Update-MgGroup -GroupId $existingGroup.Id -DisplayName $groupDef.Name -Description $groupDef.Description -ErrorAction Stop
+                        $existingGroup = Get-MgGroup -GroupId $existingGroup.Id -ErrorAction Stop
+                        break
+                    }
+                }
+            }
 
             if ($existingGroup) {
                 Write-Log "Group '$($groupDef.Name)' already exists (ID: $($existingGroup.Id))" -Level Info
@@ -1656,13 +2038,14 @@ function New-NeologikAppRegistration {
     try {
         Import-Module Microsoft.Graph.Applications -ErrorAction Stop
 
-        # Build app name with organization code and environment type (lowercase)
+        # App name suffix = the platform solution short name (neo{org}{index},
+        # e.g. neodmo01) - naming convention alignment, project#1063.
         $appName = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) {
             "Neologik GitHub Service Connection"
         } else {
-            $orgLower = $OrganizationCode.ToLower()
-            $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "$($EnvironmentType.ToLower())" }
-            "Neologik GitHub Service Connection - $orgLower$envLower$EnvironmentIndex"
+            $shortName = if (-not [string]::IsNullOrWhiteSpace([string]$script:ConfigData['SolutionShortName'])) { [string]$script:ConfigData['SolutionShortName'] }
+                         else { "neo$($OrganizationCode.ToLower())$EnvironmentIndex" }
+            "Neologik GitHub Service Connection - $shortName"
         }
 
         # Check if app registration exists
@@ -1917,6 +2300,18 @@ function Grant-GraphAppRolePermissions {
     $knownGraphAppRoleIds = @{
         'Application.Read.All'          = '9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30'
         'Application.ReadWrite.OwnedBy' = '18a4783c-866b-4cc7-a460-3d5e5662c884'
+        # Microsoft Entra Agent ID (GA) — let the deployment SP provision agent identity
+        # blueprints (+ principal + FIC) for autonomous agents, scoped to agent-id only
+        # rather than the broad 'Agent ID Administrator' directory role.
+        'AgentIdentityBlueprint.Create'                  = 'ea4b2453-ad2d-4d94-9155-10d5d9493ce9'
+        'AgentIdentityBlueprint.AddRemoveCreds.All'      = '0510736e-bdfb-4b37-9a1f-89b4a074763a'
+        'AgentIdentityBlueprint.UpdateAuthProperties.All' = '19202363-278e-49c2-bf00-391e2ba00881'
+        'AgentIdentityBlueprintPrincipal.Create'         = '8959696d-d07e-4916-9b1e-3ba9ce459161'
+        # Create the agent IDENTITY itself. Blueprint ownership does NOT cover this (neoprd
+        # deploy-bots runs 59-61 failed 403 without it, 2026-07-02).
+        'AgentIdentity.Create.All'                       = 'ad25cc1d-84d8-47df-a08e-b34c2e800819'
+        # Create the agent USER (directory user) hung off an agent identity.
+        'AgentIdUser.ReadWrite.All'                      = 'b782c9ad-6f2b-4894-a21b-72bf22417f0a'
     }
 
     Write-Log "Granting Microsoft Graph app permissions ($($AppRoles -join ', ')) to $PrincipalDescription..." -Level Info
@@ -2062,15 +2457,21 @@ function Set-AppRegistrationRoles {
             }
         }
 
-        # Subscription-scoped roles for the deployment SP. Every WRITE operation is RG-scoped
-        # (cost-management email, provider/feature registration and the resource group are
-        # handled by this onboarding script run as Owner; RG-scoped Contributor plus 'Role
-        # Based Access Control Administrator' below cover the deployment writes). 'Reader' is
-        # the one subscription-scoped role required: the infrastructure deploy's SKU/quota
-        # pre-flight reads subscription/location-level usage APIs (e.g. az search usage list =
-        # Microsoft.Search/locations/usages/read) that RG scope does not grant. Reader is
-        # read-only, so it stays within the least-privilege intent.
-        $roles = @('Reader')
+        # Subscription-scoped roles for the deployment SP. Resource writes are RG-scoped
+        # (provider/feature registration and the resource group are handled by this
+        # onboarding script run as Owner; RG-scoped Contributor plus 'Role Based Access
+        # Control Administrator' below cover the deployment writes). Two subscription-scoped
+        # roles are required:
+        #   - 'Reader': the infrastructure deploy's SKU/quota pre-flight reads
+        #     subscription/location-level usage APIs (e.g. az search usage list =
+        #     Microsoft.Search/locations/usages/read) that RG scope does not grant.
+        #   - 'Cost Management Contributor': lets the deployment pipeline create and
+        #     maintain the subscription-scoped cost report emails (neo-infrastructure
+        #     scripts/ensure-cost-report-emails.sh, project#1215; onboarding only
+        #     collects the recipients). It manages cost configuration only (budgets,
+        #     views, scheduled actions) and grants no control over resources, staying
+        #     within the least-privilege intent.
+        $roles = @('Reader', 'Cost Management Contributor')
 
         foreach ($roleName in $roles) {
             Write-Log "Assigning $roleName role..." -Level Info
@@ -2205,7 +2606,22 @@ function Set-AppRegistrationRoles {
         # Grant lower-scoped Microsoft Graph application permissions to the service principal.
         # Replaces the tenant-wide 'Application Administrator' Entra directory role with
         # Application.Read.All + Application.ReadWrite.OwnedBy (manage owned apps only).
-        Grant-GraphAppRolePermissions -PrincipalId $ServicePrincipalId -PrincipalDescription 'App Registration service principal'
+        # Also grants the granular Microsoft Entra Agent ID permissions so the deployment SP
+        # can provision agent identity blueprints (+ principal + FIC) for autonomous agents,
+        # without the broad 'Agent ID Administrator' directory role (keeps the reduced model).
+        # No Group.Create: the platform never creates Entra groups - channels reuse the
+        # onboarding group or an admin-supplied existing group id (project#1519).
+        Grant-GraphAppRolePermissions -PrincipalId $ServicePrincipalId -PrincipalDescription 'App Registration service principal' `
+            -AppRoles @(
+                'Application.Read.All',
+                'Application.ReadWrite.OwnedBy',
+                'AgentIdentityBlueprint.Create',
+                'AgentIdentityBlueprint.AddRemoveCreds.All',
+                'AgentIdentityBlueprint.UpdateAuthProperties.All',
+                'AgentIdentityBlueprintPrincipal.Create',
+                'AgentIdentity.Create.All',
+                'AgentIdUser.ReadWrite.All'
+            )
 
         # Update ConfigData with group membership
         if ($script:ConfigData['AppRegistration'] -and $adminGroup) {
@@ -2275,9 +2691,14 @@ function New-NeologikKeyVault {
             Write-Log "Creating Key Vault: $KeyVaultName..." -Level Info
             
             # Create Key Vault
+            # Resource tags (project#1173): applied on the create call; empty splat when disabled.
+            $tagParams = @{}
+            $resourceTags = Get-NeologikResourceTags
+            if ($resourceTags) { $tagParams['Tag'] = $resourceTags }
             $keyVault = New-AzKeyVault -ResourceGroupName $ResourceGroupName `
                 -VaultName $KeyVaultName `
                 -Location $Location `
+                @tagParams `
                 -ErrorAction Stop
 
             # Enable RBAC authorization
@@ -2427,6 +2848,175 @@ function New-NeologikKeyVault {
 #endregion
 
 #region Resource Provider Registration
+
+function New-NeologikNceAuthApp {
+    <#
+    .SYNOPSIS
+        Creates the 'Neologik Platform Sign-in' app registration and assigns the
+        Harness user group to it (project#1084).
+
+    .DESCRIPTION
+        From v5 the Harness admin tool (NCE) authorizes from the token's
+        groups claim only, and Entra emits that claim solely for groups
+        ASSIGNED to this app's enterprise application. The deployment
+        pipeline creates the app but its hardened service principal lacks
+        AppRoleAssignment.ReadWrite.All BY DESIGN, so the assignment used to
+        be a hard-blocking manual step (migration runsheet 7b) - skipping it
+        locked every user out of NCE. This script runs as a Global
+        Administrator, so the whole chain completes here instead:
+        app + claims config + deployment-SP ownership + secret in Key Vault
+        + group assignment. The pipeline (ensure-app-regs.sh) later finds
+        the app by its Graph uniqueName, reuses it, reconciles properties,
+        and rotates the secret when needed - its own best-effort group
+        assignment becomes a no-op.
+
+        Owner decision 2026-07-17: ONLY the Harness user group is assigned.
+        The Admin User Group is Azure RBAC only and never grants NCE access.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [array]$SecurityGroups,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DeploySpObjectId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$KeyVaultName
+    )
+
+    Write-Log "Creating the Neologik Platform Sign-in app registration (NCE + App portal login)..." -Level Info
+
+    try {
+        Import-Module Microsoft.Graph.Applications -ErrorAction Stop
+        Import-Module Microsoft.Graph.Groups -ErrorAction Stop
+
+        $solutionName = [string]$script:ConfigData['SolutionName']
+        $shortName = [string]$script:ConfigData['SolutionShortName']
+        $hostName = [string]$script:ConfigData['HostName']
+        # MUST match the deployment pipeline exactly: ensure-app-regs.sh
+        # resolves the app by uniqueName ('sp-admin-<solutionName>') and the
+        # Key Vault secret name derives from it.
+        $uniqueName = "sp-admin-$solutionName"
+        $displayName = "Neologik Platform Sign-in - $shortName"
+        $redirectUri = "https://$hostName/nce"
+
+        # Resolve by the immutable Graph uniqueName - the same key the
+        # deployment pipeline (ensure-app-regs.sh) uses. A display-name
+        # lookup would miss an app the pipeline has since renamed and
+        # attempt a duplicate create.
+        $existingApp = $null
+        try {
+            $found = Invoke-MgGraphRequest -Method GET -Uri "v1.0/applications(uniqueName='$uniqueName')" -ErrorAction Stop
+            $existingApp = Get-MgApplication -ApplicationId $found.id -ErrorAction Stop
+        }
+        catch {
+            $existingApp = $null   # 404 = not found = create below
+        }
+        $secretText = $null
+
+        if ($existingApp) {
+            Write-Log "App Registration '$($existingApp.DisplayName)' already exists (Client ID: $($existingApp.AppId))" -Level Info
+            $app = $existingApp
+            if ($app.DisplayName -ne $displayName) {
+                Update-MgApplication -ApplicationId $app.Id -DisplayName $displayName -ErrorAction Stop
+                Write-Log "App Registration renamed to '$displayName'" -Level Info
+            }
+        }
+        else {
+            Write-Log "Creating App Registration: $displayName..." -Level Info
+            $app = New-MgApplication -DisplayName $displayName `
+                -UniqueName $uniqueName `
+                -SignInAudience "AzureADMultipleOrgs" `
+                -GroupMembershipClaims "ApplicationGroup" `
+                -Web @{ RedirectUris = @($redirectUri) } `
+                -Api @{ RequestedAccessTokenVersion = 2 } `
+                -ErrorAction Stop
+            Write-Log "App Registration created successfully (Client ID: $($app.AppId))" -Level Success
+        }
+
+        $sp = Get-MgServicePrincipal -Filter "appId eq '$($app.AppId)'" -ErrorAction SilentlyContinue
+        if (-not $sp) {
+            $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
+            Write-Log "Service Principal created successfully" -Level Success
+        }
+
+        # Deployment SP as owner: the pipeline manages this app through
+        # Application.ReadWrite.OwnedBy, which only covers apps it owns.
+        $owners = Get-MgApplicationOwner -ApplicationId $app.Id -ErrorAction SilentlyContinue
+        if ($owners -and ($owners.Id -contains $DeploySpObjectId)) {
+            Write-Log "Deployment SP is already an owner of the auth app" -Level Info
+        }
+        else {
+            New-MgApplicationOwnerByRef -ApplicationId $app.Id `
+                -BodyParameter @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$DeploySpObjectId" } `
+                -ErrorAction Stop
+            Write-Log "Deployment SP added as owner of the auth app" -Level Success
+        }
+
+        # Client secret -> Key Vault under the name the pipeline expects.
+        # Only mint one when the app is new or the vault has no value yet -
+        # the pipeline rotates near-expiry credentials itself.
+        $kvSecretName = "$uniqueName-auth-secret"
+        $existingKvSecret = Get-AzKeyVaultSecret -VaultName $KeyVaultName -Name $kvSecretName -ErrorAction SilentlyContinue
+        if ($existingKvSecret) {
+            Write-Log "Key Vault already holds '$kvSecretName' - keeping the existing credential" -Level Info
+        }
+        else {
+            $passwordCred = Add-MgApplicationPassword -ApplicationId $app.Id `
+                -PasswordCredential @{ DisplayName = 'auth'; EndDateTime = (Get-Date).AddDays(365) } `
+                -ErrorAction Stop
+            $secretText = $passwordCred.SecretText
+            $secureSecret = ConvertTo-SecureString -String $secretText -AsPlainText -Force
+            $null = Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name $kvSecretName -SecretValue $secureSecret -ErrorAction Stop
+            Write-Log "Client secret stored in Key Vault as '$kvSecretName'" -Level Success
+        }
+
+        # Assign the NCE role groups so their members' tokens carry the
+        # groups claim NCE authorizes from (project#1341: contributors AND
+        # admins). Default app role, direct groups only (nested membership
+        # does not expand into the claim).
+        $defaultAppRole = '00000000-0000-0000-0000-000000000000'
+        $assignedGroups = @()
+        foreach ($rolePattern in @('Neologik NCE Contributors*', 'Neologik NCE Admins*')) {
+            $roleGroup = $SecurityGroups | Where-Object { $_.Name -like $rolePattern } | Select-Object -First 1
+            if (-not $roleGroup) {
+                Write-Log "Warning: no security group matches '$rolePattern' - NCE group assignment skipped. A Global Admin must assign it manually (runsheet steps 7b/7c)." -Level Warning
+                continue
+            }
+            $alreadyAssigned = Get-MgGroupAppRoleAssignment -GroupId $roleGroup.Id -ErrorAction SilentlyContinue |
+                Where-Object { $_.ResourceId -eq $sp.Id }
+            if ($alreadyAssigned) {
+                Write-Log "Group '$($roleGroup.Name)' is already assigned to the auth app" -Level Info
+            }
+            else {
+                $null = New-MgGroupAppRoleAssignment -GroupId $roleGroup.Id `
+                    -PrincipalId $roleGroup.Id `
+                    -ResourceId $sp.Id `
+                    -AppRoleId $defaultAppRole `
+                    -ErrorAction Stop
+                Write-Log "Group '$($roleGroup.Name)' assigned to the auth app - NCE login will carry the groups claim" -Level Success
+            }
+            $assignedGroups += $roleGroup.Name
+        }
+
+        $script:ConfigData['NceAuthApp'] = @{
+            Name = $displayName
+            ClientId = $app.AppId
+            ObjectId = $app.Id
+            ServicePrincipalId = $sp.Id
+            UniqueName = $uniqueName
+            KeyVaultSecretName = $kvSecretName
+            AssignedGroups = $assignedGroups
+        }
+
+        return $script:ConfigData['NceAuthApp']
+    }
+    catch {
+        Write-Log "Failed to create the NCE auth app: $_" -Level Error
+        throw
+    }
+}
 
 function Register-AllResourceProviders {
     <#
@@ -2626,135 +3216,6 @@ function Register-AllResourceProviders {
     }
 }
 
-function Set-NeologikCostManagementEmail {
-    <#
-    .SYNOPSIS
-        Creates the subscription-scoped Cost Management scheduled email (daily cost report) for
-        the environment, run as the subscription Owner during onboarding.
-    .DESCRIPTION
-        Previously provisioned by neo-infrastructure (modCostManagementScheduledEmail.bicep) as a
-        subscription-scoped Bicep module, which forced the deployment service connection to hold
-        subscription-scoped Contributor (Resources/deployments write at subscription scope).
-        Creating it here removes that requirement. Mirrors the Bicep: skips Sponsorship/Student
-        subscriptions, creates one private cost view plus one scheduled action per recipient.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]  [string]$SubscriptionId,
-        [Parameter(Mandatory = $true)]  [string]$SolutionName,
-        [Parameter(Mandatory = $false)] [string[]]$EmailAddresses = @(),
-        [Parameter(Mandatory = $false)] [string]$Frequency = 'Daily'
-    )
-
-    if (-not $EmailAddresses -or $EmailAddresses.Count -eq 0) {
-        Write-Log "No budget cost-report email addresses configured - skipping Cost Management scheduled email" -Level Info
-        return
-    }
-
-    # Cost Management scheduled actions are not supported on Sponsorship/Student subscriptions
-    $subName = (Get-AzContext).Subscription.Name
-    if ($subName -and ($subName.ToLower() -match 'sponsorship|student')) {
-        Write-Log "Subscription '$subName' is Sponsorship/Student - Cost Management schedules not supported, skipping" -Level Warning
-        return
-    }
-
-    Write-Log "Configuring Cost Management scheduled email report..." -Level Info
-
-    $subScope   = "/subscriptions/$SubscriptionId"
-    $apiVersion = '2023-11-01'
-
-    # Private cost view (names truncated to 25 chars to match the Bicep)
-    $viewName = "daily-costs-$SolutionName"
-    if ($viewName.Length -gt 25) { $viewName = $viewName.Substring(0, 25) }
-    $viewDisplay = "Costs - $SolutionName"
-    if ($viewDisplay.Length -gt 25) { $viewDisplay = $viewDisplay.Substring(0, 25) }
-
-    $viewBody = @{
-        properties = @{
-            displayName = $viewDisplay
-            scope       = $subScope
-            chart       = 'StackedColumn'
-            accumulated = 'false'
-            metric      = 'ActualCost'
-            kpis        = @()
-            pivots      = @(
-                @{ type = 'Dimension'; name = 'ServiceName' },
-                @{ type = 'Dimension'; name = 'ResourceGroupName' },
-                @{ type = 'Dimension'; name = 'ResourceLocation' }
-            )
-            dateRange   = 'MonthToDate'
-            query       = @{
-                type    = 'ActualCost'
-                dataSet = @{
-                    granularity = 'Daily'
-                    aggregation = @{ totalCost = @{ name = 'Cost'; function = 'Sum' } }
-                    grouping    = @(@{ type = 'Dimension'; name = 'ResourceId' })
-                }
-                timeframe = 'MonthToDate'
-            }
-        }
-    } | ConvertTo-Json -Depth 12
-
-    $viewPath = "$subScope/providers/Microsoft.CostManagement/views/$viewName`?api-version=$apiVersion"
-    try {
-        $resp = Invoke-AzRestMethod -Method PUT -Path $viewPath -Payload $viewBody -ErrorAction Stop
-        if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) {
-            Write-Log "Cost Management view '$viewName' created/updated" -Level Success
-        }
-        else {
-            Write-Log "Cost Management view creation returned HTTP $($resp.StatusCode): $($resp.Content)" -Level Warning
-            return
-        }
-    }
-    catch {
-        Write-Log "Failed to create Cost Management view: $_" -Level Warning
-        return
-    }
-
-    $viewId    = "$subScope/providers/Microsoft.CostManagement/views/$viewName"
-    $startDate = (Get-Date).ToString('yyyy-MM-dd')
-    $endDate   = (Get-Date).AddDays(364).ToString('yyyy-MM-dd')
-
-    $index = 0
-    foreach ($email in $EmailAddresses) {
-        $index++
-        $actionName = "schedule-cost-email-$SolutionName-$index"
-        $actionBody = @{
-            kind       = 'Email'
-            properties = @{
-                displayName       = "$Frequency Cost Report - $SolutionName ($index)"
-                status            = 'Enabled'
-                viewId            = $viewId
-                schedule          = @{
-                    frequency = $Frequency
-                    startDate = "${startDate}T00:00:00Z"
-                    endDate   = "${endDate}T23:59:59Z"
-                }
-                notificationEmail = $email
-                notification      = @{
-                    to      = @($email)
-                    subject = "Azure $Frequency Cost Report - $SolutionName"
-                }
-                scope             = $subScope
-            }
-        } | ConvertTo-Json -Depth 12
-
-        $actionPath = "$subScope/providers/Microsoft.CostManagement/scheduledActions/$actionName`?api-version=$apiVersion"
-        try {
-            $resp = Invoke-AzRestMethod -Method PUT -Path $actionPath -Payload $actionBody -ErrorAction Stop
-            if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300) {
-                Write-Log "Cost report scheduled action '$actionName' created for $email" -Level Success
-            }
-            else {
-                Write-Log "Scheduled action creation returned HTTP $($resp.StatusCode): $($resp.Content)" -Level Warning
-            }
-        }
-        catch {
-            Write-Log "Failed to create scheduled action for ${email}: $_" -Level Warning
-        }
-    }
-}
-
 #endregion
 
 #region Storage Account
@@ -2797,12 +3258,17 @@ function New-NeologikStorageAccount {
         else {
             Write-Log "Creating Storage Account: $StorageAccountName..." -Level Info
             
+            # Resource tags (project#1173): applied on the create call; empty splat when disabled.
+            $tagParams = @{}
+            $resourceTags = Get-NeologikResourceTags
+            if ($resourceTags) { $tagParams['Tag'] = $resourceTags }
             $storageAccount = New-AzStorageAccount -ResourceGroupName $ResourceGroupName `
                 -Name $StorageAccountName `
                 -Location $Location `
                 -SkuName Standard_LRS `
                 -Kind StorageV2 `
                 -AllowBlobPublicAccess $false `
+                @tagParams `
                 -ErrorAction Stop
 
             Write-Log "Storage Account created successfully" -Level Success
@@ -2940,7 +3406,13 @@ function New-NeologikManagedIdentities {
         [string]$EnvironmentType = "",
 
         [Parameter(Mandatory = $false)]
-        [string]$EnvironmentIndex = ""
+        [string]$EnvironmentIndex = "",
+
+        [Parameter(Mandatory = $false)]
+        [string]$ScriptRunnerIdentityName = "",
+
+        [Parameter(Mandatory = $false)]
+        [string]$SqlIdentityName = ""
     )
 
     Write-Log "Creating Managed Identities..." -Level Info
@@ -2951,15 +3423,24 @@ function New-NeologikManagedIdentities {
         # Ensure Microsoft.ManagedIdentity provider is registered
         Register-RequiredResourceProvider -ProviderNamespace 'Microsoft.ManagedIdentity'
 
-        # Build names with organization code and environment type (lowercase)
-        $orgLower = $OrganizationCode.ToLower()
-        $envLower = if ([string]::IsNullOrWhiteSpace($EnvironmentType)) { "" } else { "$($EnvironmentType.ToLower())" }
-        $nameSuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { "-$orgLower$envLower$EnvironmentIndex" }
-        $displaySuffix = if ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" } else { " - $orgLower$envLower$EnvironmentIndex" }
+        # Name suffix = the platform solution short name (neo{org}{index}, e.g.
+        # neodmo01) - naming convention alignment, project#1063. Environment
+        # type never appears in names.
+        $shortName = if (-not [string]::IsNullOrWhiteSpace([string]$script:ConfigData['SolutionShortName'])) { [string]$script:ConfigData['SolutionShortName'] }
+                     elseif ([string]::IsNullOrWhiteSpace($OrganizationCode)) { "" }
+                     else { "neo$($OrganizationCode.ToLower())$EnvironmentIndex" }
+        $nameSuffix = if ([string]::IsNullOrWhiteSpace($shortName)) { "" } else { "-$shortName" }
+        $displaySuffix = if ([string]::IsNullOrWhiteSpace($shortName)) { "" } else { " - $shortName" }
+
+        # Script-runner and SQL identity names were resolved during configuration
+        # gathering (answer file / prompt / computed); empty on checkpoints written
+        # before the fields existed - fall back to the computed Neologik-standard name.
+        $scriptRunnerName = if (-not [string]::IsNullOrWhiteSpace($ScriptRunnerIdentityName)) { $ScriptRunnerIdentityName.Trim() } else { "neologik-script-runner-service-connection$nameSuffix" }
+        $sqlIdentityName = if (-not [string]::IsNullOrWhiteSpace($SqlIdentityName)) { $SqlIdentityName.Trim() } else { "neologik-sql-managed-identity$nameSuffix" }
 
         $managedIdentities = @(
             @{
-                Name = "neologik-script-runner-service-connection$nameSuffix"
+                Name = $scriptRunnerName
                 DisplayName = "Neologik Script Runner Service Connection$displaySuffix"
                 Roles = @('Contributor')
                 RGRoles = @('Key Vault Secrets Officer', 'Azure Bot Service Contributor Role')
@@ -2968,7 +3449,7 @@ function New-NeologikManagedIdentities {
                 # Application.Read.All / ReadWrite.OwnedBy on the UAMI would be surplus.
             },
             @{
-                Name = "neologik-sql-managed-identity$nameSuffix"
+                Name = $sqlIdentityName
                 DisplayName = "Neologik SQL Managed Identity$displaySuffix"
                 Roles = @()
                 EntraRole = 'Directory Readers'
@@ -2976,6 +3457,11 @@ function New-NeologikManagedIdentities {
         )
 
         $createdIdentities = @()
+
+        # Resource tags (project#1173): applied on the create call; empty splat when disabled.
+        $tagParams = @{}
+        $resourceTags = Get-NeologikResourceTags
+        if ($resourceTags) { $tagParams['Tag'] = $resourceTags }
 
         foreach ($miDef in $managedIdentities) {
             $displayName = if ($miDef.DisplayName) { $miDef.DisplayName } else { $miDef.Name }
@@ -2995,6 +3481,7 @@ function New-NeologikManagedIdentities {
                     $mi = New-AzUserAssignedIdentity -ResourceGroupName $ResourceGroupName `
                         -Name $miDef.Name `
                         -Location $Location `
+                        @tagParams `
                         -ErrorAction Stop
 
                     Write-Log "Managed Identity created successfully (Principal ID: $($mi.PrincipalId))" -Level Success
@@ -3201,6 +3688,10 @@ function Export-ConfigurationData {
     Write-Log "Exporting configuration data..." -Level Info
 
     try {
+        # Custom resource tags may have round-tripped through the checkpoint as an object;
+        # export whatever shape is held (empty object when tagging is disabled).
+        $exportCustomTags = if ($null -ne $script:ConfigData['ResourceTagsCustom']) { $script:ConfigData['ResourceTagsCustom'] } else { @{} }
+
         # Create ordered output with specific field order
         $orderedConfig = [ordered]@{
             'ScriptVersion' = $script:Version
@@ -3217,14 +3708,16 @@ function Export-ConfigurationData {
             'UserAccount' = $script:ConfigData['UserAccount']
             'AzureRegion' = $script:ConfigData['AzureRegion']
             'HostName' = $script:ConfigData['HostName']
-            'BotCount' = $script:ConfigData['BotCount']
-            'Bots' = $script:ConfigData['Bots']
             'BudgetEmailAddresses' = $script:ConfigData['BudgetEmailAddresses']
             'BudgetEmailFrequency' = $script:ConfigData['BudgetEmailFrequency']
             'RegisterAllProviders' = $script:ConfigData['RegisterAllProviders']
+            'ResourceTagsEnabled' = [bool]$script:ConfigData['ResourceTagsEnabled']
+            'ResourceTagsCustom' = $exportCustomTags
             'InvitedGuestUsers' = $script:ConfigData['InvitedGuestUsers']
+            'ExistingAccountsAdded' = $script:ConfigData['ExistingAccountsAdded']
             'SecurityGroups' = $script:ConfigData['SecurityGroups']
             'AppRegistration' = $script:ConfigData['AppRegistration']
+            'NceAuthApp' = $script:ConfigData['NceAuthApp']
             'KeyVault' = $script:ConfigData['KeyVault']
             'StorageAccount' = $script:ConfigData['StorageAccount']
             'ManagedIdentities' = $script:ConfigData['ManagedIdentities']
@@ -3569,6 +4062,14 @@ function Test-StorageAccountNameError {
     return $null
 }
 
+function Test-ManagedIdentityNameError {
+    # Returns $null when the managed-identity name is valid, otherwise an error string.
+    param([string]$Name)
+    if ($Name.Length -lt 3 -or $Name.Length -gt 128) { return "Managed identity name must be 3-128 characters." }
+    if ($Name -notmatch '^[a-zA-Z0-9][a-zA-Z0-9_-]*$') { return "Managed identity name must start with a letter or digit and contain only letters, digits, hyphens and underscores." }
+    return $null
+}
+
 function Read-NameWithDefault {
     <#
     .SYNOPSIS
@@ -3619,21 +4120,7 @@ function Test-AnswerFileComplete {
         if (-not (Get-Answer $key)) { return $false }
     }
 
-    # Every bot the script will ask about must have both names (no built-in defaults).
-    $bots = @(Get-Answer 'bots')
-    if ($bots.Count -eq 0) { return $false }
-    $botCountAns = Get-Answer 'botCount'
-    if ($botCountAns -and "$botCountAns" -match '^\d+$' -and [int]"$botCountAns" -ge 1 -and [int]"$botCountAns" -le 10) {
-        $needed = [int]"$botCountAns"
-    } else {
-        $needed = 1
-    }
-    if ($bots.Count -lt $needed) { return $false }
-    for ($j = 0; $j -lt $needed; $j++) {
-        if (-not $bots[$j]) { return $false }
-        if ([string]::IsNullOrWhiteSpace([string]$bots[$j].agentName)) { return $false }
-        if ([string]::IsNullOrWhiteSpace([string]$bots[$j].shortName)) { return $false }
-    }
+    # v5 (Neologik Harness): bots are not gathered at onboarding.
     return $true
 }
 
@@ -3760,15 +4247,28 @@ function Set-ConfigFromAnswerFile {
     # Config file name now that org code, env type, and env index are known
     Initialize-ConfigurationFile
 
+    # Solution names FIRST (answer-file override, else Neologik-standard) - the
+    # short name is the naming token for every other computed default. Standard
+    # construction (project#1063): org token = "neo{org}", environment type
+    # never appears in names.
+    #   SolutionName      neo-neo{org}-{region}-{index}   e.g. neo-neodmo-cus-01
+    #   SolutionShortName neo{org}{index}                 e.g. neodmo01
+    $snAns = [string](Get-Answer 'solutionName')
+    $script:ConfigData['SolutionName'] = if (-not [string]::IsNullOrWhiteSpace($snAns)) { $snAns.Trim().ToLower() }
+                                         else { "neo-neo$($script:OrganizationCode)-$regionAbbrev-$($script:EnvironmentIndex)" }
+    $ssnAns = [string](Get-Answer 'solutionShortName')
+    $script:ConfigData['SolutionShortName'] = if (-not [string]::IsNullOrWhiteSpace($ssnAns)) { $ssnAns.Trim().ToLower() }
+                                              else { "neo$($script:OrganizationCode)$($script:EnvironmentIndex)" }
+
     # Resource group name (answer-file override, else computed).
-    $rgComputed = "rg-neo-$($script:OrganizationCode)$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
+    $rgComputed = "rg-$($script:ConfigData['SolutionName'])"
     $rgAns = [string](Get-Answer 'resourceGroupName')
     $script:ResourceGroupName = if (-not [string]::IsNullOrWhiteSpace($rgAns)) { $rgAns.Trim() } else { $rgComputed }
     $rgErr = Test-ResourceGroupNameError $script:ResourceGroupName
     if ($rgErr) { throw "resourceGroupName '$($script:ResourceGroupName)': $rgErr" }
 
     # Key Vault name (-KeyVaultName CLI, else answer-file override, else computed).
-    $kvComputed = "kvneo$($script:OrganizationCode)$($script:EnvironmentType)$($script:EnvironmentIndex)"
+    $kvComputed = "kv$($script:ConfigData['SolutionShortName'])"
     $kvAns = [string](Get-Answer 'keyVaultName')
     $script:KeyVaultNameOverride = if ($script:KeyVaultNameFromCli -and -not [string]::IsNullOrWhiteSpace($KeyVaultName)) { $KeyVaultName.Trim() }
                                    elseif (-not [string]::IsNullOrWhiteSpace($kvAns)) { $kvAns.Trim() }
@@ -3777,41 +4277,33 @@ function Set-ConfigFromAnswerFile {
     if ($kvErr) { throw "keyVaultName '$($script:KeyVaultNameOverride)': $kvErr" }
 
     # Deployment storage account name (answer-file override, else computed and truncated to 24).
-    $saComputed = "stneodeploy$($script:OrganizationCode)$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+    $saComputed = "stneodeployneo$($script:OrganizationCode)$regionAbbrev$($script:EnvironmentIndex)"
     if ($saComputed.Length -gt 24) { $saComputed = $saComputed.Substring(0, 24) }
     $saAns = [string](Get-Answer 'storageAccountName')
     $script:ConfigData['DeployStorageAccountName'] = if (-not [string]::IsNullOrWhiteSpace($saAns)) { $saAns.Trim().ToLower() } else { $saComputed }
     $saErr = Test-StorageAccountNameError $script:ConfigData['DeployStorageAccountName']
     if ($saErr) { throw "storageAccountName '$($script:ConfigData['DeployStorageAccountName'])': $saErr" }
 
-    # Bots (no defaults)
-    $bots = @(Get-Answer 'bots')
-    $bcAns = Get-Answer 'botCount'
-    if ($bcAns -and "$bcAns" -match '^\d+$' -and [int]"$bcAns" -ge 1 -and [int]"$bcAns" -le 10) {
-        $script:BotCount = [int]"$bcAns"
-    }
-    else {
-        $script:BotCount = $bots.Count
-    }
-    if ($script:BotCount -lt 1 -or $script:BotCount -gt 10) { throw "botCount must be between 1 and 10." }
-    if ($bots.Count -lt $script:BotCount) { throw "inputs.json defines $($bots.Count) bot(s) but botCount is $($script:BotCount)." }
+    # Script-runner managed identity name (answer-file override, else computed).
+    $sriComputed = "neologik-script-runner-service-connection-$($script:ConfigData['SolutionShortName'])"
+    $sriAns = [string](Get-Answer 'scriptRunnerIdentityName')
+    $script:ConfigData['ScriptRunnerIdentityName'] = if (-not [string]::IsNullOrWhiteSpace($sriAns)) { $sriAns.Trim() } else { $sriComputed }
+    $sriErr = Test-ManagedIdentityNameError $script:ConfigData['ScriptRunnerIdentityName']
+    if ($sriErr) { throw "scriptRunnerIdentityName '$($script:ConfigData['ScriptRunnerIdentityName'])': $sriErr" }
 
-    $script:BotConfigurations = @()
-    for ($i = 0; $i -lt $script:BotCount; $i++) {
-        $an = ([string]$bots[$i].agentName).Trim()
-        $sn = ([string]$bots[$i].shortName).Trim().ToLower()
-        if ([string]::IsNullOrWhiteSpace($an)) { throw "bot $($i + 1) agentName is required." }
-        if ($an -notmatch '^[A-Za-z0-9 \-_]+$') { throw "bot $($i + 1) agentName '$an' may only contain letters, numbers, spaces, dashes and underscores." }
-        if ($sn -notmatch '^[a-z][a-z0-9\-]*$' -or $sn.Length -lt 1 -or $sn.Length -gt 4) { throw "bot $($i + 1) shortName '$sn' must be lowercase, 1-4 chars, letters/numbers/dashes, starting with a letter." }
-        if ($script:BotConfigurations | Where-Object { $_.AgentName -eq $an }) { throw "duplicate agent name '$an'." }
-        if ($script:BotConfigurations | Where-Object { $_.ShortName -eq $sn }) { throw "duplicate short name '$sn'." }
-        $script:BotConfigurations += @{ AgentName = $an; ShortName = $sn }
-    }
-    $script:ConfigData['BotCount'] = $script:BotCount
-    $script:ConfigData['Bots'] = $script:BotConfigurations
+    # SQL managed identity name (answer-file override, else computed).
+    $sqlComputed = "neologik-sql-managed-identity-$($script:ConfigData['SolutionShortName'])"
+    $sqlAns = [string](Get-Answer 'sqlIdentityName')
+    $script:ConfigData['SqlIdentityName'] = if (-not [string]::IsNullOrWhiteSpace($sqlAns)) { $sqlAns.Trim() } else { $sqlComputed }
+    $sqlErr = Test-ManagedIdentityNameError $script:ConfigData['SqlIdentityName']
+    if ($sqlErr) { throw "sqlIdentityName '$($script:ConfigData['SqlIdentityName'])': $sqlErr" }
+
+    # v5 (Neologik Harness): no bots at onboarding - agents and channels are
+    # created post-deployment in the Harness admin tool.
 
     # Budget / cost-report email recipients (optional list; falls back to the built-in default).
-    # An empty list disables the scheduled cost-report email (see Set-NeologikCostManagementEmail).
+    # An empty list disables the scheduled cost-report email (created and maintained
+    # by the infrastructure deployment - neo-infrastructure scripts/ensure-cost-report-emails.sh).
     $bcrAns = Get-Answer 'budgetCostReportEmailRecipients'
     if ($null -ne $bcrAns) {
         $script:ConfigData['BudgetEmailAddresses'] = @(Resolve-BudgetEmailRecipients $bcrAns)
@@ -3831,9 +4323,27 @@ function Set-ConfigFromAnswerFile {
     elseif ("$rrpAns" -match '^(false|no|n|0)$') { $script:ConfigData['RegisterAllProviders'] = $false }
     else { throw "registerResourceProviders '$rrpAns' must be true or false." }
 
-    # Solution names
-    $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode)$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
-    $script:ConfigData['SolutionShortName'] = "neo$($script:OrganizationCode)$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+    # Resource tagging (project#1173): optional boolean (default: apply tags) plus optional
+    # custom tags as an object or a comma-separated key=value string. Invalid values throw
+    # so the caller falls back to interactive entry.
+    $rtAns = Get-Answer 'applyResourceTags'
+    if ($null -eq $rtAns) { $script:ConfigData['ResourceTagsEnabled'] = $true }
+    elseif ($rtAns -is [bool]) { $script:ConfigData['ResourceTagsEnabled'] = [bool]$rtAns }
+    elseif ("$rtAns" -match '^(true|yes|y|1)$') { $script:ConfigData['ResourceTagsEnabled'] = $true }
+    elseif ("$rtAns" -match '^(false|no|n|0)$') { $script:ConfigData['ResourceTagsEnabled'] = $false }
+    else { throw "applyResourceTags '$rtAns' must be true or false." }
+
+    $script:ConfigData['ResourceTagsCustom'] = @{}
+    if ($script:ConfigData['ResourceTagsEnabled']) {
+        $rtcAns = Get-Answer 'resourceTagsCustom'
+        if ($null -ne $rtcAns) {
+            try { $script:ConfigData['ResourceTagsCustom'] = ConvertTo-NeologikCustomTags $rtcAns }
+            catch { throw "resourceTagsCustom: $($_.Exception.Message)" }
+        }
+    }
+
+    # Solution names were resolved at the top of this function (they drive every
+    # computed default above).
 
     return $regionAbbrev
 }
@@ -3901,7 +4411,7 @@ function Start-NeologikOnboarding {
         # Non-interactive mode requires a fully-populated answer file — fail before any
         # prompt could fire, with a clearer error than a Read-Host failure mid-run.
         if ($script:NonInteractiveMode -and -not (Test-AnswerFileComplete)) {
-            throw "Non-interactive mode requires a fully-populated answer file (organizationCode, organizationName, fqdn, and complete bots[]). Supply -AnswerFile or fix the missing keys."
+            throw "Non-interactive mode requires a fully-populated answer file (organizationCode, organizationName, fqdn). Supply -AnswerFile or fix the missing keys."
         }
 
         # Check for an existing checkpoint and offer to resume
@@ -4534,14 +5044,24 @@ function Start-NeologikOnboarding {
             }
         }
         
-        # Resource Group, Key Vault and Storage Account names. Each shows an effective default:
-        # the answer-file value (or, for Key Vault, a -KeyVaultName CLI value) when present,
-        # otherwise the computed Neologik-standard name. Press Enter to accept, or type to
-        # override; validated against Azure naming rules. This lets client-specific naming
-        # conventions be applied from inputs.json without editing the script.
+        # Resource Group, Key Vault, Storage Account and script-runner identity names. Each
+        # shows an effective default: the answer-file value (or, for Key Vault, a -KeyVaultName
+        # CLI value) when present, otherwise the computed Neologik-standard name. Press Enter to
+        # accept, or type to override; validated against Azure naming rules. This lets
+        # client-specific naming conventions be applied from inputs.json without editing the script.
 
         # Resource group name.
-        $rgComputed = "rg-neo-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
+        # Solution names FIRST (answer-file override, else Neologik-standard) - the
+        # short name is the naming token for every other computed default
+        # (project#1063; environment type never appears in names).
+        $snAns = [string](Get-Answer 'solutionName')
+        $script:ConfigData['SolutionName'] = if (-not [string]::IsNullOrWhiteSpace($snAns)) { $snAns.Trim().ToLower() }
+                                             else { "neo-neo$($script:OrganizationCode.ToLower())-$regionAbbrev-$($script:EnvironmentIndex)" }
+        $ssnAns = [string](Get-Answer 'solutionShortName')
+        $script:ConfigData['SolutionShortName'] = if (-not [string]::IsNullOrWhiteSpace($ssnAns)) { $ssnAns.Trim().ToLower() }
+                                                  else { "neo$($script:OrganizationCode.ToLower())$($script:EnvironmentIndex)" }
+
+        $rgComputed = "rg-$($script:ConfigData['SolutionName'])"
         $rgAns = [string](Get-Answer 'resourceGroupName')
         $rgDefault = if (-not [string]::IsNullOrWhiteSpace($rgAns)) { $rgAns.Trim() } else { $rgComputed }
         $script:ResourceGroupName = Read-NameWithDefault -Title 'Resource Group Name' `
@@ -4549,7 +5069,7 @@ function Start-NeologikOnboarding {
             -LabelPrefix (Get-PromptLabel $rgDefault $rgComputed)
 
         # Key Vault name. Precedence for the default: -KeyVaultName CLI, then answer file, then computed.
-        $kvComputed = "kvneo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$($script:EnvironmentIndex)"
+        $kvComputed = "kv$($script:ConfigData['SolutionShortName'])"
         $kvAns = [string](Get-Answer 'keyVaultName')
         $kvDefault = if ($script:KeyVaultNameFromCli -and -not [string]::IsNullOrWhiteSpace($KeyVaultName)) { $KeyVaultName.Trim() }
                      elseif (-not [string]::IsNullOrWhiteSpace($kvAns)) { $kvAns.Trim() }
@@ -4559,7 +5079,7 @@ function Start-NeologikOnboarding {
             -LabelPrefix (Get-PromptLabel $kvDefault $kvComputed)
 
         # Deployment storage account name (holds the certificate blob container).
-        $saComputed = "stneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+        $saComputed = "stneodeployneo$($script:OrganizationCode.ToLower())$regionAbbrev$($script:EnvironmentIndex)"
         if ($saComputed.Length -gt 24) { $saComputed = $saComputed.Substring(0, 24) }
         $saAns = [string](Get-Answer 'storageAccountName')
         $saDefault = if (-not [string]::IsNullOrWhiteSpace($saAns)) { $saAns.Trim().ToLower() } else { $saComputed }
@@ -4567,207 +5087,36 @@ function Start-NeologikOnboarding {
             -DefaultValue $saDefault -Validator ${function:Test-StorageAccountNameError} `
             -LabelPrefix (Get-PromptLabel $saDefault $saComputed)
 
-        # Get Number of Bots with validation
-        # Source the default from the answer file when it holds a valid 1-10 value.
-        $botCountDefault = Get-Answer 'botCount'
-        if ($botCountDefault -and "$botCountDefault" -match '^\d+$' -and [int]"$botCountDefault" -ge 1 -and [int]"$botCountDefault" -le 10) {
-            $botCountDefault = [int]"$botCountDefault"
-        }
-        elseif ($botCountDefault) {
-            Write-Host "  ⚠ Ignoring invalid botCount '$botCountDefault' from answer file (must be 1-10)." -ForegroundColor Yellow
-            $botCountDefault = 1
-        }
-        else {
-            $botCountDefault = 1
-        }
-        $botCountLabel = Get-PromptLabel $botCountDefault 1
-        $botCountValid = $false
-        while (-not $botCountValid) {
-            Write-Host ""
-            Write-Host "How many bots will there be?" -ForegroundColor Cyan
-            Write-Host "  $botCountLabel" -NoNewline -ForegroundColor Gray
-            Write-Host $botCountDefault -ForegroundColor Yellow
-            Write-Host "  Press Enter to use default, or type new value: " -NoNewline -ForegroundColor Gray
-            $botCountInput = Read-Host
+        # Script-runner managed identity name (the deployment pipeline's service connection).
+        $sriComputed = "neologik-script-runner-service-connection-$($script:ConfigData['SolutionShortName'])"
+        $sriAns = [string](Get-Answer 'scriptRunnerIdentityName')
+        $sriDefault = if (-not [string]::IsNullOrWhiteSpace($sriAns)) { $sriAns.Trim() } else { $sriComputed }
+        $script:ConfigData['ScriptRunnerIdentityName'] = Read-NameWithDefault -Title 'Script Runner Managed Identity Name' `
+            -DefaultValue $sriDefault -Validator ${function:Test-ManagedIdentityNameError} `
+            -LabelPrefix (Get-PromptLabel $sriDefault $sriComputed)
 
-            if ([string]::IsNullOrWhiteSpace($botCountInput)) {
-                $script:BotCount = $botCountDefault
-                $botCountValid = $true
-                Write-Host "  ✓ Using default: $($script:BotCount)" -ForegroundColor Green
-            }
-            else {
-                # Validate it's a number
-                if ($botCountInput -match '^\d+$') {
-                    $botNumber = [int]$botCountInput
-                    
-                    # Validate range (1-10)
-                    if ($botNumber -ge 1 -and $botNumber -le 10) {
-                        $script:BotCount = $botNumber
-                        $botCountValid = $true
-                        Write-Host "  ✓ Using: $($script:BotCount)" -ForegroundColor Green
-                    }
-                    else {
-                        Write-Host "  ✗ Bot count must be between 1 and 10. Please try again." -ForegroundColor Red
-                    }
-                }
-                else {
-                    Write-Host "  ✗ Bot count must be a number. Please try again." -ForegroundColor Red
-                }
-            }
-        }
+        # SQL managed identity name.
+        $sqlComputed = "neologik-sql-managed-identity-$($script:ConfigData['SolutionShortName'])"
+        $sqlAns = [string](Get-Answer 'sqlIdentityName')
+        $sqlDefault = if (-not [string]::IsNullOrWhiteSpace($sqlAns)) { $sqlAns.Trim() } else { $sqlComputed }
+        $script:ConfigData['SqlIdentityName'] = Read-NameWithDefault -Title 'SQL Managed Identity Name' `
+            -DefaultValue $sqlDefault -Validator ${function:Test-ManagedIdentityNameError} `
+            -LabelPrefix (Get-PromptLabel $sqlDefault $sqlComputed)
 
-        # Get Bot Names (Agent Name and Short Name for each bot)
-        $botsAnswer = @(Get-Answer 'bots')
-        # Built-in suggested agent name (the product name), offered as the prompt default when the
-        # answer file has no value for this bot.
-        $agentNameBuiltinDefault = 'Neologik'
-        $script:BotConfigurations = @()
-        for ($i = 1; $i -le $script:BotCount; $i++) {
-            # Agent-name suggestion: prefer the answer-file value; otherwise fall back to the
-            # built-in default, but only while it is still free (so a second bot is not offered a
-            # name an earlier bot already took).
-            $agentNamePrefill = $null
-            $agentNameFromAnswer = $false
-            if ($botsAnswer.Count -ge $i -and $botsAnswer[$i - 1] -and $botsAnswer[$i - 1].agentName) {
-                $anp = ([string]$botsAnswer[$i - 1].agentName).Trim()
-                if (-not [string]::IsNullOrWhiteSpace($anp)) { $agentNamePrefill = $anp; $agentNameFromAnswer = $true }
-            }
-            if (-not $agentNamePrefill -and -not ($script:BotConfigurations | Where-Object { $_.AgentName -eq $agentNameBuiltinDefault })) {
-                $agentNamePrefill = $agentNameBuiltinDefault
-            }
-            $agentNameLabel = if ($agentNameFromAnswer) { 'Pre-filled: ' } else { 'Default: ' }
-            $agentNameValid = $false
-            $agentName = ""
-
-            # Get Agent Name
-            while (-not $agentNameValid) {
-                Write-Host ""
-                Write-Host "Full Agent Name for Bot $i`:" -ForegroundColor Cyan
-                if ($agentNamePrefill) {
-                    Write-Host "  $agentNameLabel" -NoNewline -ForegroundColor Gray
-                    Write-Host $agentNamePrefill -ForegroundColor Yellow
-                }
-                Write-Host "  Requirements: letters, numbers, spaces, dashes, and underscores allowed" -ForegroundColor Gray
-                if ($agentNamePrefill) {
-                    Write-Host "  Press Enter to accept, or type a new value: " -NoNewline -ForegroundColor Gray
-                }
-                else {
-                    Write-Host "  Enter agent name: " -NoNewline -ForegroundColor Gray
-                }
-                $agentNameInput = Read-Host
-
-                if ([string]::IsNullOrWhiteSpace($agentNameInput)) {
-                    if ($agentNamePrefill) {
-                        $agentName = $agentNamePrefill
-                    }
-                    else {
-                        Write-Host "  ✗ Agent name is required. Please enter a value." -ForegroundColor Red
-                        continue
-                    }
-                }
-                else {
-                    $agentName = $agentNameInput.Trim()
-                }
-
-                # Validate characters (letters, numbers, spaces, dashes, and underscores)
-                if ($agentName -notmatch '^[A-Za-z0-9 \-_]+$') {
-                    Write-Host "  ✗ Agent name must contain only letters, numbers, spaces, dashes, and underscores. Please try again." -ForegroundColor Red
-                    continue
-                }
-
-                # Check for duplicates
-                if ($script:BotConfigurations | Where-Object { $_.AgentName -eq $agentName }) {
-                    Write-Host "  ✗ Agent name '$agentName' is already used. Please choose a different name." -ForegroundColor Red
-                    continue
-                }
-
-                $agentNameValid = $true
-                Write-Host "  ✓ Using: $agentName" -ForegroundColor Green
-            }
-
-            # Get Bot Short Name
-            # No built-in default — pre-fill from the answer file when present, otherwise require input.
-            $botShortNamePrefill = $null
-            if ($botsAnswer.Count -ge $i -and $botsAnswer[$i - 1] -and $botsAnswer[$i - 1].shortName) {
-                $snp = ([string]$botsAnswer[$i - 1].shortName).Trim()
-                if (-not [string]::IsNullOrWhiteSpace($snp)) { $botShortNamePrefill = $snp }
-            }
-            $botShortNameValid = $false
-
-            while (-not $botShortNameValid) {
-                Write-Host ""
-                Write-Host "Bot $i Short Name:" -ForegroundColor Cyan
-                if ($botShortNamePrefill) {
-                    Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
-                    Write-Host $botShortNamePrefill -ForegroundColor Yellow
-                    Write-Host "  Press Enter to use pre-filled value, or type new value: " -NoNewline -ForegroundColor Gray
-                }
-                else {
-                    Write-Host "  Example: " -NoNewLine -ForegroundColor Gray
-                    Write-Host "bot" -ForegroundColor Yellow
-                    Write-Host "  Requirements: lowercase, max 4 characters, letters and dashes only" -ForegroundColor Gray
-                    Write-Host "  Enter short name: " -NoNewline -ForegroundColor Gray
-                }
-                $botShortNameInput = Read-Host
-
-                if ([string]::IsNullOrWhiteSpace($botShortNameInput)) {
-                    if ($botShortNamePrefill) {
-                        $botShortName = $botShortNamePrefill
-                    }
-                    else {
-                        Write-Host "  ✗ Short name is required. Please enter a value." -ForegroundColor Red
-                        continue
-                    }
-                }
-                else {
-                    $botShortName = $botShortNameInput.Trim()
-                }
-
-                # Validate lowercase
-                if ($botShortName -cne $botShortName.ToLower()) {
-                    Write-Host "  ✗ Bot short name must be lowercase. Please try again." -ForegroundColor Red
-                    continue
-                }
-
-                # Validate length
-                if ($botShortName.Length -lt 1 -or $botShortName.Length -gt 4) {
-                    Write-Host "  ✗ Bot short name must be between 1 and 4 characters. Please try again." -ForegroundColor Red
-                    continue
-                }
-
-                # Validate characters (lowercase letters and dashes only)
-                if ($botShortName -notmatch '^[a-z][a-z0-9\-]*$') {
-                    Write-Host "  ✗ Bot short name must contain only lowercase letters, numbers and dashes, and must start with a letter. Please try again." -ForegroundColor Red
-                    continue
-                }
-
-                # Check for duplicates
-                if ($script:BotConfigurations | Where-Object { $_.ShortName -eq $botShortName }) {
-                    Write-Host "  ✗ Bot short name '$botShortName' is already used. Please choose a different name." -ForegroundColor Red
-                    continue
-                }
-
-                $botShortNameValid = $true
-                Write-Host "  ✓ Using: $botShortName" -ForegroundColor Green
-            }
-
-            # Store both names for this bot
-            $script:BotConfigurations += @{
-                AgentName = $agentName
-                ShortName = $botShortName
-            }
-        }
-
-        $script:ConfigData['BotCount'] = $script:BotCount
-        $script:ConfigData['Bots'] = $script:BotConfigurations
+        # v5: no bots are created at onboarding. Agents and their channels are
+        # created post-deployment in the NCE admin tool; channels reuse the
+        # default user group created above (or an admin supplies another
+        # existing group id at channel attach) - the platform never creates
+        # groups (project#1519).
 
         # Get Budget Cost-Report Email Recipient(s)
-        # A daily Azure Cost Management report is emailed to these addresses. This used to be
-        # provisioned by the infrastructure deployment as a subscription-scoped Bicep module; it
-        # is now created here (run as Owner, at Step 13b) so the deployment service connection
-        # needs no subscription-scoped role. Pre-filled from inputs.json
-        # 'budgetCostReportEmailRecipients' when present. Leave blank for the default, or 'none'
-        # to disable.
+        # A daily Azure Cost Management report is emailed to these addresses. The report
+        # (cost view + scheduled actions) is created and maintained by the infrastructure
+        # deployment (neo-infrastructure scripts/ensure-cost-report-emails.sh), authorised
+        # by the deployment SP's subscription-scoped 'Cost Management Contributor' grant
+        # assigned by this script (project#1215); onboarding only collects the recipients.
+        # Pre-filled from inputs.json 'budgetCostReportEmailRecipients' when present.
+        # Leave blank for the default, or 'none' to disable.
         $defaultBudgetEmail = @($script:DefaultBudgetCostReportEmailRecipients)
         $budgetAns = Get-Answer 'budgetCostReportEmailRecipients'
         if ($null -ne $budgetAns) {
@@ -4851,9 +5200,110 @@ function Start-NeologikOnboarding {
             Write-Host "  ✓ Will register the minimal set only — run Register-NeologikResourceProviders.ps1 before deploying" -ForegroundColor Green
         }
 
-        # Calculate solution names based on configuration
-        $script:ConfigData['SolutionName'] = "neo-$($script:OrganizationCode.ToLower())$($script:EnvironmentType)-$regionAbbrev-$($script:EnvironmentIndex)"
-        $script:ConfigData['SolutionShortName'] = "neo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+        # Ask whether to tag created Azure resources (project#1173). Some tenants carry
+        # Azure Policies that DENY creation of untagged resources, so tags must be applied
+        # on the create call itself. Pre-filled from inputs.json 'applyResourceTags' and
+        # 'resourceTagsCustom' when present. Default: apply tags.
+        $tagsDefault = $true
+        $tagsAns = Get-AnswerBool 'applyResourceTags'
+        if ($null -ne $tagsAns) { $tagsDefault = $tagsAns }
+        $tagsDefaultText = if ($tagsDefault) { 'true' } else { 'false' }
+        $tagsValid = $false
+        while (-not $tagsValid) {
+            Write-Host ""
+            Write-Host "Apply Azure resource tags to created resources? (true/false)" -ForegroundColor Cyan
+            Write-Host "  Tags (Vendor, ApplicationName, ManagedBy, Environment, Solution," -ForegroundColor Gray
+            Write-Host "  DeploymentDate) are applied when each resource is created, satisfying" -ForegroundColor Gray
+            Write-Host "  Azure Policies that deny creation of untagged resources." -ForegroundColor Gray
+            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
+            Write-Host $tagsDefaultText -ForegroundColor Yellow
+            Write-Host "  Press Enter to use default, or type true/false: " -NoNewline -ForegroundColor Gray
+            $tagsInput = Read-Host
+
+            if ([string]::IsNullOrWhiteSpace($tagsInput)) {
+                $script:ConfigData['ResourceTagsEnabled'] = $tagsDefault
+                $tagsValid = $true
+            }
+            elseif ($tagsInput.Trim() -match '^(true|yes|y|1)$') {
+                $script:ConfigData['ResourceTagsEnabled'] = $true
+                $tagsValid = $true
+            }
+            elseif ($tagsInput.Trim() -match '^(false|no|n|0)$') {
+                $script:ConfigData['ResourceTagsEnabled'] = $false
+                $tagsValid = $true
+            }
+            else {
+                Write-Host "  Invalid value. Enter true or false. Please try again." -ForegroundColor Red
+            }
+        }
+        if ($script:ConfigData['ResourceTagsEnabled']) {
+            Write-Host "  Using: true (resources are tagged at creation)" -ForegroundColor Green
+        }
+        else {
+            Write-Host "  Using: false (no tags are applied)" -ForegroundColor Green
+        }
+
+        # Optional customer tags, only when tagging is enabled. Comma-separated key=value
+        # pairs; custom pairs override the Neologik defaults on key collision.
+        $script:ConfigData['ResourceTagsCustom'] = @{}
+        if ($script:ConfigData['ResourceTagsEnabled']) {
+            $customPrefill = ''
+            $customAns = Get-Answer 'resourceTagsCustom'
+            if ($null -ne $customAns) {
+                try {
+                    $prefillTags = ConvertTo-NeologikCustomTags $customAns
+                    $customPrefill = (@($prefillTags.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ',')
+                }
+                catch {
+                    Write-Host "  Ignoring invalid resourceTagsCustom from answer file: $($_.Exception.Message)" -ForegroundColor Yellow
+                }
+            }
+            $customValid = $false
+            while (-not $customValid) {
+                Write-Host ""
+                Write-Host "Custom resource tags (optional):" -ForegroundColor Cyan
+                Write-Host "  Comma-separated key=value pairs; keys may use letters, digits, '.', '_'" -ForegroundColor Gray
+                Write-Host "  and '-'. Custom tags override the Neologik defaults on key collision." -ForegroundColor Gray
+                Write-Host "  Example: " -NoNewline -ForegroundColor Gray
+                Write-Host "CostCentre=IT123,Owner=Platform Team" -ForegroundColor Yellow
+                if ($customPrefill) {
+                    Write-Host "  Pre-filled: " -NoNewline -ForegroundColor Gray
+                    Write-Host $customPrefill -ForegroundColor Yellow
+                    Write-Host "  Press Enter to use pre-filled value, 'none' for no custom tags, or type new pairs: " -NoNewline -ForegroundColor Gray
+                }
+                else {
+                    Write-Host "  Press Enter for none, or type key=value pairs: " -NoNewline -ForegroundColor Gray
+                }
+                $customInput = Read-Host
+
+                if ([string]::IsNullOrWhiteSpace($customInput)) {
+                    $customInput = $customPrefill
+                }
+                elseif ($customInput.Trim() -match '^(none)$') {
+                    $customInput = ''
+                }
+
+                try {
+                    $script:ConfigData['ResourceTagsCustom'] = ConvertTo-NeologikCustomTags $customInput
+                    $customValid = $true
+                }
+                catch {
+                    Write-Host "  $($_.Exception.Message) Please try again." -ForegroundColor Red
+                    continue
+                }
+
+                if ($script:ConfigData['ResourceTagsCustom'].Count -gt 0) {
+                    $customSummary = (@($script:ConfigData['ResourceTagsCustom'].GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ', ')
+                    Write-Host "  Using custom tags: $customSummary" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "  No custom tags" -ForegroundColor Green
+                }
+            }
+        }
+
+        # Solution names were resolved before the resource-name prompts above
+        # (they drive every computed default).
             }
 
         # Provisioning decisions - presented BEFORE the summary so they appear in it and are
@@ -4863,7 +5313,9 @@ function Start-NeologikOnboarding {
         # decision and never prompt again. (The SP secret is held in a script variable, not
         # ConfigData, so it is never written to the checkpoint or exported config.)
 
-        # Guest invitations.
+        # Guest invitations. Typed additions to the invite list are interactive-only;
+        # default to none so the summary and Step 8 can always read the key.
+        $script:ConfigData['AdditionalGuestEmails'] = @()
         if ($script:SkipGuestInvitationFromCli) {
             $script:ConfigData['SkipGuestInvitation'] = [bool]$SkipGuestInvitation
         }
@@ -4874,18 +5326,129 @@ function Start-NeologikOnboarding {
             }
             else {
                 Write-Host ""
+                # Recover a missing guest users file before asking - customers sometimes
+                # download only the .ps1 instead of unzipping the full onboarding package.
+                if ($script:NeologikGuestUsers.Count -eq 0 -and -not (Test-Path $script:GuestUsersFile) -and -not $script:NonInteractiveMode) {
+                    Resolve-GuestUsersFile | Out-Null
+                }
                 Write-Host "Invite Neologik guest users into this tenant?" -ForegroundColor Cyan
                 if ($script:NeologikGuestUsers.Count -gt 0) {
                     Write-Host "  The following $($script:NeologikGuestUsers.Count) guest(s) from NeologikGuestUsers.txt will be invited:" -ForegroundColor Gray
                     $script:NeologikGuestUsers | ForEach-Object { Write-Host "    - $_" -ForegroundColor Gray }
                 }
                 else {
-                    Write-Host "  NeologikGuestUsers.txt is empty or missing - no guests will be invited even if you choose Y." -ForegroundColor Gray
+                    Write-Host "  NeologikGuestUsers.txt is empty or missing - choose Y to type the addresses" -ForegroundColor Gray
+                    Write-Host "  to invite, or N to skip invitations." -ForegroundColor Gray
                 }
                 Write-Host "  (Y/n, default: Y - invite): " -NoNewline -ForegroundColor Yellow
                 $inviteAns = Read-Host
                 # Default (Enter) invites; only an explicit N/no skips.
                 $script:ConfigData['SkipGuestInvitation'] = ($inviteAns -match '^(n|no)$')
+
+                # Invitations accepted: offer to extend the file's list with typed
+                # addresses (or build the whole list by hand when the file is empty or
+                # missing). Interactive path only - unattended runs use the file.
+                if (-not $script:ConfigData['SkipGuestInvitation']) {
+                    $addMore = $false
+                    if ($script:NeologikGuestUsers.Count -gt 0) {
+                        Write-Host "  Do you want to add any more addresses to invite? (y/N, default: N): " -NoNewline -ForegroundColor Yellow
+                        $moreAns = Read-Host
+                        $addMore = ($moreAns -match '^(y|yes)$')
+                    }
+                    else {
+                        $addMore = $true
+                        Write-Host "  Enter the addresses to invite." -ForegroundColor Gray
+                    }
+                    if ($addMore) {
+                        Write-Host "  One address per line (a line may also hold several, comma-separated)." -ForegroundColor Gray
+                        Write-Host "  Press Enter on an empty line to finish." -ForegroundColor Gray
+                        $combined = @(Read-EmailAddressList -Seed @($script:NeologikGuestUsers))
+                        $additional = @($combined | Where-Object { $script:NeologikGuestUsers -notcontains $_ })
+                        $script:ConfigData['AdditionalGuestEmails'] = $additional
+                        if ($additional.Count -gt 0) {
+                            Write-Host "  $($additional.Count) additional address(es) will be invited alongside the $($script:NeologikGuestUsers.Count) from the file:" -ForegroundColor Gray
+                            $additional | ForEach-Object { Write-Host "    - $_" -ForegroundColor Gray }
+                        }
+                        elseif ($script:NeologikGuestUsers.Count -eq 0) {
+                            Write-Host "  No addresses entered - no guests will be invited." -ForegroundColor Yellow
+                        }
+                    }
+                }
+            }
+        }
+
+        # Existing accounts into the groups (asked only when invitations were declined):
+        # the client may have pre-created the Neologik team's accounts (B2B guests or
+        # member accounts) and want them added to the security groups without any
+        # invitation being sent. Precedence: answer file, then an interactive prompt.
+        # Address source precedence: answer file 'existingAccountEmails', then
+        # NeologikGuestUsers.txt or interactively typed addresses.
+        $script:ConfigData['AddExistingAccountsToGroups'] = $false
+        $script:ConfigData['ExistingAccountEmails'] = @()
+        if ($script:ConfigData['SkipGuestInvitation']) {
+            $addAns = Get-AnswerBool 'addExistingAccountsToGroups'
+            if ($null -ne $addAns) {
+                $script:ConfigData['AddExistingAccountsToGroups'] = $addAns
+                Write-Log "Add-existing-accounts decision from answer file: addExistingAccountsToGroups=$addAns." -Level Info
+            }
+            elseif (-not $script:NonInteractiveMode) {
+                Write-Host ""
+                Write-Host "Add existing accounts to the security groups?" -ForegroundColor Cyan
+                Write-Host "  Choose Y if you have already created the Neologik team's accounts in this" -ForegroundColor Gray
+                Write-Host "  tenant (as guests or full members) and want them added to the security" -ForegroundColor Gray
+                Write-Host "  groups now. No invitations are sent. NOTE: accounts added here go into ALL" -ForegroundColor Gray
+                Write-Host "  Neologik groups, including the Admin User Group (Azure admin access) -" -ForegroundColor Gray
+                Write-Host "  only list accounts that should hold Neologik admin/support access." -ForegroundColor Gray
+                Write-Host "  (y/N, default: N): " -NoNewline -ForegroundColor Yellow
+                $addAnswer = Read-Host
+                $script:ConfigData['AddExistingAccountsToGroups'] = ($addAnswer -match '^(y|yes)$')
+            }
+
+            if ($script:ConfigData['AddExistingAccountsToGroups']) {
+                $emails = @()
+                $ansEmails = Get-Answer 'existingAccountEmails'
+                if ($null -ne $ansEmails) {
+                    foreach ($entry in @($ansEmails)) {
+                        $emails += @(([string]$entry) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                    }
+                    Write-Log "Existing-account addresses from answer file: $($emails.Count)." -Level Info
+                }
+                elseif ($script:NonInteractiveMode) {
+                    # Unattended with no answer-file list: the guest users file is the source.
+                    $emails = @($script:NeologikGuestUsers)
+                    Write-Log "Non-interactive: existing-account addresses taken from NeologikGuestUsers.txt ($($emails.Count))." -Level Info
+                }
+                else {
+                    $useFile = $false
+                    if ($script:NeologikGuestUsers.Count -gt 0) {
+                        Write-Host ""
+                        Write-Host "  Where should the account addresses come from?" -ForegroundColor Cyan
+                        Write-Host "  NeologikGuestUsers.txt contains $($script:NeologikGuestUsers.Count) address(es):" -ForegroundColor Gray
+                        $script:NeologikGuestUsers | ForEach-Object { Write-Host "    - $_" -ForegroundColor Gray }
+                        Write-Host "  [F] Use the file   [T] Type the addresses   (F/t, default: F): " -NoNewline -ForegroundColor Yellow
+                        $srcAnswer = Read-Host
+                        $useFile = ($srcAnswer -notmatch '^(t|type)$')
+                    }
+                    if ($useFile) {
+                        $emails = @($script:NeologikGuestUsers)
+                    }
+                    else {
+                        # Line-by-line entry via the shared reader: one address per Enter,
+                        # commas accepted within a line, blank line finishes.
+                        Write-Host "  Enter the email addresses, one per line (a line may also hold several," -ForegroundColor Gray
+                        Write-Host "  comma-separated). Each must exactly match the account's mail or user" -ForegroundColor Gray
+                        Write-Host "  principal name. Press Enter on an empty line to finish." -ForegroundColor Gray
+                        $emails = @(Read-EmailAddressList)
+                        if ($emails.Count -eq 0) {
+                            Write-Host "  No addresses entered - no accounts will be added to the groups." -ForegroundColor Yellow
+                        }
+                        else {
+                            Write-Host "  $($emails.Count) address(es) collected:" -ForegroundColor Gray
+                            $emails | ForEach-Object { Write-Host "    - $_" -ForegroundColor Gray }
+                        }
+                    }
+                }
+                $script:ConfigData['ExistingAccountEmails'] = $emails
             }
         }
 
@@ -4919,15 +5482,26 @@ function Start-NeologikOnboarding {
         Write-Host "  Resource Group Name:  " -NoNewline; Write-Host $script:ResourceGroupName -ForegroundColor Yellow
         Write-Host "  Key Vault Name:       " -NoNewline; Write-Host $script:KeyVaultNameOverride -ForegroundColor Yellow
         Write-Host "  Storage Account Name: " -NoNewline; Write-Host $script:ConfigData['DeployStorageAccountName'] -ForegroundColor Yellow
-        Write-Host "  Bot Count:            " -NoNewline; Write-Host $script:BotCount -ForegroundColor Yellow
-        foreach ($bot in $script:BotConfigurations) {
-            Write-Host "  Bot:                  " -NoNewline; Write-Host "$($bot.AgentName) (short: $($bot.ShortName))" -ForegroundColor Yellow
-        }
+        Write-Host "  Script Runner Identity: " -NoNewline; Write-Host $script:ConfigData['ScriptRunnerIdentityName'] -ForegroundColor Yellow
+        Write-Host "  SQL Managed Identity: " -NoNewline; Write-Host $script:ConfigData['SqlIdentityName'] -ForegroundColor Yellow
+        Write-Host "  Solution Name: " -NoNewline; Write-Host $script:ConfigData['SolutionName'] -ForegroundColor Yellow
+        Write-Host "  Solution Short Name: " -NoNewline; Write-Host $script:ConfigData['SolutionShortName'] -ForegroundColor Yellow
         $budgetEmailSummary = if ($script:ConfigData['BudgetEmailAddresses'].Count -gt 0) { $script:ConfigData['BudgetEmailAddresses'] -join ', ' } else { '(disabled)' }
         Write-Host "  Cost-Report Email:    " -NoNewline; Write-Host $budgetEmailSummary -ForegroundColor Yellow
         $providerSummary = if ($script:ConfigData['RegisterAllProviders']) { 'All providers' } else { 'Minimal set (run Register-NeologikResourceProviders.ps1 before deploying)' }
         Write-Host "  Provider Registration:" -NoNewline; Write-Host " $providerSummary" -ForegroundColor Yellow
-        $guestSummary = if ($script:ConfigData['SkipGuestInvitation']) { 'No (skipped)' } else { 'Yes' }
+        $tagsSummary = if ($script:ConfigData['ResourceTagsEnabled']) {
+            $customCount = @($script:ConfigData['ResourceTagsCustom'].Keys).Count
+            if ($customCount -gt 0) { "Yes ($customCount custom)" } else { 'Yes' }
+        }
+        else { 'No' }
+        Write-Host "  Apply Resource Tags:  " -NoNewline; Write-Host $tagsSummary -ForegroundColor Yellow
+        $guestSummary = if (-not $script:ConfigData['SkipGuestInvitation']) {
+                            $typedCount = @($script:ConfigData['AdditionalGuestEmails'] | Where-Object { $_ }).Count
+                            if ($typedCount -gt 0) { "Yes ($($script:NeologikGuestUsers.Count) from file + $typedCount typed)" } else { 'Yes' }
+                        }
+                        elseif ($script:ConfigData['AddExistingAccountsToGroups']) { "No - adding $(@($script:ConfigData['ExistingAccountEmails']).Count) existing account(s) to the groups" }
+                        else { 'No (skipped)' }
         Write-Host "  Invite Neologik Guests:" -NoNewline; Write-Host " $guestSummary" -ForegroundColor Yellow
         if ($script:ConfigData['UseExistingServicePrincipal']) {
             Write-Host "  Deployment SP:        " -NoNewline; Write-Host "Existing: $($script:ConfigData['ExistingServicePrincipalObjectId'])" -ForegroundColor Yellow
@@ -4982,6 +5556,12 @@ function Start-NeologikOnboarding {
             if (-not $script:ConfigData.ContainsKey('RegisterAllProviders')) {
                 $script:ConfigData['RegisterAllProviders'] = $false
             }
+            # Resource tagging (project#1173) may be absent on older checkpoints - default to
+            # disabled so a resumed pre-feature run keeps its original untagged behaviour.
+            if (-not $script:ConfigData.ContainsKey('ResourceTagsEnabled')) {
+                $script:ConfigData['ResourceTagsEnabled'] = $false
+                $script:ConfigData['ResourceTagsCustom'] = @{}
+            }
             # Provisioning decisions may be absent on older checkpoints — default them. The SP
             # secret is not persisted, so a resumed run cannot re-store it in Key Vault (the
             # client adds it manually if needed).
@@ -4995,7 +5575,7 @@ function Start-NeologikOnboarding {
 
             Write-Host "`n  ⏩ Configuration restored from checkpoint — skipping input prompts" -ForegroundColor Gray
             Write-Host "     Org: $($script:OrganizationCode)  |  Env: $($script:EnvironmentType)  |  Region: $($script:AzureRegion)" -ForegroundColor Cyan
-            Write-Host "     Resource Group: $($script:ResourceGroupName)  |  Bots: $($script:BotCount)" -ForegroundColor Cyan
+            Write-Host "     Resource Group: $($script:ResourceGroupName)" -ForegroundColor Cyan
             Write-Host ""
         }
 
@@ -5006,20 +5586,26 @@ function Start-NeologikOnboarding {
         $null = New-NeologikResourceGroup -ResourceGroupName $script:ResourceGroupName -Location $script:AzureRegion
 
         # Step 8: Invite guest users (skipped when the client uses its own-tenant
-        # accounts and takes no B2B guests). The decision was made during configuration
-        # gathering and shown in the summary.
+        # accounts and takes no B2B guests). When invitations were declined but the
+        # operator chose to add existing accounts, resolve those instead - lookup only,
+        # never inviting; unresolvable addresses warn and the run continues. Both
+        # decisions were made during configuration gathering and shown in the summary.
         if ($script:ConfigData['SkipGuestInvitation']) {
             Write-Log "Guest user invitation skipped (per configuration)." -Level Info
             $guestUsers = @()
+            if ($script:ConfigData['AddExistingAccountsToGroups']) {
+                $guestUsers = @(Invoke-ExistingAccountResolution -Emails @($script:ConfigData['ExistingAccountEmails']))
+            }
         }
         else {
-            $guestUsers = Invoke-GuestUserInvitation -GuestEmails $script:NeologikGuestUsers
+            # File entries plus any addresses typed at the invite prompt (existing
+            # accounts are matched, the rest receive B2B invitations).
+            $inviteEmails = @(@($script:NeologikGuestUsers) + @($script:ConfigData['AdditionalGuestEmails'] | Where-Object { $_ }) | Select-Object -Unique)
+            $guestUsers = Invoke-GuestUserInvitation -GuestEmails $inviteEmails
         }
 
         # Step 9: Create security groups (includes logged-in user + guest users)
-        # Extract agent names for group creation
-        $agentNames = $script:BotConfigurations | ForEach-Object { $_.AgentName }
-        $securityGroups = New-NeologikSecurityGroups -GuestUsers $guestUsers -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType -EnvironmentIndex $script:EnvironmentIndex -BotNames $agentNames
+        $securityGroups = New-NeologikSecurityGroups -GuestUsers $guestUsers -OrganizationCode $script:OrganizationCode -EnvironmentType $script:EnvironmentType -EnvironmentIndex $script:EnvironmentIndex
 
         # Step 10: Assign roles to security groups
         $null = Set-NeologikRoleAssignments -SecurityGroups $securityGroups -SubscriptionId $script:ConfigData['SubscriptionId'] -ResourceGroupName $script:ResourceGroupName
@@ -5052,7 +5638,7 @@ function Start-NeologikOnboarding {
             Write-Log "Using Key Vault name override: $keyVaultName" -Level Info
         }
         else {
-            $keyVaultName = "kvneo$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$($script:EnvironmentIndex)"
+            $keyVaultName = "kv$($script:ConfigData['SolutionShortName'])"
         }
 
         # Key Vault names must be 3-24 characters, only alphanumeric and hyphens
@@ -5068,25 +5654,36 @@ function Start-NeologikOnboarding {
             -SecurityGroups $securityGroups `
             -SubscriptionId $script:ConfigData['SubscriptionId']
 
+        # Step 12b: NCE auth app (project#1084). Created here - in the Global
+        # Admin session - so the Harness user group assignment that the v5
+        # groups-claim login depends on happens at onboarding time. The
+        # deployment pipeline's ensure-app-regs.sh finds this app by
+        # uniqueName, reuses it and reconciles its properties; its own
+        # best-effort assignment (blocked for the hardened deploy SP) becomes
+        # a no-op. Retires hard-blocking migration runsheet step 7b for
+        # environments onboarded from this version.
+        $null = New-NeologikNceAuthApp -SecurityGroups $securityGroups `
+            -DeploySpObjectId $appReg.ServicePrincipal.Id `
+            -KeyVaultName $keyVaultName
+
         # Step 13: Register required Azure resource providers (full set unless the operator
         # opted out, in which case only the minimal set is registered here and the rest must be
         # registered separately via Register-NeologikResourceProviders.ps1).
         Register-AllResourceProviders -RegisterAll:$script:ConfigData['RegisterAllProviders']
         Complete-OnboardingStep 'ResourceProviders'
 
-        # Step 13b: Configure subscription-scoped Cost Management scheduled email (run as Owner)
-        Set-NeologikCostManagementEmail -SubscriptionId $script:ConfigData['SubscriptionId'] `
-            -SolutionName $script:ConfigData['SolutionName'] `
-            -EmailAddresses $script:ConfigData['BudgetEmailAddresses'] `
-            -Frequency $script:ConfigData['BudgetEmailFrequency']
-        Complete-OnboardingStep 'CostManagementEmail'
+        # (The subscription-scoped Cost Management scheduled email is created and
+        # maintained by the infrastructure deployment - neo-infrastructure
+        # scripts/ensure-cost-report-emails.sh - authorised by the SP's
+        # 'Cost Management Contributor' grant above, project#1215. Onboarding only
+        # collects the recipients, exported via the Configuration JSON.)
 
         # Step 14: Create Storage Account and blob container for certificates.
         # Name was resolved during configuration gathering (answer file / prompt / computed).
         # Fall back to the computed name for checkpoints written before this field existed.
         $storageAccountName = [string]$script:ConfigData['DeployStorageAccountName']
         if ([string]::IsNullOrWhiteSpace($storageAccountName)) {
-            $storageAccountName = "stneodeploy$($script:OrganizationCode.ToLower())$($script:EnvironmentType)$regionAbbrev$($script:EnvironmentIndex)"
+            $storageAccountName = "stneodeployneo$($script:OrganizationCode.ToLower())$regionAbbrev$($script:EnvironmentIndex)"
         }
 
         # Storage account names must be 3-24 characters, lowercase alphanumeric only
@@ -5106,7 +5703,9 @@ function Start-NeologikOnboarding {
             -SubscriptionId $script:ConfigData['SubscriptionId'] `
             -OrganizationCode $script:OrganizationCode `
             -EnvironmentType $script:EnvironmentType `
-            -EnvironmentIndex $script:EnvironmentIndex
+            -EnvironmentIndex $script:EnvironmentIndex `
+            -ScriptRunnerIdentityName ([string]$script:ConfigData['ScriptRunnerIdentityName']) `
+            -SqlIdentityName ([string]$script:ConfigData['SqlIdentityName'])
 
         # Step 16: Export configuration
         Export-ConfigurationData

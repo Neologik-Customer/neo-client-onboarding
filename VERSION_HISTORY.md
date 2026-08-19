@@ -9,12 +9,182 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Invite list extendable at the prompt (project#1064)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1064
+**Date**: 2026-08-17
+
+- Accepting guest invitations interactively now lists the file's
+  addresses and asks "Do you want to add any more addresses to invite?" -
+  typed via the shared line-by-line reader (one per Enter, blank line to
+  finish, commas accepted within a line, duplicates removed). With an
+  empty or missing NeologikGuestUsers.txt, answering Y goes straight to
+  typed entry, so the whole invite list can be built by hand.
+- Existing accounts among the combined list are matched (no email), the
+  rest receive B2B invitations, and everyone joins the groups - the
+  invitation flow itself is unchanged.
+- Configuration summary shows "Yes (N from file + M typed)"; unattended
+  (-NonInteractive) runs use the file only.
+
+## Unreleased - Add existing accounts to groups when invitations are declined (project#1064)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1064
+**Date**: 2026-08-17
+
+- Declining guest invitations now offers a follow-up question: "Add
+  existing accounts to the security groups?". Yes resolves pre-created
+  accounts (B2B guests or members) by mail/userPrincipalName and adds
+  them to the groups with NO invitation sent - for clients who provision
+  the Neologik team's accounts themselves.
+- Address sources, in precedence order: answer-file
+  `existingAccountEmails` (array or comma string), NeologikGuestUsers.txt,
+  or addresses typed at the prompt ([F]ile / [T]ype choice). Typed entry
+  is line-by-line: one address per Enter, blank line to finish, commas
+  accepted within a line for pasting a list; duplicates removed and the
+  collected list echoed back with a count. New answer-file key
+  `addExistingAccountsToGroups` (true/false); in -NonInteractive mode
+  the file is the default source.
+- Unresolvable addresses are reported ("does not exist in this tenant -
+  skipped, continuing") and never stop the run.
+- Prompt and docs warn that accounts added this way join ALL Neologik
+  groups including the Admin User Group; configuration JSON gains an
+  `ExistingAccountsAdded` section.
+- Docs: README, TECHNICAL-REFERENCE, QUICK-REFERENCE (+ PDF),
+  PRE-ONBOARDING-INFO-GATHERING, inputs-example.json.
+
+## Unreleased - v5 documentation alignment (project#1527)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1527
+**Date**: 2026-08-17
+
+- Customer-facing docs aligned with the v5.0.0 script: TECHNICAL-REFERENCE
+  rewritten (v5 naming convention, no bots at onboarding, Platform Sign-in
+  app, client-provided SP, CI mode, Reader/Cost Management Contributor
+  subscription roles, Agent ID Graph roles, `Neologik_<org><index>_...`
+  config filename, correct repo URL); QUICK-REFERENCE and secure-overview
+  brought to the same facts; README, PRE-ONBOARDING-INFO-GATHERING and
+  FINISHING-STEPS-GUIDE purged of bot-count / per-bot-group flow.
+- Script text-only fixes: the non-interactive answer-file error no longer
+  demands `bots[]` (validation requires organizationCode, organizationName,
+  fqdn only) and the `-KeyVaultName` help shows the v5 default name shape.
+  No behaviour change.
+- QUICK-REFERENCE.pdf and secure-overview.pdf regenerated from the updated
+  markdown (markdown -> HTML -> Edge headless print-to-PDF, A4;
+  text-verified).
+- New CREATE-SP-GUIDE.md: customer step-by-step for creating their own
+  deployment service principal (portal + az CLI), the
+  enterprise-application-object-ID distinction, secret-rotation
+  responsibility, and the what-you-do-NOT-need-to-do list; linked from
+  README, PRE-ONBOARDING-INFO-GATHERING, QUICK-REFERENCE and
+  TECHNICAL-REFERENCE.
+
+## Unreleased - Group.Create removed from the deployment SP grant set (project#1519)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1519
+**Date**: 2026-08-17
+
+- The Microsoft Graph `Group.Create` application permission is no longer
+  granted to the deployment SP (owner decision 2026-08-17, amending the
+  2026-07-14 dedicated-group decision). The platform never creates Entra
+  groups: agent channels reuse the onboarding default user group, or an
+  admin supplies an existing group id at channel attach
+  (`awaiting_user_group` create-and-paste path). Grant now matches
+  exercised capability, continuing the issue #774 least-privilege model.
+- Script comments claiming channel provisioning creates per-agent groups
+  corrected to the reuse/paste model.
+- Tenants already granted `Group.Create` keep the assignment until revoked
+  as a separate operational action (tracked on the ticket).
+
+## Unreleased - Pooja Pandey added to Neologik guest users (project#1448)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1448
+**Date**: 2026-08-13
+
+- Pooja.Pandey@neologik.ai added to `NeologikGuestUsers.txt`, matching the
+  hotfix already landed on main (7f1363d) and develop (d648d2d).
+
+## Unreleased - Recover a missing NeologikGuestUsers.txt interactively (project#1383)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1383
+**Date**: 2026-08-10
+
+Customers who download only `Install-NeologikEnvironment.ps1` (instead of
+unzipping the full onboarding package) previously got a single startup warning
+and a run that silently invited no Neologik guest users. Interactive runs now
+recover at the guest-invitation configuration prompt via the new
+`Resolve-GuestUsersFile`:
+
+- Explains that the file ships in the onboarding zip (one email per line) and
+  offers: [B] browse (Windows file-open dialog, topmost so it cannot hide
+  behind the console), typing the full path, or [S] explicitly skipping guest
+  invitations.
+- The selected file is validated (exists, contains at least one non-comment
+  entry) before being accepted; invalid choices re-prompt.
+- Startup warning reworded to say interactive runs will offer to locate the
+  file. Non-interactive (CI) mode behaviour unchanged (warn and continue;
+  governed by `-SkipGuestInvitation` / answer file).
+
+## Unreleased - Azure mandatory MFA: claims-challenge handling (project#1381)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1381
+**Date**: 2026-08-10
+
+Azure now enforces MFA at the ARM layer for all resource create/update/delete
+operations (mandatory MFA Phase 2, enforced since 1 October 2025; postponement
+window closed 1 July 2026). A cached or freshly minted token without MFA passes
+sign-in but fails the first resource write - observed in the field as
+"Failed to create/validate resource group: ... disallowed by Azure ...
+without authenticating through MFA" during a v4.5.0 onboarding.
+
+- Interactive sign-in (`Invoke-AzConnect`) now requests the ARM 'p1'
+  authentication-context claim via `Connect-AzAccount -ClaimsChallenge`, so the
+  first token satisfies the enforcement (browser and device-code paths).
+- Cached-context reuse inspects the ARM access token (new
+  `Get-ArmTokenMfaClaimStatus`) and re-authenticates up front when a user token
+  carries neither 'acrs' p1 nor 'amr' mfa.
+- Reactive backstop: resource group creation catches the ARM MFA
+  claims-challenge error, re-authenticates and retries once.
+- Non-interactive (CI) mode never re-authenticates; it logs a clear warning
+  when the supplied user token lacks the claim. Service principal tokens are
+  exempt from mandatory MFA and unaffected.
+- Same proactive claims challenge applied to the standalone sign-ins in
+  `Register-NeologikResourceProviders.ps1` and
+  `Update-NeologikEnvironmentAccess.ps1`.
+- Dependencies: `Az.Accounts` minimum raised 3.0.0 -> 5.2.0 (first version
+  with `Connect-AzAccount -ClaimsChallenge`).
+
+## Unreleased - NCE delegation model groups (project#1341)
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1341
+**Date**: 2026-08-06
+
+- Group creation (Step 10): the NCE group is now created as
+  `Neologik NCE Contributors - {org}-{env}` (NCE contributor role); a
+  pre-existing `Neologik NCE User Group`/legacy-named group is RENAMED in
+  place (object id and memberships unchanged). New group
+  `Neologik NCE Admins - {org}-{env}` (NCE admin role - Blueprints,
+  Audit, Admin page), seeded with the current user + Neologik guests
+  like the contributors group.
+- Auth app (Step 14b): BOTH NCE role groups are assigned to the
+  `Neologik Platform Sign-in` enterprise app so members' tokens carry
+  the groups claim; `NceAuthApp.AssignedGroups` (list) replaces
+  `AssignedGroup`.
+- Post-onboarding: put the admins group object id in `NEO_NCE_ADMINS`
+  and the contributors group id in `NEO_NCE_USERS` in the environment's
+  neo-env-config variables file (bootstrap-if-empty seeding at database
+  deploy).
+
 ## Unreleased
+**Branch**: `feature/agent-platform`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1063
 
 ### Features
-- **Non-interactive (CI) mode for Install-NeologikEnvironment.ps1** (script
-  version bumped to v1.11.0; the in-script version was stale at v1.9.0 since
-  the 1.9.1-1.10.1 releases). Three new switches:
+- **Non-interactive (CI) mode for Install-NeologikEnvironment.ps1**
+  (cherry-picked from develop 4f0dcd9, where it bumped the script version to
+  v1.11.0; on feature/agent-platform the script version remains v5.0.0, and
+  the cherry-pick also restores Resolve-BudgetEmailRecipients, whose removal
+  had left the answer-file budget-recipients path broken). Three new
+  switches:
   - `-NonInteractive`: unattended mode for automation. Requires a fully
     populated answer file (verified up front); every interactive gate either
     resolves from switches/answer keys or throws instead of prompting. An
@@ -33,9 +203,100 @@ This document tracks the version history of the Neologik customer onboarding scr
   - Interactive behaviour is unchanged when the new switches are not passed.
 
 ### Changes
-- **Pooja Pandey added to `NeologikGuestUsers.txt`** (project#1448): future
-  onboarding runs invite Pooja.Pandey@neologik.ai as a B2B guest and seed
-  her into the per-environment security groups.
+- **Cost report emails move to the deployment pipeline; deployment SP
+  gains subscription-scoped 'Cost Management Contributor' (project#1215,
+  https://github.com/Neologik-AI/project/issues/1215)**:
+  Install-NeologikEnvironment.ps1 no longer creates the subscription-
+  scoped Cost Management scheduled email (Set-NeologikCostManagementEmail
+  and onboarding step 13b removed; old checkpoints resume unaffected -
+  the step list is record-only). Instead it assigns the deployment SP
+  'Cost Management Contributor' at subscription scope alongside the
+  existing Reader, and the infrastructure deployment creates and
+  maintains the report (neo-infrastructure
+  scripts/ensure-cost-report-emails.sh) - one owner of the resource
+  definition, and recipient changes become an env-file edit plus
+  redeploy instead of a manual subscription-Owner action. Onboarding
+  still collects the recipients (Configuration JSON export unchanged).
+  Update-NeologikEnvironmentAccess.ps1 -Phase PostWindow ensures both
+  retained subscription-scoped roles (before removing the legacy broad
+  grants) so existing environments pick the grant up at their v5
+  migration. The role manages cost configuration only (budgets, views,
+  scheduled actions), no resource control. secure-overview.md updated
+  to document both subscription-scoped roles.
+- **Update-NeologikEnvironmentAccess.ps1 - the single Global Administrator
+  script for v5 migration windows (project#1258,
+  https://github.com/Neologik-AI/project/issues/1258)**: idempotent,
+  verification-first, run by the customer GA. `-Phase Window` (default):
+  grants/verifies the deployment SP's 8 Microsoft Graph app roles, assigns
+  the NCE user group to the 'Neologik Platform Sign-in' enterprise app
+  (with direct-membership warning), verifies tenant-wide admin consent and
+  prints the two-parameter consent URL when missing. `-Phase PostWindow`
+  (pre-#774 environments, only after verified migration): ensures the
+  7-role RG-scoped set first, then removes subscription-scoped
+  Contributor + User Access Administrator and the Application
+  Administrator directory role. Inputs from the onboarding Configuration
+  JSON (`-ConfigurationFile`) or explicit parameters.
+- **Sign-in app renamed 'Neologik Platform Sign-in - <shortname>'
+  (owner decision 2026-08-02, project#1239)**: it fronts NCE and every
+  bespoke App portal, so the NCE-specific name was misleading on
+  Microsoft sign-in/consent screens. New-NeologikNceAuthApp now resolves
+  an existing app by its immutable Graph uniqueName (`sp-admin-
+  <solutionName>`) instead of display name - a display-name lookup would
+  miss a pipeline-renamed app and attempt a duplicate - and renames a
+  found app to the current standard. Cosmetic only: clientId, uniqueName,
+  scopes and consent untouched.
+- **Gated Azure resource tagging at onboarding (project#1173,
+  https://github.com/Neologik-AI/project/issues/1173)**: new Step 6 prompt
+  "Apply Azure resource tags to created resources? (true/false)", default
+  true (answer-file keys `applyResourceTags` / `resourceTagsCustom`), with an
+  optional follow-up prompt for customer tags as comma-separated key=value
+  pairs (keys letters/digits/`._-`; keys and values must not contain `,` or
+  `=`). When enabled, the resource group, Key Vault, deployment storage
+  account and both user-assigned managed identities are tagged AT CREATION
+  (`New-Az* -Tag`) with Vendor, ApplicationName, ManagedBy, Environment
+  (`{org}{envtype}`), Solution (solution short name) and DeploymentDate,
+  plus the custom pairs (custom overrides defaults on key collision) - so
+  tenants whose Azure Policies DENY creation of untagged resources accept
+  them. When disabled, the create calls pass no `-Tag` parameter at all
+  (behaviour unchanged). Choices are exported as `ResourceTagsEnabled` /
+  `ResourceTagsCustom` in the Configuration JSON for the later environment
+  setup to carry forward, and participate in checkpoint/resume (checkpoints
+  written before this feature default to disabled on resume). Entra objects
+  (security groups, app registrations, service principals) are not taggable
+  ARM resources and are untouched.
+- **Naming convention alignment (project#1063)**: all computed names now follow
+  the platform Neologik-standard convention; the environment type (dev/prd)
+  NEVER appears in names (it only drives sizing/defaults). Canonical tokens:
+  solution `neo-neo{org}-{region}-{index}` (e.g. `neo-neodmo-cus-01`), short
+  name `neo{org}{index}` (e.g. `neodmo01`). Derived: RG `rg-{solution}`, KV
+  `kv{short}`, deploy storage `stneodeployneo{org}{region}{index}`, MIs
+  `neologik-script-runner-service-connection-{short}` /
+  `neologik-sql-managed-identity-{short}`, groups and app registration
+  suffixed `- {short}`, config file `Neologik_{org}{index}_...json`.
+  Previously the script invented `{org}{env}{index}` composites (`dmodev01`,
+  dmo01 dress rehearsal) matching neither of the two registered conventions
+  (neo-env-config `naming/templates/`: neologik-standard, keolis).
+- **Client-convention flexibility (design D6)**: `solutionName` and
+  `solutionShortName` are now answer-file overridable (the short name drives
+  every dependent suffix), and the SQL managed identity name gains the same
+  override/prompt treatment as the script-runner identity (`sqlIdentityName`
+  answer key + interactive prompt). Every script-created resource name is now
+  individually overridable for client naming conventions.
+- **ScriptVersion bumped to v5.0.0** (was stale at v1.9.0 on the v5 branch).
+- **v5: NCE group renamed** - new onboardings create
+  `Neologik Harness User Group - {org}{env}{index}` (was `Neologik NCE User
+  Group`); consumption is by group ID (`NEO_NCE_USERS`), so existing
+  environments keep their old-named groups unaffected.
+- **v5: no bots created at onboarding** (Neologik Harness, agent/channel
+  decoupling): removed the bot count / agent name / short name prompts,
+  answer-file parsing (`botCount`/`bots` now ignored), per-bot user group
+  creation, and bot fields from checkpoint/summary/config export. The script
+  now creates ONE default user group (`Neologik User Group - {org}{env}{index}`)
+  alongside the NCE and Admin groups, and grants the deployment SP the Graph
+  `Group.Create` application permission (bf7b1a76-6e77-406b-b258-bf5c7720e98f)
+  so Harness channel provisioning can create per-agent user groups at channel
+  attach. Agents and channels are created post-deployment in the Harness
+  admin tool.
 - **Onboarding-kit zip builder moved out of this repo** (owner decision
   2026-07-16): this repository is customer-facing and carries no customer
   data - contents, history, or Actions. `prepare-onboarding-zip.yml`
@@ -44,6 +305,56 @@ This document tracks the version history of the Neologik customer onboarding scr
   no-customer-data contributor rule. The dispatch inputs (workshop data),
   the run log's `inputs.json` echo, and the SAS download link were
   world-readable while the action lived here.
+- **Script-runner managed identity name override** — new optional `scriptRunnerIdentityName`
+  answer-file key, interactive prompt, and `prepare-onboarding-zip.yml` dispatch input, completing
+  the client-naming override set (resource group, Key Vault, deployment storage account, and now
+  the script-runner UAMI) for client-specific resource naming conventions. Blank/omitted keeps the
+  computed Neologik-standard name (`neologik-script-runner-service-connection-{org}{env}{index}`).
+  Validated against Azure managed-identity naming rules (3-128 chars, letters/digits/hyphens/
+  underscores, starts with a letter or digit). Builds on PR #20
+  (https://github.com/Neologik-Customer/neo-client-onboarding/pull/20), whose branch is merged in
+  as this change's base.
+
+### Files Changed
+- Modified: [Install-NeologikEnvironment.ps1](Install-NeologikEnvironment.ps1) - resource tagging (project#1173): `Get-NeologikResourceTags` / `ConvertTo-NeologikCustomTags` helpers, Step 6 tagging prompts + summary line, `-Tag` splatting on the four create calls, `Set-ConfigFromAnswerFile` keys, checkpoint back-compat default, `ResourceTagsEnabled` / `ResourceTagsCustom` in the config export
+- Modified: [inputs-example.json](inputs-example.json) - `applyResourceTags` / `resourceTagsCustom` keys + note (project#1173)
+- Modified: [README.md](README.md) - resource-tags prompt documented in the script inputs list (project#1173)
+- Modified: [Install-NeologikEnvironment.ps1](Install-NeologikEnvironment.ps1) — `Test-ManagedIdentityNameError` validator; answer-file + interactive resolution into `ConfigData['ScriptRunnerIdentityName']`; summary line; `New-NeologikManagedIdentities -ScriptRunnerIdentityName` parameter (falls back to the computed name for pre-existing checkpoints)
+- Modified: [.github/workflows/prepare-onboarding-zip.yml](.github/workflows/prepare-onboarding-zip.yml) — `scriptRunnerIdentityName` input, validation, inputs.json emission
+- Modified: [inputs-example.json](inputs-example.json) — `scriptRunnerIdentityName` field + naming note
+- Modified: [VERSION_HISTORY.md](VERSION_HISTORY.md) — this entry
+
+### Breaking Changes
+- None
+
+---
+
+## Version NEXT
+**Branch**: `feature/ideas-agent`
+**Status**: Pending
+
+### Features
+- **Microsoft Entra Agent ID permissions for the deployment SP** — the deployment service
+  principal is now granted the granular Graph application permissions
+  `AgentIdentityBlueprint.Create`, `AgentIdentityBlueprint.AddRemoveCreds.All`,
+  `AgentIdentityBlueprint.UpdateAuthProperties.All`, `AgentIdentityBlueprintPrincipal.Create`,
+  and `AgentIdUser.ReadWrite.All`, so it can provision agent identity blueprints (+ principal +
+  FIC) **and mint each autonomous bot's agent identity + agent user** (e.g. the ideas agent).
+  Chosen over the broad `Agent ID Administrator` directory role to stay consistent with the
+  reduced-permission model (granular app perms, not directory roles).
+
+### Files Changed
+- Modified: [Install-NeologikEnvironment.ps1](Install-NeologikEnvironment.ps1) — added the four
+  `AgentIdentityBlueprint*` app role IDs plus `AgentIdUser.ReadWrite.All` to
+  `Grant-GraphAppRolePermissions` and granted them to the deployment SP.
+
+### ⚠️ Migration — already-onboarded environments
+This grant only runs for **newly-onboarded** environments. Environments onboarded **before** this
+change have a reduced deploy SP without these roles, and cannot self-grant. Before enabling an
+autonomous bot (`BOT<N>_AUTONOMOUS=true`) on such an env, a Global Admin must perform a **one-off
+backfill** of the Agent ID roles, or the first autonomous deploy fails. See
+`neo-infrastructure/docs/agent-identity-blueprint.md` → *Backfilling an already-onboarded environment*.
+dev03 was backfilled 2026-06-30.
 
 ---
 

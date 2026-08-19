@@ -18,6 +18,7 @@ Welcome! This repository contains everything you need to set up your Neologik en
 **Main Files:**
 - **Install-NeologikEnvironment.ps1** - The PowerShell script that creates your Azure resources
 - **PFX-CERT-GUIDE.md** - Instructions for creating your TLS/SSL certificate
+- **CREATE-SP-GUIDE.md** - Optional: how to create the deployment service principal yourself instead of letting the script create it
 - **FINISHING-STEPS-GUIDE.md** - Final steps after Neologik completes the deployment
 - **Upgrade-TeamsAppInstallations.ps1** + **TEAMS-APP-UPGRADE-GUIDE.md** - Bulk-upgrade every user's installed Neologik Teams bot to the latest version (run periodically, after onboarding)
 
@@ -31,8 +32,8 @@ Welcome! This repository contains everything you need to set up your Neologik en
 
 **Option 2: Clone the Repository (If you're familiar with Git)**
 ```powershell
-git clone https://github.com/Neologik-AI/neo-client-onboarding-scripts.git
-cd neo-client-onboarding-scripts
+git clone https://github.com/Neologik-Customer/neo-client-onboarding.git
+cd neo-client-onboarding
 ```
 
 ---
@@ -167,17 +168,30 @@ Questions you'll be asked:
    - Can contain letters, numbers, underscores, hyphens, periods, and parentheses
    - Cannot end with a period
 
-8. **Bot Count**: How many bots will there be? (1-10)
-   - Default is 1
-   - Used to create separate user groups for each bot
+8. **Apply Azure Resource Tags**: "Apply Azure resource tags to created resources? (true/false)"
+   - Default is true
+   - When true, every resource the script creates (resource group, Key Vault, storage account, managed identities) is tagged at creation with Vendor, ApplicationName, ManagedBy, Environment, Solution and DeploymentDate - required by tenants whose Azure Policies deny creation of untagged resources
+   - When true, you can optionally add custom tags as comma-separated key=value pairs (keys use letters, digits, '.', '_' and '-'; custom tags override the defaults)
+   - When false, no tags are applied
 
-9. **Bot Configuration**: For each bot, you'll be asked:
-    - **Full Bot Name**: Descriptive name for the bot (e.g., "Customer Service Bot")
-      - Letters (upper or lower case), numbers, spaces, dashes and underscores; 30 character limit
-      - Used in security group names
-    - **Short Name**: Short identifier for the bot (e.g., "bot", "sup")
-      - Lowercase, 1–4 characters, must start with a letter, letters/numbers/dashes only
-      - Used internally for identification
+9. **Resource Names**: Key Vault, Storage Account and Managed Identity names
+   - Each prompt shows the computed standard name as the default - just press Enter to accept
+   - Type a different name only if your organisation mandates its own naming convention
+   - (You will not be asked about bots or agents - those are created after deployment in the Neologik admin tool)
+
+10. **Budget Cost-Report Email Recipient(s)**: Where the daily Azure cost report is sent
+    - Press Enter for the default, enter one or more addresses separated by commas, or type "none" to disable
+
+11. **Invite Neologik guest users?**: Whether to invite the Neologik team members listed in `NeologikGuestUsers.txt` as guests
+    - The addresses in the file are listed on screen first; default is Yes. Choose No if you provision accounts for the Neologik team in your own tenant instead
+    - If you choose Yes, you are asked whether to **add any more addresses to invite** - type them one per line, Enter on an empty line to finish (a line may hold several, comma-separated). This also works when the file is empty or missing: choose Yes and type the whole list
+    - If you choose No, a follow-up question asks: **"Add existing accounts to the security groups?"** - answer Yes to add accounts you have already created (guests or full members) with no invitation sent. The addresses come from `NeologikGuestUsers.txt`, or you can type them in one per line - press Enter after each address and press Enter on an empty line when you have finished (a line may also hold several addresses separated by commas). An address with no matching account is reported and skipped - the script carries on
+    - Note: accounts added here go into ALL Neologik groups, including the Admin User Group (Azure admin access) - only list accounts that should hold Neologik admin/support access
+
+12. **Use a service principal you have already created?**: Whether to reuse your own deployment service principal
+    - Default is No (the script creates one for you)
+    - If Yes, have its **object ID** (the enterprise-application object ID, not the client/app ID) ready, plus optionally its client secret
+    - See **[CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md)** for step-by-step instructions on creating the service principal and finding the correct ID
 
 ### 7. Confirm and Continue
 
@@ -205,7 +219,7 @@ You'll see messages like:
 ### 9. Review the ResultsWhen complete, you'll see a green success message and a summary of what was created.
 
 Two files will be saved in the same folder:
-- `NeologikConfiguration_[date].json` - Configuration details
+- `Neologik_[org][index]_Configuration_[date].json` - Configuration details
 - `NeologikOnboarding_[date].log` - Detailed log file
 
 ---
@@ -215,7 +229,7 @@ Two files will be saved in the same folder:
 The script will display your next steps. You need to:
 
 ### 1. Review and Share Configuration
-✉️ Send the **JSON configuration file** (`NeologikConfiguration_[date].json`) to Neologik at support@neologik.ai
+✉️ Send the **JSON configuration file** (`Neologik_[org][index]_Configuration_[date].json`) to Neologik at support@neologik.ai
 
 ### 2. Decide on Your Fully Qualified Domain Name (FQDN)
 🌐 **Choose your hostname and coordinate with Neologik:**
@@ -233,7 +247,7 @@ The script will display your next steps. You need to:
    - You'll need the .pfx file and its password for the next steps
 
 📁 **Then, upload the .pfx file** to the Azure Storage Account:
-   - **Storage Account**: `stneodeploy[your-org][env][region][index]`
+   - **Storage Account**: `stneodeployneo[your-org][region][index]` (shown in the script's completion summary)
    - **Container**: `certificate`
    - **Authentication**: Use Microsoft Entra ID (your Azure account)
 

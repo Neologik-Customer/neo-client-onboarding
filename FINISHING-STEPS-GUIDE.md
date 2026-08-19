@@ -83,7 +83,7 @@ Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) ten
 #### A. Grant Access to Bot Application
 
 1. **Open the Bot consent URL** provided by Neologik in your browser
-   - Format: `https://login.microsoftonline.com/common/adminconsent?client_id={bot-id}&redirect_uri=https://{hostName}/nce`
+   - Format: `https://login.microsoftonline.com/common/adminconsent?client_id={bot-id}&redirect_uri=https://{hostName}/nce/consent-complete`
    - `{hostName}` = Your full qualified hostname
    - `{bot-id}` = Bot application ID provided by Neologik
 
@@ -96,12 +96,14 @@ Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) ten
 
 4. **Click "Accept"** to grant tenant-wide consent
 
-5. **Confirmation:** You should see a success message
+5. **Confirmation:** the browser lands on the consent confirmation page
+   (`https://{hostName}/nce/consent-complete`), which reports success or the
+   Microsoft error message
 
 #### B. Grant Access to NCE Admin Tool Application
 
 1. **Open the Admin Tool consent URL** provided by Neologik in your browser
-   - Format: `https://login.microsoftonline.com/common/adminconsent?client_id={nce-admin-id}&redirect_uri=https://{hostName}/nce`
+   - Format: `https://login.microsoftonline.com/common/adminconsent?client_id={nce-admin-id}&redirect_uri=https://{hostName}/nce/consent-complete`
    - `{hostName}` = Your full qualified hostname (same as above)
    - `{nce-admin-id}` = NCE Admin Tool application ID provided by Neologik
 
@@ -114,7 +116,9 @@ Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) ten
 
 4. **Click "Accept"** to grant tenant-wide consent
 
-5. **Confirmation:** You should see a success message
+5. **Confirmation:** the browser lands on the consent confirmation page
+   (`https://{hostName}/nce/consent-complete`), which reports success or the
+   Microsoft error message
 
 ### Verify Consent
 
@@ -213,13 +217,12 @@ After deployment, inform your users:
 
 ## Step 4: Grant Users Access to the Bot
 
-Bot access is controlled by security groups in your Entra ID. Each bot has its own dedicated group — **only users who are members of the group can use that bot.** Users who are not in the group will be denied access even if they can see the app in Teams.
+Bot access is controlled by security groups in your Entra ID. Each bot (agent) is attached to an access group — **only users who are members of that group can use it.** Users who are not in the group will be denied access even if they can see the app in Teams.
 
-These groups are created automatically during deployment. **Your Entra ID administrator is responsible for managing membership on an ongoing basis.**
+By default every agent uses the group created during onboarding, named `Neologik User Group - <short name>` (e.g., `Neologik User Group - neokad01`). If you want a different or per-agent group, tell Neologik which existing Entra group to attach — the platform never creates groups itself. **Your Entra ID administrator is responsible for managing membership on an ongoing basis.**
 
 ### What You Need
-- **Group names** provided by Neologik — one per bot, named in the format:
-  `Neologik User Group <bot name> - <environment>` (e.g., `Neologik User Group Contract Agent - kadprd`)
+- **Group name(s)** confirmed with Neologik — the default `Neologik User Group - <short name>`, or the group(s) you chose per agent
 - **Global Administrator** or **Groups Administrator** role in Entra ID
 
 ### Instructions
@@ -228,7 +231,7 @@ These groups are created automatically during deployment. **Your Entra ID admini
 
 1. Go to **Azure Portal** (portal.azure.com)
 2. Navigate to **Microsoft Entra ID** > **Groups**
-3. Search for `Neologik User Group` — you will see one group per bot
+3. Search for `Neologik User Group` — you will see the default access group (and any other groups you chose per agent)
 4. Click the group for the bot you want to manage
 
 #### B. Add Users to the Group
@@ -262,7 +265,7 @@ Before considering the deployment complete, verify:
 - [ ] Both applications appear in Enterprise applications with "Admin consent granted"
 - [ ] Teams app is uploaded to Teams Admin Center
 - [ ] Teams app is available to the Neologik User Group
-- [ ] At least one test user has been added to each bot's access group in Entra ID
+- [ ] At least one test user has been added to each agent's access group in Entra ID
 - [ ] Test user can find and open the app in Microsoft Teams
 - [ ] Test user can send a message and receive a response (confirms group access is working)
 - [ ] Application loads correctly when accessed via the FQDN (https://app.yourcompany.com)
@@ -287,7 +290,7 @@ Before considering the deployment complete, verify:
 
 ### Bot Access Issues
 **Problem:** User sees "You do not have permission to use this bot" or "Unauthorized"
-- **Solution:** The user is not a member of the bot's access group in Entra ID. Go to **Microsoft Entra ID** > **Groups** > find the `Neologik User Group <bot name>` group > **Members** > **Add members**. Access is granted immediately.
+- **Solution:** The user is not a member of the bot's access group in Entra ID. Go to **Microsoft Entra ID** > **Groups** > find the agent's access group (default `Neologik User Group - <short name>`) > **Members** > **Add members**. Access is granted immediately.
 
 **Problem:** User was just added to the group but still sees "Unauthorized"
 - **Solution:** Ask the user to close and reopen the bot in Teams. Group changes can take a few minutes to propagate.
