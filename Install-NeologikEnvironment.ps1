@@ -2841,6 +2841,22 @@ function New-NeologikNceAuthApp {
             Write-Log "Deployment SP added as owner of the auth app" -Level Success
         }
 
+        # Deployment SP as owner of the SERVICE PRINCIPAL object too - application
+        # ownership does not extend to the service principal, so without this the
+        # pipeline's servicePrincipal updates (display-name sync) are denied with
+        # Authorization_RequestDenied on every deploy (project#1579). Idempotent:
+        # re-running onboarding adds the missing owner on existing environments.
+        $spOwners = Get-MgServicePrincipalOwner -ServicePrincipalId $sp.Id -ErrorAction SilentlyContinue
+        if ($spOwners -and ($spOwners.Id -contains $DeploySpObjectId)) {
+            Write-Log "Deployment SP is already an owner of the auth service principal" -Level Info
+        }
+        else {
+            New-MgServicePrincipalOwnerByRef -ServicePrincipalId $sp.Id `
+                -BodyParameter @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$DeploySpObjectId" } `
+                -ErrorAction Stop
+            Write-Log "Deployment SP added as owner of the auth service principal" -Level Success
+        }
+
         # Client secret -> Key Vault under the name the pipeline expects.
         # Only mint one when the app is new or the vault has no value yet -
         # the pipeline rotates near-expiry credentials itself.
