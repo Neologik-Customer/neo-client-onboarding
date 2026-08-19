@@ -329,6 +329,13 @@ without authenticating through MFA" during a v4.5.0 onboarding.
 
 ---
 
+## Version NEXT - summary alignment (project#1577)
+
+- Date: 2026-08-19
+- Summary: The configuration summary renders every row through one
+  label-padding helper (single 24-character label column); the value
+  column previously drifted after the Azure Region row.
+
 ## Version NEXT - remove model quota pre-flight (project#1578)
 
 - Date: 2026-08-19
