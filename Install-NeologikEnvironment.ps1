@@ -5357,44 +5357,50 @@ function Start-NeologikOnboarding {
         Write-Host "║                                                               ║" -ForegroundColor Cyan
         Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "  Logged in User:       " -NoNewline; Write-Host $script:ConfigData['UserAccount'] -ForegroundColor Yellow
-        Write-Host "  Tenant ID:            " -NoNewline; Write-Host $script:ConfigData['TenantId'] -ForegroundColor Yellow
-        Write-Host "  Subscription Name:    " -NoNewline; Write-Host $script:ConfigData['SubscriptionName'] -ForegroundColor Yellow
-        Write-Host "  Organization Name:    " -NoNewline; Write-Host $script:OrganizationName -ForegroundColor Yellow
-        Write-Host "  Bot Hostname (FQDN):  " -NoNewline; Write-Host $script:HostName -ForegroundColor Yellow
-        Write-Host "  Organization Code:    " -NoNewline; Write-Host $script:OrganizationCode -ForegroundColor Yellow
-        Write-Host "  Environment Type:     " -NoNewline; Write-Host $script:EnvironmentType -ForegroundColor Yellow
-        Write-Host "  Environment Index:    " -NoNewline; Write-Host $script:EnvironmentIndex -ForegroundColor Yellow
-        Write-Host "  Azure Region:         " -NoNewline; Write-Host $script:AzureRegion -ForegroundColor Yellow
-        Write-Host "  Resource Group Name:  " -NoNewline; Write-Host $script:ResourceGroupName -ForegroundColor Yellow
-        Write-Host "  Key Vault Name:       " -NoNewline; Write-Host $script:KeyVaultNameOverride -ForegroundColor Yellow
-        Write-Host "  Storage Account Name: " -NoNewline; Write-Host $script:ConfigData['DeployStorageAccountName'] -ForegroundColor Yellow
-        Write-Host "  Script Runner Identity: " -NoNewline; Write-Host $script:ConfigData['ScriptRunnerIdentityName'] -ForegroundColor Yellow
-        Write-Host "  SQL Managed Identity: " -NoNewline; Write-Host $script:ConfigData['SqlIdentityName'] -ForegroundColor Yellow
-        Write-Host "  Solution Name: " -NoNewline; Write-Host $script:ConfigData['SolutionName'] -ForegroundColor Yellow
-        Write-Host "  Solution Short Name: " -NoNewline; Write-Host $script:ConfigData['SolutionShortName'] -ForegroundColor Yellow
+        # Single label width keeps the value column aligned (project#1577)
+        function Write-SummaryRow {
+            param([string]$Label, [string]$Value)
+            Write-Host ("  {0,-24}" -f ($Label + ':')) -NoNewline
+            Write-Host $Value -ForegroundColor Yellow
+        }
+        Write-SummaryRow 'Logged in User' $script:ConfigData['UserAccount']
+        Write-SummaryRow 'Tenant ID' $script:ConfigData['TenantId']
+        Write-SummaryRow 'Subscription Name' $script:ConfigData['SubscriptionName']
+        Write-SummaryRow 'Organization Name' $script:OrganizationName
+        Write-SummaryRow 'Bot Hostname (FQDN)' $script:HostName
+        Write-SummaryRow 'Organization Code' $script:OrganizationCode
+        Write-SummaryRow 'Environment Type' $script:EnvironmentType
+        Write-SummaryRow 'Environment Index' $script:EnvironmentIndex
+        Write-SummaryRow 'Azure Region' $script:AzureRegion
+        Write-SummaryRow 'Resource Group Name' $script:ResourceGroupName
+        Write-SummaryRow 'Key Vault Name' $script:KeyVaultNameOverride
+        Write-SummaryRow 'Storage Account Name' $script:ConfigData['DeployStorageAccountName']
+        Write-SummaryRow 'Script Runner Identity' $script:ConfigData['ScriptRunnerIdentityName']
+        Write-SummaryRow 'SQL Managed Identity' $script:ConfigData['SqlIdentityName']
+        Write-SummaryRow 'Solution Name' $script:ConfigData['SolutionName']
+        Write-SummaryRow 'Solution Short Name' $script:ConfigData['SolutionShortName']
         $budgetEmailSummary = if ($script:ConfigData['BudgetEmailAddresses'].Count -gt 0) { $script:ConfigData['BudgetEmailAddresses'] -join ', ' } else { '(disabled)' }
-        Write-Host "  Cost-Report Email:    " -NoNewline; Write-Host $budgetEmailSummary -ForegroundColor Yellow
+        Write-SummaryRow 'Cost-Report Email' $budgetEmailSummary
         $providerSummary = if ($script:ConfigData['RegisterAllProviders']) { 'All providers' } else { 'Minimal set (run Register-NeologikResourceProviders.ps1 before deploying)' }
-        Write-Host "  Provider Registration:" -NoNewline; Write-Host " $providerSummary" -ForegroundColor Yellow
+        Write-SummaryRow 'Provider Registration' $providerSummary
         $tagsSummary = if ($script:ConfigData['ResourceTagsEnabled']) {
             $customCount = @($script:ConfigData['ResourceTagsCustom'].Keys).Count
             if ($customCount -gt 0) { "Yes ($customCount custom)" } else { 'Yes' }
         }
         else { 'No' }
-        Write-Host "  Apply Resource Tags:  " -NoNewline; Write-Host $tagsSummary -ForegroundColor Yellow
+        Write-SummaryRow 'Apply Resource Tags' $tagsSummary
         $guestSummary = if (-not $script:ConfigData['SkipGuestInvitation']) {
                             $typedCount = @($script:ConfigData['AdditionalGuestEmails'] | Where-Object { $_ }).Count
                             if ($typedCount -gt 0) { "Yes ($($script:NeologikGuestUsers.Count) from file + $typedCount typed)" } else { 'Yes' }
                         }
                         elseif ($script:ConfigData['AddExistingAccountsToGroups']) { "No - adding $(@($script:ConfigData['ExistingAccountEmails']).Count) existing account(s) to the groups" }
                         else { 'No (skipped)' }
-        Write-Host "  Invite Neologik Guests:" -NoNewline; Write-Host " $guestSummary" -ForegroundColor Yellow
+        Write-SummaryRow 'Invite Neologik Guests' $guestSummary
         if ($script:ConfigData['UseExistingServicePrincipal']) {
-            Write-Host "  Deployment SP:        " -NoNewline; Write-Host "Existing: $($script:ConfigData['ExistingServicePrincipalObjectId'])" -ForegroundColor Yellow
+            Write-SummaryRow 'Deployment SP' "Existing: $($script:ConfigData['ExistingServicePrincipalObjectId'])"
         }
         else {
-            Write-Host "  Deployment SP:        " -NoNewline; Write-Host "Create new" -ForegroundColor Yellow
+            Write-SummaryRow 'Deployment SP' 'Create new'
         }
         Write-Host ""
         if ($answerComplete) {
