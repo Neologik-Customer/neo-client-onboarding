@@ -7,7 +7,6 @@
     - PowerShell version validation and updates
     - Azure authentication with required permissions
     - Role validation (Subscription Owner and Global Administrator)
-    - Quota pre-flight checks (Azure OpenAI gpt-5.4-mini)
     - Guest user invitations
     - Subscription, resource group, and security group creation
     - App registration and managed identity setup
@@ -1153,118 +1152,6 @@ function Test-RequiredPermissions {
         Write-Log "Permission validation failed: $_" -Level Error
         throw
     }
-}
-
-function Test-QuotaRequirements {
-    <#
-    .SYNOPSIS
-        Checks Azure OpenAI gpt-5.4-mini quota availability for the target region.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Location,
-
-        [Parameter(Mandatory = $true)]
-        [string]$SubscriptionId
-    )
-
-    Write-Host "`n╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "║                                                               ║" -ForegroundColor Cyan
-    Write-Host "║                  QUOTA PRE-FLIGHT CHECKS                      ║" -ForegroundColor Cyan
-    Write-Host "║                                                               ║" -ForegroundColor Cyan
-    Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Log "Checking quota requirements for region: $Location" -Level Info
-
-    $quotaIssues = @()
-
-    # Azure OpenAI quota — gpt-5.4-mini
-    Write-Host "  Checking Azure OpenAI gpt-5.4-mini quota..." -ForegroundColor Gray
-    try {
-        $uri      = "https://management.azure.com/subscriptions/$SubscriptionId/providers/Microsoft.CognitiveServices/locations/$Location/usages?api-version=2024-10-01"
-        $response = Invoke-AzRestMethod -Uri $uri -Method GET -ErrorAction Stop
-
-        if ($response.StatusCode -eq 200) {
-            $usages       = ($response.Content | ConvertFrom-Json).value
-            $openAiQuotas = $usages | Where-Object { $_.name.value -like '*gpt-5.4-mini*' }
-
-            if ($openAiQuotas) {
-                foreach ($q in $openAiQuotas) {
-                    $available = $q.limit - $q.currentValue
-                    $label     = $q.name.localizedValue
-                    if ($available -gt 0) {
-                        Write-Host "  ✓ ${label}: $($q.currentValue)/$($q.limit) TPM used ($available available)" -ForegroundColor Green
-                        Write-Log "OpenAI gpt-5.4-mini quota: $($q.currentValue)/$($q.limit) TPM used" -Level Info
-                    }
-                    else {
-                        Write-Host "  ✗ ${label}: $($q.currentValue)/$($q.limit) TPM used (none available)" -ForegroundColor Red
-                        Write-Log "OpenAI gpt-5.4-mini quota exhausted: $($q.currentValue)/$($q.limit)" -Level Warning
-                        $quotaIssues += "Azure OpenAI gpt-5.4-mini quota is exhausted in ${Location} — a quota increase request is required (https://aka.ms/oai/stuquotarequest)"
-                    }
-                }
-            }
-            else {
-                Write-Host "  ⚠ gpt-5.4-mini quota entry not found in ${Location}" -ForegroundColor Yellow
-                Write-Log "gpt-5.4-mini quota not found in region: $Location" -Level Warning
-                $quotaIssues += "Azure OpenAI gpt-5.4-mini quota was not found in ${Location} — confirm the model is available here (supported: East US2, Sweden Central, South Central US, Poland Central)"
-            }
-        }
-        else {
-            Write-Host "  ⚠ Could not retrieve OpenAI quota (HTTP $($response.StatusCode))" -ForegroundColor Yellow
-            Write-Log "OpenAI quota check returned HTTP $($response.StatusCode)" -Level Warning
-        }
-    }
-    catch {
-        Write-Host "  ⚠ Could not check Azure OpenAI quota: $_" -ForegroundColor Yellow
-        Write-Log "OpenAI quota check failed: $_" -Level Warning
-    }
-
-    Write-Host ""
-
-    if ($quotaIssues.Count -gt 0) {
-        Write-Host "╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
-        Write-Host "║                                                               ║" -ForegroundColor Yellow
-        Write-Host "║                    ⚠  QUOTA WARNING                          ║" -ForegroundColor Yellow
-        Write-Host "║                                                               ║" -ForegroundColor Yellow
-        Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "  The following quota issues were detected:" -ForegroundColor Yellow
-        foreach ($issue in $quotaIssues) {
-            Write-Host "  • $issue" -ForegroundColor Yellow
-        }
-        Write-Host ""
-        Write-Host "  Deploying without sufficient quota may cause failures later." -ForegroundColor Gray
-        Write-Host "  See QUICK-REFERENCE.md → Prerequisites for how to request increases." -ForegroundColor Gray
-        Write-Host ""
-        # Quota warnings are advisory (the interactive default is to continue) - in
-        # non-interactive mode log them and carry on rather than hitting Read-Host.
-        if ($script:NonInteractiveMode) {
-            Write-Host "  Non-interactive: continuing despite quota warnings." -ForegroundColor Yellow
-            Write-Log "Non-interactive: continuing despite quota warnings: $($quotaIssues -join '; ')" -Level Warning
-            Write-Host ""
-            return
-        }
-        Write-Host "  Continue anyway? (Y/N, default: Y): " -NoNewline -ForegroundColor Yellow
-        $continueChoice = Read-Host
-
-        if ([string]::IsNullOrWhiteSpace($continueChoice) -or $continueChoice -eq 'Y' -or $continueChoice -eq 'y') {
-            Write-Host "  Continuing with quota warnings acknowledged..." -ForegroundColor Yellow
-            Write-Log "User chose to continue despite quota warnings: $($quotaIssues -join '; ')" -Level Warning
-        }
-        else {
-            Write-Host ""
-            Write-Host "  Installation cancelled. Please request the required quota increases and re-run the script." -ForegroundColor Red
-            Write-Log "Installation cancelled by user due to quota warnings" -Level Warning
-            exit 0
-        }
-    }
-    else {
-        Write-Host "  ✓ All quota checks passed." -ForegroundColor Green
-        Write-Log "All quota checks passed" -Level Success
-    }
-
-    Write-Host ""
 }
 
 function Register-RequiredResourceProvider {
@@ -5578,9 +5465,6 @@ function Start-NeologikOnboarding {
             Write-Host "     Resource Group: $($script:ResourceGroupName)" -ForegroundColor Cyan
             Write-Host ""
         }
-
-        # Step 6.5: Quota pre-flight checks
-        Test-QuotaRequirements -Location $script:AzureRegion -SubscriptionId $script:ConfigData['SubscriptionId']
 
         # Step 7: Create resource group
         $null = New-NeologikResourceGroup -ResourceGroupName $script:ResourceGroupName -Location $script:AzureRegion

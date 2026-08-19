@@ -13,7 +13,6 @@ This repository contains a robust PowerShell script that automates the complete 
 - Resource provider registration with retry logic
 - Azure authentication with re-authentication option
 - Permission validation (Subscription Owner and Global Administrator)
-- Quota pre-flight checks (vCPU and Azure OpenAI)
 - Input validation for all configuration parameters
 - Guest user invitations (optional - can be skipped)
 - Subscription and resource group setup
@@ -263,7 +262,6 @@ Computed standard names (example: organization code `abc`, UK South, index `01`)
 - Validates PowerShell version (7.4+), offering to install/update if needed
 - Checks for required Azure modules and installs missing ones
 - Verifies Subscription Owner and Global Administrator roles
-- Warns (non-fatally) on insufficient vCPU or Azure OpenAI quota in the target region
 
 ### 2. Azure Authentication
 
