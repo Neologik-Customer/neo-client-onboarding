@@ -329,6 +329,16 @@ without authenticating through MFA" during a v4.5.0 onboarding.
 
 ---
 
+## Version NEXT - remove model quota pre-flight (project#1578)
+
+- Date: 2026-08-19
+- Summary: Test-QuotaRequirements removed (owner ruling). It warned on a
+  hard-coded model (gpt-5.4-mini) in the environment's region with a stale
+  supported-region list; v5 deploys no models at onboarding (zero-model is
+  a first-class state) and the model region is chosen independently at the
+  manual model-deployment step. vCPU guidance in QUICK-REFERENCE stays;
+  the Azure OpenAI quota section there is removed.
+
 ## Version NEXT - naming formula fix (project#1576)
 
 - Date: 2026-08-19

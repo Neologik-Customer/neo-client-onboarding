@@ -34,30 +34,15 @@ Azure Portal → **Usage + quotas** → select the quota line → **New Quota Re
 
 ---
 
-### Azure OpenAI Quota
-
-Neologik requires sufficient Azure OpenAI token quota in the target region before deployment can proceed. Check and request increases **before** running the onboarding script.
-
-#### Checking current quota
-
-1. Sign in to [Azure AI Foundry](https://ai.azure.com)
-2. Navigate to **Operate** → **Quota** in the left pane
-3. Find **gpt-5.4-mini** in the list and confirm you have sufficient tokens-per-minute (TPM) available in your target region
-
-#### Requesting an increase
-
-Use the [Azure OpenAI quota request form](https://aka.ms/oai/stuquotarequest). Requests typically take up to 10 business days to approve.
-
----
-
 ## Variables Used
 
 - `{org}` = Organization code (3 characters, lowercase)
 - `{region}` = Azure region abbreviation (e.g., `uks`, `eus`, lowercase)
 - `{index}` = Environment index (e.g., `01`, `02`)
+- `{env}` = Environment type (`dev`, `prd`)
 - `{short}` = Solution short name: `{org}{env}{index}` (e.g., `abcprd01`)
 
-The environment type (`dev`/`prd`) is collected for classification but never appears in resource names. Every computed name below can be overridden from the answer file (`inputs.json`) to match a client-mandated naming convention.
+The environment type joins the organisation code in every name (project#1576). Every computed name below can be overridden from the answer file (`inputs.json`) to match a client-mandated naming convention.
 
 **Example:** Organization "ABC", UK South, index 01
 - Resource Group: `rg-neo-abcprd-uks-01`
