@@ -30,7 +30,7 @@ This repository contains a robust PowerShell script that automates the complete 
 ## What's New in v5
 
 - **No bots at onboarding**: agents and their channels are created after deployment in the Neologik Platform admin tool (NCE). The bot count / agent name prompts are gone; `botCount`/`bots` keys in older answer files are ignored.
-- **Platform naming convention**: resource names are driven by two naming tokens - the solution name and solution short name - and the environment type no longer appears in any name (see Resource Naming Convention below).
+- **Platform naming convention**: resource names are driven by two naming tokens - the solution name and solution short name - and the environment type joins the organisation code in every name (see Resource Naming Convention below).
 - **Client naming conventions**: every script-created resource name can be overridden from the answer file, so a client-mandated naming convention can be applied without editing the script.
 - **Client-provided service principal**: you may create the deployment service principal yourself and give the script its object ID; the script then assigns the required roles to it instead of creating one.
 - **Skippable guest invitations**: `-SkipGuestInvitation` (or the answer file) skips inviting Neologik staff, for clients who provision accounts in their own tenant. Declining invitations offers a follow-up: add existing pre-created accounts to the security groups (from the guest file or typed addresses) with no invitation sent; non-existent addresses are reported and skipped without stopping the run.
@@ -109,7 +109,7 @@ Or specify several parameters:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `OrganizationCode` | String | (prompted) | 3-character organization code for resource naming. Exactly 3 alphanumeric characters, lowercased automatically |
-| `EnvironmentType` | String | `"dev"` | Environment type: `dev` or `prd`. Used for classification only - it does not appear in resource names |
+| `EnvironmentType` | String | `"dev"` | Environment type: `dev` or `prd`. Joins the organisation code in every computed resource name (e.g. `abcprd01`) |
 | `AzureRegion` | String | `"uksouth"` | Azure region for resource deployment |
 | `TenantId` | String | (current) | Azure Tenant ID (optional, uses current context) |
 | `SubscriptionName` | String | `"Neologik-Development-01"` | Name of the Azure subscription to use |
@@ -126,7 +126,7 @@ Or specify several parameters:
 
 ## Answer File (`inputs.json`)
 
-Every interactive prompt can be pre-filled from a JSON answer file - copy `inputs-example.json` to `inputs.json` next to the script (auto-detected) or pass a path with `-AnswerFile`. Values pre-fill the matching prompt: press Enter to accept, or type to override. The file also carries the provisioning decisions (`skipGuestInvitation`, `useExistingServicePrincipal` with its object ID and optional secret) and the resource-name overrides described under Resource Naming Convention.
+Every interactive prompt can be pre-filled from a JSON answer file - copy `inputs-example.json` to `inputs.json` next to the script (auto-detected) or pass a path with `-AnswerFile`. Values pre-fill the matching prompt: press Enter to accept, or type to override. The file also carries the provisioning decisions (`skipGuestInvitation`, `useExistingServicePrincipal` with its object ID and optional secret, `registerResourceProviders`) and the resource-name overrides described under Resource Naming Convention.
 
 ## Non-Interactive (CI) Mode
 
@@ -212,7 +212,7 @@ The chosen name is saved to the checkpoint, so if a run fails and you resume it,
 
 ## Interactive Configuration Flow
 
-The script asks for, in order: Organization Name, Bot Hostname (FQDN), Organization Code, Environment Type, Azure Region, Environment Index, resource tagging (with optional custom tags), then the five resource names (Resource Group, Key Vault, Deployment Storage Account, Script Runner Managed Identity, SQL Managed Identity - each pre-filled with the computed standard name or your answer-file override), the budget cost-report email recipients, the guest-invitation decision (accepting it lists the file's addresses and offers to add more, typed line-by-line; declining it offers a follow-up: add existing pre-created accounts to the security groups, from the guest file or typed addresses), and the service-principal decision (create one, or use one you already created). A configuration summary is shown for confirmation before anything is created.
+The script asks for, in order: Organization Name, Bot Hostname (FQDN), Organization Code, Environment Type, Azure Region, Environment Index, resource tagging (with optional custom tags), then the five resource names (Resource Group, Key Vault, Deployment Storage Account, Script Runner Managed Identity, SQL Managed Identity - each pre-filled with the computed standard name or your answer-file override), the budget cost-report email recipients, the resource-provider decision (register the full platform provider set now, or only the minimal set the script itself needs), the guest-invitation decision (accepting it lists the file's addresses and offers to add more, typed line-by-line; declining it offers a follow-up: add existing pre-created accounts to the security groups, from the guest file or typed addresses), and the service-principal decision (create one, or use one you already created). A configuration summary is shown for confirmation before anything is created.
 
 ## Input Validation
 
@@ -233,7 +233,7 @@ The script will keep prompting until valid input is provided, ensuring all resou
 
 ## Resource Naming Convention
 
-Two naming tokens drive every computed name (the environment type never appears in names):
+Two naming tokens drive every computed name (the environment type joins the organisation code in both):
 
 - **Solution name**: `neo-<org><env>-<region>-<index>` (e.g. `neo-abcprd-uks-01`)
 - **Solution short name**: `<org><env><index>` (e.g. `abcprd01`)
@@ -241,17 +241,17 @@ Two naming tokens drive every computed name (the environment type never appears 
 Computed standard names (example: organization code `abc`, UK South, index `01`):
 
 - **Resource Group**: `rg-<solution-name>` (e.g. `rg-neo-abcprd-uks-01`)
-- **Key Vault**: `kv<short-name>` (e.g. `kvneoabc01`)
-- **Deployment Storage Account**: `stneodeployneo<org><region><index>` truncated to 24 characters (e.g. `stneodeployneoabcuks01`)
+- **Key Vault**: `kv<short-name>` (e.g. `kvabcprd01`)
+- **Deployment Storage Account**: `stneodeploy<org><env><region><index>` truncated to 24 characters (e.g. `stneodeployabcprduks01`)
 - **Security Groups** (suffix = short name):
-  - `Neologik User Group - neoabc01` (default users group - assigned to agent channels created in the NCE)
-  - `Neologik NCE Contributors - neoabc01` (NCE contributor role; renamed in place from the pre-v5 `Neologik NCE User Group` where one exists)
-  - `Neologik NCE Admins - neoabc01` (NCE admin role - Blueprints, Audit and the Admin page)
-  - `Neologik Admin User Group - neoabc01` (Azure resource administration)
+  - `Neologik User Group - abcprd01` (default users group - assigned to agent channels created in the NCE)
+  - `Neologik NCE Contributors - abcprd01` (NCE contributor role; renamed in place from the pre-v5 `Neologik NCE User Group` where one exists)
+  - `Neologik NCE Admins - abcprd01` (NCE admin role - Blueprints, Audit and the Admin page)
+  - `Neologik Admin User Group - abcprd01` (Azure resource administration)
 - **App Registrations**:
-  - `Neologik GitHub Service Connection - neoabc01` (deployment service principal)
-  - `Neologik Platform Sign-in - neoabc01` (NCE and App portal login)
-- **Managed Identities**: `neologik-script-runner-service-connection-neoabc01`, `neologik-sql-managed-identity-neoabc01`
+  - `Neologik GitHub Service Connection - abcprd01` (deployment service principal)
+  - `Neologik Platform Sign-in - abcprd01` (NCE and App portal login)
+- **Managed Identities**: `neologik-script-runner-service-connection-abcprd01`, `neologik-sql-managed-identity-abcprd01`
 
 **Client naming conventions**: if your organization mandates its own naming convention, override any of the computed names from the answer file - `solutionName`, `solutionShortName` (the tokens; the short name also drives the group, app-registration and identity suffixes), `resourceGroupName`, `keyVaultName`, `storageAccountName`, `scriptRunnerIdentityName`, `sqlIdentityName`. Each is validated against the Azure naming rules above. Tell Neologik about your convention as well, so the platform deployment applies the same convention to the resources it creates inside the resource group.
 
@@ -311,22 +311,22 @@ Creates (or, with a client-provided service principal, reuses):
 
 ### 6. Platform Sign-in App Registration
 
-Creates the `Neologik Platform Sign-in - <short-name>` app registration (NCE and App portal login), stores its client secret in Key Vault, registers the deployment service principal as an owner, and assigns the NCE Contributors and NCE Admins groups to it so their members' tokens carry the groups claim the NCE authorizes from. The deployment pipeline later finds this app by its Graph uniqueName and reuses it.
+Creates the `Neologik Platform Sign-in - <short-name>` app registration (NCE and App portal login), stores its client secret in Key Vault, registers the deployment service principal as owner of both the application and its service principal (enterprise application) objects, and assigns the NCE Contributors and NCE Admins groups to it so their members' tokens carry the groups claim the NCE authorizes from. The deployment pipeline later finds this app by its Graph uniqueName and reuses it.
 
 ### 7. Key Vault
 
-- **Key Vault**: `kv<short-name>` (e.g. `kvneoabc01`), or the name you supplied
+- **Key Vault**: `kv<short-name>` (e.g. `kvabcprd01`), or the name you supplied
 - **RBAC Authorization**: Enabled (no access policies)
 - **Secrets Stored**: deployment service principal client secret (automatic), Platform Sign-in client secret (automatic), certificate PFX password (manual step)
 - **Permissions**: Key Vault Secrets Officer assigned to the Neologik Admin User Group at resource group level
 
 ### 8. Resource Provider Registration
 
-Registers the required Azure resource providers (Microsoft.Compute, Microsoft.Storage, Microsoft.KeyVault, Microsoft.ManagedIdentity, Microsoft.Resources and the wider platform set), waiting for registration to complete with retry logic.
+Registers the minimal Azure resource providers the script itself needs (Microsoft.Compute, Microsoft.KeyVault, Microsoft.ManagedIdentity, Microsoft.Resources, Microsoft.Storage), waiting for registration to complete with retry logic. A prompt (default No; pre-fillable with the `registerResourceProviders` answer-file key) offers to register the full platform provider set (around 30 providers) now instead. If you decline, run `Register-NeologikResourceProviders.ps1` from this repository before the platform deployment.
 
 ### 9. Storage Account
 
-- **Storage Account**: `stneodeployneo<org><region><index>` (or your override)
+- **Storage Account**: `stneodeploy<org><env><region><index>` (or your override)
 - **Authentication**: Microsoft Entra ID only (shared key access disabled)
 - **Blob Containers**: `certificate` (TLS certificate), `json` (configuration handoff), `logs`
 - **Permissions**: Storage Blob Data Contributor assigned to the Neologik Admin User Group at resource group level
@@ -539,7 +539,7 @@ The invited Neologik team members are automatically added to the appropriate sec
 Complete these steps in the Azure Portal:
 
 #### Upload TLS Certificate
-1. Navigate to the Deployment Storage Account (default `stneodeployneo<org><region><index>`)
+1. Navigate to the Deployment Storage Account (default `stneodeploy<org><env><region><index>`)
 2. Go to Containers, then `certificate`
 3. Upload your TLS certificate (.pfx file)
 4. Use **Microsoft Entra ID** authentication (not access key)

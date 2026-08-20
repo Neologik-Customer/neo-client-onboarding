@@ -26,7 +26,7 @@ Neologik requires sufficient vCPU quota in the target subscription and region be
 #### Checking current quota
 
 1. Azure Portal → **Subscriptions** → select your subscription → **Usage + quotas**
-2. Filter by your target region and search for **`Standard D2ds v6`** or **`Standard DC2ds v6`** to see current usage vs. limit
+2. Filter by your target region and search for **`Standard D2s v6`** (the Dsv6 family) to see current usage vs. limit
 
 #### Requesting an increase
 
@@ -42,13 +42,13 @@ Azure Portal → **Usage + quotas** → select the quota line → **New Quota Re
 - `{env}` = Environment type (`dev`, `prd`)
 - `{short}` = Solution short name: `{org}{env}{index}` (e.g., `abcprd01`)
 
-The environment type joins the organisation code in every name (project#1576). Every computed name below can be overridden from the answer file (`inputs.json`) to match a client-mandated naming convention.
+The environment type joins the organisation code in every name (project#1576). Every computed name below - including the resource group - can be overridden with user input to match a client-mandated naming convention.
 
 **Example:** Organization "ABC", UK South, index 01
 - Resource Group: `rg-neo-abcprd-uks-01`
-- Key Vault: `kvneoabc01`
-- Storage Account: `stneodeployneoabcuks01`
-- Default User Group: `Neologik User Group - neoabc01`
+- Key Vault: `kvabcprd01`
+- Storage Account: `stneodeployabcprduks01`
+- Default User Group: `Neologik User Group - abcprd01`
 
 ---
 
@@ -63,8 +63,8 @@ The environment type joins the organisation code in every name (project#1576). E
 **Notes:**
 - Accounts you have pre-created (B2B guests or full member accounts whose mail or UPN matches a listed address) are detected and used as-is - no duplicate invitation
 - Interactive runs list the file's addresses and offer to **add more to invite**, typed one per line (blank line finishes, commas accepted within a line); with an empty or missing file the whole invite list can be typed in
-- Skip invitations entirely with `-SkipGuestInvitation` (or `skipGuestInvitation` in `inputs.json`) when you provision accounts in your own tenant; groups are then seeded with the signed-in user only
-- Declining invitations offers a follow-up: **add existing pre-created accounts to the security groups** with no invitation sent - addresses from `NeologikGuestUsers.txt`, typed interactively, or `existingAccountEmails` in `inputs.json` (with `addExistingAccountsToGroups: true`). Addresses with no matching account are reported and skipped; the run continues
+- Skip invitations entirely (user input) when you provision accounts in your own tenant; groups are then seeded with the signed-in user only
+- Declining invitations offers a follow-up: **add existing pre-created accounts to the security groups** with no invitation sent - addresses from `NeologikGuestUsers.txt`. Addresses with no matching account are reported and skipped; the run continues
 - All accounts processed by this step (invited or pre-existing) join **all four groups**, including the Admin User Group and its Azure RBAC - Neologik admin/support accounts only
 
 ---
@@ -92,7 +92,7 @@ The environment type joins the organisation code in every name (project#1576). E
 
 | Name | Location |
 |------|----------|
-| `rg-neo-{org}{env}-{region}-{index}` | Customer specified (e.g., uksouth) |
+| `rg-neo-{org}{env}-{region}-{index}` (name can be overridden with user input) | Customer specified (e.g., uksouth) |
 
 **Scope:** Subscription
 
@@ -119,7 +119,7 @@ The environment type joins the organisation code in every name (project#1576). E
 
 ### 5. App Registration & Service Principal (Entra ID)
 
-**Action:** Create app registration for GitHub deployments - or reuse a service principal you have already created (`-ExistingServicePrincipalObjectId` / `useExistingServicePrincipal` in `inputs.json`; roles below are assigned either way; creation steps in [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md))
+**Action:** Create app registration for GitHub deployments - or reuse a service principal you have already created, supplied as user input (creation steps in [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md))
 
 | Property | Value |
 |----------|-------|
@@ -170,7 +170,7 @@ The environment type joins the organisation code in every name (project#1576). E
 | **Name** | `Neologik Platform Sign-in - {short}` |
 | **Type** | Multi-tenant (AzureADMultipleOrgs), web redirect URI on your hostname |
 | **Client Secret** | Created (365-day expiration), stored in Key Vault |
-| **Owner** | Deployment service principal (so the pipeline can manage/rotate it) |
+| **Owner** | Deployment service principal, on both the application and its service principal objects (so the pipeline can manage/rotate it) |
 | **Group Assignments** | `Neologik NCE Contributors - {short}` and `Neologik NCE Admins - {short}` assigned to the enterprise application, so members' tokens carry the groups claim NCE authorizes from |
 
 ---
@@ -181,7 +181,7 @@ The environment type joins the organisation code in every name (project#1576). E
 
 | Property | Value |
 |----------|-------|
-| **Name** | `kv{org}{env}{index}` (override with `-KeyVaultName` or `keyVaultName` in `inputs.json`) |
+| **Name** | `kv{org}{env}{index}` (name can be overridden with user input) |
 | **Authorization** | Microsoft Entra ID RBAC (no access policies) |
 | **Public Access** | Enabled |
 | **Soft Delete** | Enabled (Azure default) |
@@ -207,7 +207,7 @@ The environment type joins the organisation code in every name (project#1576). E
 
 | Property | Value |
 |----------|-------|
-| **Name** | `stneodeployneo{org}{region}{index}` (truncated to 24 characters; override with `storageAccountName` in `inputs.json`) |
+| **Name** | `stneodeploy{org}{env}{region}{index}` (truncated to 24 characters; name can be overridden with user input) |
 | **Authentication** | Microsoft Entra ID only |
 | **Shared Key Access** | Disabled |
 | **Public Access** | Enabled |
@@ -229,7 +229,7 @@ The environment type joins the organisation code in every name (project#1576). E
 ### Identity 1: Script Runner Service Connection
 | Property | Value |
 |----------|-------|
-| **Name** | `neologik-script-runner-service-connection-{short}` (override with `scriptRunnerIdentityName`) |
+| **Name** | `neologik-script-runner-service-connection-{short}` (name can be overridden with user input) |
 | **Display Name** | `Neologik Script Runner Service Connection - {short}` |
 
 **Role Assignments:**
@@ -242,13 +242,19 @@ The environment type joins the organisation code in every name (project#1576). E
 ### Identity 2: SQL Managed Identity
 | Property | Value |
 |----------|-------|
-| **Name** | `neologik-sql-managed-identity-{short}` (override with `sqlIdentityName`) |
+| **Name** | `neologik-sql-managed-identity-{short}` (name can be overridden with user input) |
 | **Display Name** | `Neologik SQL Managed Identity - {short}` |
 
 **Role Assignments:**
 | Role | Scope |
 |------|-------|
 | **Directory Readers** | Entra ID (Directory Role) |
+
+---
+
+### 11. Resource Provider Registration
+
+The script registers a minimal set of Azure resource providers on the subscription (Compute, KeyVault, ManagedIdentity, Resources, Storage), or the full platform set of around 30 if the operator opts in at the prompt. Registration enables resource types on the subscription; it grants no permissions and creates no resources.
 
 ---
 
