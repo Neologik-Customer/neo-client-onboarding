@@ -1081,9 +1081,11 @@ function Test-RequiredPermissions {
         }
         catch {
             Write-Log "Trying alternative method to get role assignments..." -Level Info
-            # Get current user's object ID from Graph
-            $currentUser = Get-MgUser -UserId $userAccount -ErrorAction Stop
-            $roleAssignments = Get-AzRoleAssignment -Scope "/subscriptions/$SubscriptionId" -ObjectId $currentUser.Id -ErrorAction Stop
+            # Get current user's object ID via Graph REST on the already-established
+            # connection - the Get-Mg* entity cmdlets load extra Graph submodules whose
+            # assemblies can conflict with the loaded Microsoft.Graph.Authentication version.
+            $currentUser = Invoke-MgGraphRequest -Method GET -Uri "v1.0/me?`$select=id" -ErrorAction Stop
+            $roleAssignments = Get-AzRoleAssignment -Scope "/subscriptions/$SubscriptionId" -ObjectId $currentUser.id -ErrorAction Stop
         }
         
         $isOwner = $roleAssignments | Where-Object { $_.RoleDefinitionName -eq 'Owner' }
@@ -1101,17 +1103,15 @@ function Test-RequiredPermissions {
         $isGlobalAdmin = $false
         $globalAdminConfirmed = $true
         try {
-            $userId = (Get-MgUser -UserId $script:ConfigData['UserAccount']).Id
-            $globalAdminRole = Get-MgDirectoryRole -Filter "displayName eq 'Global Administrator'"
-
-            if (-not $globalAdminRole) {
-                # Activate the role template if not activated
-                $roleTemplate = Get-MgDirectoryRoleTemplate -Filter "displayName eq 'Global Administrator'"
-                $globalAdminRole = New-MgDirectoryRole -RoleTemplateId $roleTemplate.Id
-            }
-
-            $adminMembers = Get-MgDirectoryRoleMember -DirectoryRoleId $globalAdminRole.Id
-            $isGlobalAdmin = [bool]($adminMembers | Where-Object { $_.Id -eq $userId })
+            # Membership check via Graph REST on the already-established connection.
+            # The previous Get-MgUser / Get-MgDirectoryRole* approach loaded the
+            # Microsoft.Graph.Users and DirectoryManagement submodules, whose assemblies
+            # can conflict with the loaded Microsoft.Graph.Authentication version and
+            # crash the check on otherwise-healthy machines. Checking the signed-in
+            # user's own active directory roles also needs no role activation write.
+            $gaRoleTemplateId = '62e90394-69f5-4237-9190-012177145e10'  # Global Administrator (well-known template id)
+            $memberOf = Invoke-MgGraphRequest -Method GET -Uri "v1.0/me/memberOf/microsoft.graph.directoryRole?`$select=roleTemplateId" -ErrorAction Stop
+            $isGlobalAdmin = [bool]($memberOf.value | Where-Object { $_.roleTemplateId -eq $gaRoleTemplateId })
         }
         catch {
             # The check itself failed (e.g. a Graph token/permission issue such as IDX14102) —
@@ -1154,6 +1154,45 @@ function Test-RequiredPermissions {
     }
 }
 
+function Find-NeologikUserByEmail {
+    <#
+    .SYNOPSIS
+        Resolves a user account by mail or userPrincipalName via Graph REST.
+    .DESCRIPTION
+        Uses Invoke-MgGraphRequest on the established Graph connection instead of
+        Get-MgUser: the Microsoft.Graph.Users submodule's assembly can conflict with
+        the loaded Microsoft.Graph.Authentication version and crash the lookup on
+        otherwise-healthy machines. Returns the matching user (id, displayName) or
+        $null when no account matches or the lookup fails.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Email
+    )
+
+    $safeEmail = $Email -replace "'", "''"
+    $filter = [uri]::EscapeDataString("mail eq '$safeEmail' or userPrincipalName eq '$safeEmail'")
+    try {
+        $result = Invoke-MgGraphRequest -Method GET -Uri "v1.0/users?`$filter=$filter&`$select=id,displayName" -ErrorAction Stop
+        if ($result.value -and $result.value.Count -gt 0) {
+            # Normalize to a typed object: the response hashtable's key lookup can be
+            # case-sensitive, and callers read .Id / .DisplayName. JSON keys are exact
+            # camelCase ('id', 'displayName'), so these lookups are always safe.
+            $match = $result.value[0]
+            return [pscustomobject]@{
+                Id          = $match.id
+                DisplayName = $match.displayName
+            }
+        }
+        return $null
+    }
+    catch {
+        Write-Log "User lookup for $Email failed: $_" -Level Warning
+        return $null
+    }
+}
+
 function Register-RequiredResourceProvider {
     <#
     .SYNOPSIS
@@ -1172,7 +1211,7 @@ function Register-RequiredResourceProvider {
 
         if ($provider.RegistrationState -eq 'Registered') {
             Write-Log "Resource provider '$ProviderNamespace' is already registered" -Level Info
-            return $true
+            return
         }
 
         if ($provider.RegistrationState -eq 'Registering') {
@@ -1196,7 +1235,7 @@ function Register-RequiredResourceProvider {
 
             if ($provider.RegistrationState -eq 'Registered') {
                 Write-Log "Resource provider '$ProviderNamespace' registered successfully" -Level Success
-                return $true
+                return
             }
 
             if ($provider.RegistrationState -ne 'Registering') {
@@ -1486,7 +1525,7 @@ function Invoke-GuestUserInvitation {
             Write-Log "Processing guest user: $email..." -Level Info
 
             # Check if user already exists
-            $existingUser = Get-MgUser -Filter "mail eq '$email' or userPrincipalName eq '$email'" -ErrorAction SilentlyContinue
+            $existingUser = Find-NeologikUserByEmail -Email $email
 
             if ($existingUser) {
                 Write-Log "Guest user $email already exists (ID: $($existingUser.Id))" -Level Info
@@ -1575,18 +1614,10 @@ function Invoke-ExistingAccountResolution {
 
     Write-Log "Resolving existing accounts for group membership (no invitations will be sent)..." -Level Info
 
-    try {
-        Import-Module Microsoft.Graph.Users -ErrorAction Stop
-    }
-    catch {
-        Write-Log "Could not load the Microsoft Graph Users module - existing accounts will not be added to the groups (continuing): $_" -Level Warning
-        return @()
-    }
-
     $resolvedUsers = @()
     foreach ($email in $Emails) {
         Write-Log "Looking up existing account: $email..." -Level Info
-        $existingUser = Get-MgUser -Filter "mail eq '$email' or userPrincipalName eq '$email'" -ErrorAction SilentlyContinue
+        $existingUser = Find-NeologikUserByEmail -Email $email
 
         if ($existingUser) {
             Write-Log "Account $email exists (ID: $($existingUser.Id)) - it will be added to the security groups" -Level Success
@@ -1964,11 +1995,21 @@ function New-NeologikAppRegistration {
             Write-Log "Service Principal already exists" -Level Info
         }
 
-        # Create client secret
+        # Create client secret. On an existing app, first remove previous
+        # script-created secrets (DisplayName 'auth') so re-running onboarding
+        # rotates the credential instead of accumulating one 365-day secret per
+        # run; the fresh secret is stored in Key Vault later in this run.
+        # Client-managed secrets under other display names are untouched.
         Write-Log "Creating client secret..." -Level Info
-        
+
         $secretName = "auth"
         $secretEndDate = (Get-Date).AddDays(365)
+
+        $staleCreds = @($app.PasswordCredentials | Where-Object { $_.DisplayName -eq $secretName })
+        foreach ($staleCred in $staleCreds) {
+            Remove-MgApplicationPassword -ApplicationId $app.Id -KeyId $staleCred.KeyId -ErrorAction Stop
+            Write-Log "Removed previous script-created client secret (KeyId: $($staleCred.KeyId))" -Level Info
+        }
 
         $passwordCred = Add-MgApplicationPassword -ApplicationId $app.Id `
             -PasswordCredential @{
@@ -3805,18 +3846,18 @@ function Export-ConfigurationData {
         Write-Host ""
 
         Write-Host "⚠️  Next Steps:" -ForegroundColor Yellow
-        Write-Host "  1. Review the configuration file (available locally and in Storage Account)"
-        Write-Host "  2. Service principal client secret is securely stored in Key Vault: $($script:ConfigData['KeyVault'].Name)"
+        Write-Host "  1. Send the configuration JSON file to Neologik (support@neologik.ai) -"
+        Write-Host "     the deployment cannot start without it"
+        Write-Host "  2. Review the configuration file (available locally and in Storage Account)"
+        Write-Host "  3. Service principal client secret is securely stored in Key Vault: $($script:ConfigData['KeyVault'].Name)"
         Write-Host "     Secret name: $($script:ConfigData['KeyVault'].SecretName)"
-        Write-Host "  3. Import your TLS certificate (.pfx file) into Key Vault as a certificate (if using own hostname):"
-        Write-Host "     Key Vault:        $($script:ConfigData['KeyVault'].Name)"
-        Write-Host "     Certificate name: keyvault-neo-ingress"
-        Write-Host "     Command:"
-        Write-Host "       az keyvault certificate import --vault-name $($script:ConfigData['KeyVault'].Name) --name keyvault-neo-ingress --file certificate.pfx --password <PFX_PASSWORD>"
-        Write-Host "     (The PFX password is consumed at import time — it does not need to be stored separately.)"
+        Write-Host "  4. Upload your TLS certificate (.pfx file) to the Storage Account (see PFX-CERT-GUIDE.md to create it):"
+        Write-Host "     Storage Account: $($script:ConfigData['StorageAccount'].Name)"
+        Write-Host "     Container:       $($script:ConfigData['StorageAccount'].CertificateContainerName)"
+        Write-Host "     Authentication:  Microsoft Entra ID (your Azure account)"
+        Write-Host "  5. Store the certificate PFX password in Key Vault '$($script:ConfigData['KeyVault'].Name)' as a secret named:"
+        Write-Host "     neologik-deployment-certificate-pfx-secret"
         Write-Host ""
-
-        return $script:OutputFile
     }
     catch {
         Write-Log "Failed to export configuration: $_" -Level Error

@@ -9,6 +9,33 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Fixes from the dev06 v5 run transcript (project#1652)
+**Branch**: `bugfix/v5-run-findings`
+**Ticket**: https://github.com/Neologik-AI/project/issues/1652
+**Date**: 2026-08-20
+
+- Global Administrator and user lookups now use Invoke-MgGraphRequest (REST
+  on the established Graph connection) instead of Get-MgUser /
+  Get-MgDirectoryRole*, whose submodule assemblies can conflict with the
+  loaded Microsoft.Graph.Authentication version and crash the check (the
+  operator then always got the proceed-at-own-risk prompt). The GA check
+  reads the signed-in user's active roles by roleTemplateId and no longer
+  needs the role-activation write. New shared helper
+  Find-NeologikUserByEmail replaces both guest/existing-account lookups.
+- Completion Next Steps corrected: the TLS certificate goes to the
+  deployment Storage Account 'certificate' container with the PFX password
+  stored as the Key Vault secret neologik-deployment-certificate-pfx-secret
+  (the previous instruction - import into the environment Key Vault as
+  'keyvault-neo-ingress' - pointed at a certificate the pipeline imports
+  itself and skipped the password handoff). A step to send the
+  configuration JSON to Neologik is now step 1.
+- Re-running onboarding rotates the deployment SP client secret instead of
+  accumulating one 365-day secret per run: previous script-created secrets
+  (DisplayName 'auth') are removed before the new one is minted.
+- Console output cleaned: stray 'True' lines from the resource-provider
+  registration loop and the bare configuration-file path echoed after the
+  Next Steps block.
+
 ## Unreleased - Invite list extendable at the prompt (project#1064)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1064
