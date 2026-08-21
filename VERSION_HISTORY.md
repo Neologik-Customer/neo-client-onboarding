@@ -9,6 +9,18 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Storage uploads verified and surfaced (project#1652 process item 4)
+**Date**: 2026-08-21
+
+- The configuration JSON and log uploads are verified (blob read back)
+  and drive the completion output: blob paths are shown only for files
+  that landed, and a failed configuration upload raises a prominent
+  warning with manual portal upload instructions - Neologik retrieves
+  the JSON from the json container, so a silent failure stalls
+  onboarding. Upload code deduplicated into Copy-NeologikFileToStorage.
+- Non-interactive runs attempt the upload once instead of skipping it;
+  it succeeds when the CI login can authenticate data-plane calls.
+
 ## Unreleased - Fixes from the dev06 v5 run transcript (project#1652)
 **Branch**: `bugfix/v5-run-findings`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1652

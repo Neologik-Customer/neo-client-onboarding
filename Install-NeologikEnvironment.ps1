@@ -3611,6 +3611,68 @@ function New-NeologikManagedIdentities {
 
 #region Output and Reporting
 
+function Copy-NeologikFileToStorage {
+    <#
+    .SYNOPSIS
+        Uploads a local file to a Storage Account blob container and verifies it
+        landed by reading the blob back. Returns $true/$false; retries cover
+        data-plane RBAC propagation after role assignment.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$StorageAccountName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ContainerName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Description,
+
+        [int]$MaxRetries = 12
+    )
+
+    $blobName = Split-Path -Leaf $FilePath
+    try {
+        # Storage context using Entra ID authentication
+        $ctx = New-AzStorageContext -StorageAccountName $StorageAccountName -UseConnectedAccount
+    }
+    catch {
+        Write-Log "Could not create a storage context for '$StorageAccountName': $_" -Level Warning
+        return $false
+    }
+
+    $retryCount = 0
+    while ($retryCount -lt $MaxRetries) {
+        try {
+            Set-AzStorageBlobContent -File $FilePath `
+                -Container $ContainerName `
+                -Blob $blobName `
+                -Context $ctx `
+                -Force `
+                -ErrorAction Stop | Out-Null
+            # Read the blob back so success means the file is verifiably there
+            $null = Get-AzStorageBlob -Container $ContainerName -Blob $blobName -Context $ctx -ErrorAction Stop
+            Write-Log "$Description uploaded to Storage Account: $StorageAccountName/$ContainerName/$blobName" -Level Success
+            return $true
+        }
+        catch {
+            $retryCount++
+            if ($retryCount -lt $MaxRetries) {
+                Write-Log "Storage data-plane permission not yet propagated. Retrying in 20 seconds... (Attempt $retryCount of $MaxRetries)" -Level Warning
+                Start-Sleep -Seconds 20
+            }
+            else {
+                Write-Log "Failed to upload $Description to Storage Account after $MaxRetries attempt(s) - it remains locally at ${FilePath}: $_" -Level Warning
+            }
+        }
+    }
+    return $false
+}
+
 function Export-ConfigurationData {
     <#
     .SYNOPSIS
@@ -3662,91 +3724,30 @@ function Export-ConfigurationData {
         $orderedConfig | ConvertTo-Json -Depth 10 | Out-File -FilePath $script:OutputFile -Encoding UTF8
         Write-Log "Configuration exported to: $script:OutputFile" -Level Success
 
-        # Copy JSON file to Storage Account blob container. Skipped in non-interactive
-        # (CI) mode: blob upload is a data-plane call the static access-token session
-        # cannot authenticate, and the caller collects the local file instead.
-        if ($script:NonInteractiveMode) {
-            Write-Log "Non-interactive: skipping upload of the configuration and log files to the Storage Account; collect them from the local paths logged below." -Level Info
-        }
-        elseif ($script:ConfigData['StorageAccount']) {
+        # Upload the JSON and log files, recording the outcomes - Neologik
+        # retrieves the configuration from the json container, so a failure is
+        # surfaced prominently in the completion summary. Non-interactive (CI)
+        # sessions get one attempt: static access-token sessions cannot
+        # authenticate data-plane calls (full logins can), so retries are pointless.
+        $uploadRetries = if ($script:NonInteractiveMode) { 1 } else { 12 }
+        $script:ConfigData['ConfigUploadedToStorage'] = $false
+        $script:ConfigData['LogUploadedToStorage'] = $false
+        if ($script:ConfigData['StorageAccount']) {
             Write-Log "Copying configuration file to Storage Account..." -Level Info
+            $script:ConfigData['ConfigUploadedToStorage'] = Copy-NeologikFileToStorage `
+                -FilePath $script:OutputFile `
+                -StorageAccountName $script:ConfigData['StorageAccount'].Name `
+                -ContainerName $script:ConfigData['StorageAccount'].JsonContainerName `
+                -Description "Configuration file" `
+                -MaxRetries $uploadRetries
 
-            $storageAccountName = $script:ConfigData['StorageAccount'].Name
-            $jsonContainerName = $script:ConfigData['StorageAccount'].JsonContainerName
-            $blobName = Split-Path -Leaf $script:OutputFile
-
-            # Get storage context using Entra ID authentication
-            $ctx = New-AzStorageContext -StorageAccountName $storageAccountName -UseConnectedAccount
-
-            # Upload with retry: data-plane RBAC (Storage Blob Data Contributor) can take
-            # several minutes to propagate after assignment, so early attempts may 403.
-            $uploaded = $false
-            $retryCount = 0
-            $maxRetries = 12
-            while (-not $uploaded -and $retryCount -lt $maxRetries) {
-                try {
-                    Set-AzStorageBlobContent -File $script:OutputFile `
-                        -Container $jsonContainerName `
-                        -Blob $blobName `
-                        -Context $ctx `
-                        -Force `
-                        -ErrorAction Stop | Out-Null
-                    $uploaded = $true
-                    Write-Log "Configuration file uploaded to Storage Account: $storageAccountName/$jsonContainerName/$blobName" -Level Success
-                }
-                catch {
-                    $retryCount++
-                    if ($retryCount -lt $maxRetries) {
-                        Write-Log "Storage data-plane permission not yet propagated. Retrying in 20 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
-                        Start-Sleep -Seconds 20
-                    }
-                    else {
-                        Write-Log "Warning: Failed to copy configuration file to Storage Account after $maxRetries attempts: $_" -Level Warning
-                        Write-Log "The configuration file is still available locally at: $script:OutputFile" -Level Info
-                    }
-                }
-            }
-        }
-
-        # Copy log file to Storage Account blob container (also data-plane; see above).
-        if (-not $script:NonInteractiveMode -and $script:ConfigData['StorageAccount']) {
             Write-Log "Copying log file to Storage Account..." -Level Info
-
-            $storageAccountName = $script:ConfigData['StorageAccount'].Name
-            $logsContainerName = $script:ConfigData['StorageAccount'].LogsContainerName
-            $logBlobName = Split-Path -Leaf $script:LogFile
-
-            # Get storage context using Entra ID authentication
-            $ctx = New-AzStorageContext -StorageAccountName $storageAccountName -UseConnectedAccount
-
-            # Upload with retry: data-plane RBAC (Storage Blob Data Contributor) can take
-            # several minutes to propagate after assignment, so early attempts may 403.
-            $uploaded = $false
-            $retryCount = 0
-            $maxRetries = 12
-            while (-not $uploaded -and $retryCount -lt $maxRetries) {
-                try {
-                    Set-AzStorageBlobContent -File $script:LogFile `
-                        -Container $logsContainerName `
-                        -Blob $logBlobName `
-                        -Context $ctx `
-                        -Force `
-                        -ErrorAction Stop | Out-Null
-                    $uploaded = $true
-                    Write-Log "Log file uploaded to Storage Account: $storageAccountName/$logsContainerName/$logBlobName" -Level Success
-                }
-                catch {
-                    $retryCount++
-                    if ($retryCount -lt $maxRetries) {
-                        Write-Log "Storage data-plane permission not yet propagated. Retrying in 20 seconds... (Attempt $retryCount of $maxRetries)" -Level Warning
-                        Start-Sleep -Seconds 20
-                    }
-                    else {
-                        Write-Log "Warning: Failed to copy log file to Storage Account after $maxRetries attempts: $_" -Level Warning
-                        Write-Log "The log file is still available locally at: $script:LogFile" -Level Info
-                    }
-                }
-            }
+            $script:ConfigData['LogUploadedToStorage'] = Copy-NeologikFileToStorage `
+                -FilePath $script:LogFile `
+                -StorageAccountName $script:ConfigData['StorageAccount'].Name `
+                -ContainerName $script:ConfigData['StorageAccount'].LogsContainerName `
+                -Description "Log file" `
+                -MaxRetries $uploadRetries
         }
 
         # Display summary
@@ -3826,17 +3827,27 @@ function Export-ConfigurationData {
 
         Write-Host "Output Files:" -ForegroundColor Yellow
         Write-Host "  Configuration (Local): $script:OutputFile" -ForegroundColor Cyan
-        if ($script:ConfigData['StorageAccount']) {
+        if ($script:ConfigData['ConfigUploadedToStorage']) {
             Write-Host "  Configuration (Blob):  $($script:ConfigData['StorageAccount'].Name)/$($script:ConfigData['StorageAccount'].JsonContainerName)/$(Split-Path -Leaf $script:OutputFile)" -ForegroundColor Cyan
         }
         Write-Host "  Log File (Local):      $script:LogFile" -ForegroundColor Cyan
-        if ($script:ConfigData['StorageAccount']) {
+        if ($script:ConfigData['LogUploadedToStorage']) {
             Write-Host "  Log File (Blob):       $($script:ConfigData['StorageAccount'].Name)/$($script:ConfigData['StorageAccount'].LogsContainerName)/$(Split-Path -Leaf $script:LogFile)" -ForegroundColor Cyan
+        }
+        if ($script:ConfigData['StorageAccount'] -and -not $script:ConfigData['ConfigUploadedToStorage']) {
+            Write-Host ""
+            Write-Host "  ⚠️  Configuration file NOT uploaded - Neologik retrieves it from the Storage Account." -ForegroundColor Red
+            Write-Host "      Upload it manually: Azure Portal > '$($script:ConfigData['StorageAccount'].Name)' > Containers > '$($script:ConfigData['StorageAccount'].JsonContainerName)' > Upload" -ForegroundColor Yellow
         }
         Write-Host ""
 
         Write-Host "⚠️  Next Steps:" -ForegroundColor Yellow
-        Write-Host "  1. Review the configuration file (available locally and in Storage Account)"
+        if ($script:ConfigData['ConfigUploadedToStorage']) {
+            Write-Host "  1. Review the configuration file (available locally and in Storage Account)"
+        }
+        else {
+            Write-Host "  1. Review the configuration file (local only - see the upload warning above)"
+        }
         Write-Host "  2. Ensure that service principal client secret is securely stored in Key Vault: $($script:ConfigData['KeyVault'].Name)"
         Write-Host "     Secret name: $($script:ConfigData['KeyVault'].SecretName)"
         Write-Host "  3. Provide your TLS certificate in ONE of two ways:"

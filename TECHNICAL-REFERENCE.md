@@ -148,7 +148,7 @@ pwsh -NonInteractive -File ./Install-NeologikEnvironment.ps1 -NonInteractive -Ac
 - The configuration summary is not confirmed interactively; warn-and-prompt checks (Global Administrator verification, subscription selection) fail hard instead of prompting.
 - A leftover `NeologikCheckpoint.json` is an error unless `-FreshRun` discards it.
 - Access tokens are short-lived (~60 minutes) and cannot be refreshed mid-run; the token user still needs Subscription Owner + Global Administrator.
-- The upload of the configuration file to the Storage Account is skipped (data-plane call the static token session cannot authenticate) - collect the local files instead.
+- The upload of the configuration and log files to the Storage Account is attempted once; it succeeds when the caller's Azure context can authenticate data-plane calls (e.g. an OIDC login) and is reported as failed with a static access-token session - collect the local files in that case.
 - Run under `pwsh -NonInteractive` so any unexpected prompt throws instead of hanging.
 
 ## Usage Examples
@@ -355,7 +355,7 @@ Creates two files next to the script:
 - **Configuration JSON**: `Neologik_<org><index>_Configuration_<timestamp>.json` (includes script version; excludes secret values)
 - **Log File**: `NeologikOnboarding_<timestamp>.log`
 
-In interactive runs the configuration JSON is also uploaded to the Storage Account's `json` container (skipped in non-interactive mode).
+The configuration JSON and log file are also uploaded to the Storage Account's `json` and `logs` containers, and each upload is verified by reading the blob back; a failed configuration upload is flagged prominently in the completion summary with manual upload instructions (Neologik retrieves the configuration from the `json` container). Non-interactive runs attempt the upload once rather than retrying.
 
 ## Output Files
 
