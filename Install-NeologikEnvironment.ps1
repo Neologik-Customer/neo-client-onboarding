@@ -1995,21 +1995,11 @@ function New-NeologikAppRegistration {
             Write-Log "Service Principal already exists" -Level Info
         }
 
-        # Create client secret. On an existing app, first remove previous
-        # script-created secrets (DisplayName 'auth') so re-running onboarding
-        # rotates the credential instead of accumulating one 365-day secret per
-        # run; the fresh secret is stored in Key Vault later in this run.
-        # Client-managed secrets under other display names are untouched.
+        # Create client secret
         Write-Log "Creating client secret..." -Level Info
 
         $secretName = "auth"
         $secretEndDate = (Get-Date).AddDays(365)
-
-        $staleCreds = @($app.PasswordCredentials | Where-Object { $_.DisplayName -eq $secretName })
-        foreach ($staleCred in $staleCreds) {
-            Remove-MgApplicationPassword -ApplicationId $app.Id -KeyId $staleCred.KeyId -ErrorAction Stop
-            Write-Log "Removed previous script-created client secret (KeyId: $($staleCred.KeyId))" -Level Info
-        }
 
         $passwordCred = Add-MgApplicationPassword -ApplicationId $app.Id `
             -PasswordCredential @{
@@ -3846,16 +3836,25 @@ function Export-ConfigurationData {
         Write-Host ""
 
         Write-Host "⚠️  Next Steps:" -ForegroundColor Yellow
-        Write-Host "  1. Send the configuration JSON file to Neologik (support@neologik.ai) -"
-        Write-Host "     the deployment cannot start without it"
-        Write-Host "  2. Review the configuration file (available locally and in Storage Account)"
-        Write-Host "  3. Service principal client secret is securely stored in Key Vault: $($script:ConfigData['KeyVault'].Name)"
+        Write-Host "  1. Review the configuration file (available locally and in Storage Account)"
+        Write-Host "  2. Ensure that service principal client secret is securely stored in Key Vault: $($script:ConfigData['KeyVault'].Name)"
         Write-Host "     Secret name: $($script:ConfigData['KeyVault'].SecretName)"
-        Write-Host "  4. Upload your TLS certificate (.pfx file) to the Storage Account (see PFX-CERT-GUIDE.md to create it):"
-        Write-Host "     Storage Account: $($script:ConfigData['StorageAccount'].Name)"
-        Write-Host "     Container:       $($script:ConfigData['StorageAccount'].CertificateContainerName)"
-        Write-Host "     Authentication:  Microsoft Entra ID (your Azure account)"
-        Write-Host "  5. Store the certificate PFX password in Key Vault '$($script:ConfigData['KeyVault'].Name)' as a secret named:"
+        Write-Host "  3. Provide your TLS certificate in ONE of two ways:"
+        Write-Host "     (you may create your own secure .pfx file via the instructions in PFX-CERT-GUIDE.md)"
+        Write-Host "     Option A - import the .pfx directly into Key Vault as a certificate:"
+        Write-Host "       In the Azure Portal (portal.azure.com), open Key Vault"
+        Write-Host "       '$($script:ConfigData['KeyVault'].Name)' > Certificates > Generate/Import,"
+        Write-Host "       choose Import, name the certificate 'keyvault-neo-ingress', select your"
+        Write-Host "       .pfx file and enter its password."
+        Write-Host "       (the password is consumed at import - do not store or share it)"
+        Write-Host "     Option B - upload to the Storage Account: a ready-made .pfx file"
+        Write-Host "       or, if you cannot produce a .pfx, the raw certificate files (private key,"
+        Write-Host "       server certificate, CA bundle) for Neologik to assemble:"
+        Write-Host "       Storage Account: $($script:ConfigData['StorageAccount'].Name)"
+        Write-Host "       Container:       $($script:ConfigData['StorageAccount'].CertificateContainerName)"
+        Write-Host "       Authentication:  Microsoft Entra ID (your Azure account)"
+        Write-Host "  4. If you uploaded a .pfx to the Storage Account (Option B): store its"
+        Write-Host "     password in Key Vault '$($script:ConfigData['KeyVault'].Name)' as a secret named:"
         Write-Host "     neologik-deployment-certificate-pfx-secret"
         Write-Host ""
     }
