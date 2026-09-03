@@ -105,6 +105,14 @@
     assignments should be removed (the email monitor's identity at its
     migration window). Optional; used with or without -MailboxGrantsFile.
 
+.PARAMETER UseAzureCliToken
+    Sign in to Microsoft Graph with the Azure CLI session's token for the
+    tenant (az account get-access-token) instead of the device-code prompt.
+    For Neologik engineers running the script from a workstation whose az
+    session in the tenant already satisfies multi-factor authentication -
+    the device-code prompt allows only 120 seconds to complete. Customers
+    keep the default device-code sign-in.
+
 .PARAMETER SubscriptionId
     Azure subscription id. Required for -Phase PostWindow when no
     ConfigurationFile is given.
@@ -154,7 +162,10 @@ param(
     [string]$MailboxGrantsFile,
 
     [Parameter(Mandatory = $false)]
-    [string[]]$RemoveLegacyGrantAppIds
+    [string[]]$RemoveLegacyGrantAppIds,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$UseAzureCliToken
 )
 
 Set-StrictMode -Version Latest
@@ -177,7 +188,10 @@ $script:RetiredGraphRoles = @(
     'AgentIdentityBlueprint.UpdateAuthProperties.All',
     'AgentIdentityBlueprintPrincipal.Create',
     'AgentIdentity.Create.All',
-    'AgentIdUser.ReadWrite.All'
+    'AgentIdUser.ReadWrite.All',
+    # Granted by onboarding before project#1519 and never revoked on those
+    # environments; the platform never creates Entra groups.
+    'Group.Create'
 )
 # The blueprint PRINCIPAL's own role: agent users parented by that blueprint only.
 $script:BlueprintPrincipalGraphRoles = @('AgentIdUser.ReadWrite.IdentityParentedBy')
@@ -414,8 +428,18 @@ $graphScopes = @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All',
 if ($Phase -eq 'PostWindow') {
     $graphScopes += 'RoleManagement.ReadWrite.Directory'
 }
-Write-Log 'Signing in to Microsoft Graph (device code - use your Global Administrator account)...' -Level Info
-Connect-MgGraph -TenantId $TenantId -Scopes $graphScopes -UseDeviceCode -NoWelcome
+if ($UseAzureCliToken) {
+    Write-Log 'Signing in to Microsoft Graph with the Azure CLI session token (az account get-access-token)...' -Level Info
+    $cliToken = az account get-access-token --resource-type ms-graph --tenant $TenantId --query accessToken -o tsv
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($cliToken)) {
+        throw "az account get-access-token failed for tenant $TenantId - sign in first: az login --tenant $TenantId --scope https://graph.microsoft.com//.default"
+    }
+    Connect-MgGraph -AccessToken (ConvertTo-SecureString -String $cliToken -AsPlainText -Force) -NoWelcome
+}
+else {
+    Write-Log 'Signing in to Microsoft Graph (device code - use your Global Administrator account)...' -Level Info
+    Connect-MgGraph -TenantId $TenantId -Scopes $graphScopes -UseDeviceCode -NoWelcome
+}
 
 $deploySp = Get-MgServicePrincipal -Filter "appId eq '$DeploySpClientId'"
 if (-not $deploySp) {

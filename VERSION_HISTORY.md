@@ -36,6 +36,10 @@ This document tracks the version history of the Neologik customer onboarding scr
   principal role, GitHub credentials), ensures the two retained roles, then
   removes the six retired roles from the deployment SP (narrow before broad).
   `-BlueprintKey` targets a non-default blueprint archetype.
+- `Update-NeologikEnvironmentAccess.ps1 -UseAzureCliToken` signs in to Graph with
+  the Azure CLI session token instead of the device-code prompt (whose
+  120-second window is too short for a chat-driven hand-off); for Neologik
+  engineers, customers keep device code. Proven on the dev03 retro-fit.
 - Graph delegated scopes requested by the scripts gain the Agent ID scopes
   (AgentIdentityBlueprint.Create, AgentIdentityBlueprint.AddRemoveCreds.All,
   AgentIdentityBlueprintPrincipal.Create).
