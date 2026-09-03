@@ -15,11 +15,24 @@
     like.
 
     Phase 'Window' (the default) - run any time BEFORE the migration window:
-      1. Deployment identity Graph roles: grants the Neologik deployment
-         service principal the eight Microsoft Graph application roles the
-         v5 platform needs (agent identity management plus the two base
-         application roles). Only a Global Administrator can grant Graph
-         application roles - Application Administrator is not sufficient.
+      1. Least-privilege Graph model (project#2144):
+         a. Agent identity blueprint: ensures 'Neologik Agent Blueprint -
+            <key> - <short-name>' and its principal exist (created here if
+            absent, adopted if the pipeline created it), that the
+            deployment identity owns both, that the principal holds
+            AgentIdUser.ReadWrite.IdentityParentedBy, and that the GitHub
+            OIDC federated credentials the deployment pipeline uses to act
+            AS the blueprint are present.
+         b. Deployment identity Graph roles: ensures the two retained
+            application roles (Application.ReadWrite.OwnedBy,
+            AgentIdentityBlueprint.AddRemoveCreds.All), then REMOVES the six
+            retired tenant-wide roles (Application.Read.All,
+            AgentIdentityBlueprint.Create, .UpdateAuthProperties.All,
+            AgentIdentityBlueprintPrincipal.Create, AgentIdentity.Create.All,
+            AgentIdUser.ReadWrite.All) - narrow before broad, so the
+            pipeline never loses a capability in between. Only a Global
+            Administrator can grant or revoke Graph application roles -
+            Application Administrator is not sufficient.
       2. Sign-in group assignment: assigns the Neologik NCE user group to
          the 'Neologik Platform Sign-in' enterprise application. From v5,
          NCE authorises purely from the sign-in token's groups claim, and
@@ -112,25 +125,43 @@ param(
     [string]$SubscriptionId,
 
     [Parameter(Mandatory = $false)]
-    [string]$ResourceGroupName
+    [string]$ResourceGroupName,
+
+    [Parameter(Mandatory = $false)]
+    [string]$BlueprintKey = 'default'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# The eight Microsoft Graph application roles the deployment identity needs.
-# Canonical inventory (names, ids, where each is used):
-# neo-bot-service/docs/NEOLOGIK_PLATFORM_DEPLOYMENT_SP_PERMISSIONS.md.
+# The two Microsoft Graph application roles the deployment identity keeps
+# (least-privilege model, project#2144). Canonical inventory (names, ids,
+# where each is used): neo-bot-service/docs/NEOLOGIK_PLATFORM_DEPLOYMENT_SP_PERMISSIONS.md.
 # Matched by role value against the Graph service principal at runtime.
+# Must match Install-NeologikEnvironment.ps1.
 $script:RequiredGraphRoles = @(
-    'Application.Read.All',
     'Application.ReadWrite.OwnedBy',
+    'AgentIdentityBlueprint.AddRemoveCreds.All'
+)
+# The tenant-wide roles retired by project#2144 - removed from the deployment
+# identity AFTER the retained roles and the blueprint set-up are in place.
+$script:RetiredGraphRoles = @(
+    'Application.Read.All',
     'AgentIdentityBlueprint.Create',
-    'AgentIdentityBlueprint.AddRemoveCreds.All',
     'AgentIdentityBlueprint.UpdateAuthProperties.All',
     'AgentIdentityBlueprintPrincipal.Create',
     'AgentIdentity.Create.All',
     'AgentIdUser.ReadWrite.All'
+)
+# The blueprint PRINCIPAL's own role: agent users parented by that blueprint only.
+$script:BlueprintPrincipalGraphRoles = @('AgentIdUser.ReadWrite.IdentityParentedBy')
+# Deployment pipeline repositories allowed to obtain a token as the blueprint
+# (GitHub OIDC, bound to the immutable repository id). Must match
+# Install-NeologikEnvironment.ps1.
+$script:PipelineRepositories = @(
+    @{ Name = 'neo-infrastructure'; Id = '995398788' },
+    @{ Name = 'neo-bot-service';    Id = '995400343' },
+    @{ Name = 'neo-env-config';     Id = '995441655' }
 )
 
 # The narrow resource-group role set that replaces the legacy broad grants
@@ -243,7 +274,8 @@ foreach ($module in @('Microsoft.Graph.Applications', 'Microsoft.Graph.Groups', 
     }
 }
 
-$graphScopes = @('Application.Read.All', 'AppRoleAssignment.ReadWrite.All', 'DelegatedPermissionGrant.Read.All')
+$graphScopes = @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All', 'DelegatedPermissionGrant.Read.All',
+    'AgentIdentityBlueprint.Create', 'AgentIdentityBlueprint.AddRemoveCreds.All', 'AgentIdentityBlueprintPrincipal.Create')
 if ($Phase -eq 'PostWindow') {
     $graphScopes += 'RoleManagement.ReadWrite.Directory'
 }
@@ -258,35 +290,170 @@ Write-Log "Deployment identity: '$($deploySp.DisplayName)'" -Level Info
 
 if ($Phase -eq 'Window') {
 
-    # ----- 1. deployment identity Graph roles ---------------------------------
-    Write-Log 'Step 1/3: deployment identity Graph roles' -Level Info
     $graphSp = Get-MgServicePrincipal -Filter "appId eq '$script:GraphSpAppId'"
-    $existing = Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $deploySp.Id -All |
-        Where-Object { $_.ResourceId -eq $graphSp.Id }
-    $granted = 0
-    foreach ($roleName in $script:RequiredGraphRoles) {
-        $role = $graphSp.AppRoles | Where-Object { $_.Value -eq $roleName }
-        if (-not $role) {
-            Write-Log "  role '$roleName' not published by Microsoft Graph in this cloud - report this to Neologik" -Level Warning
-            Add-Summary "Graph role: $roleName" 'NOT FOUND - report'
+    $graph = 'https://graph.microsoft.com/v1.0'
+    $graphBeta = 'https://graph.microsoft.com/beta'
+    $odataHeaders = @{ 'OData-Version' = '4.0' }
+
+    # Ensures a set of Graph app roles on one principal; returns the number newly granted.
+    function Set-GraphAppRoles {
+        param([string]$PrincipalId, [string]$Label, [string[]]$RoleNames)
+        $existing = Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $PrincipalId -All |
+            Where-Object { $_.ResourceId -eq $graphSp.Id }
+        $count = 0
+        foreach ($roleName in $RoleNames) {
+            $role = $graphSp.AppRoles | Where-Object { $_.Value -eq $roleName }
+            if (-not $role) {
+                Write-Log "  role '$roleName' not published by Microsoft Graph in this cloud - report this to Neologik" -Level Warning
+                Add-Summary "$Label role: $roleName" 'NOT FOUND - report'
+                continue
+            }
+            if ($existing | Where-Object { $_.AppRoleId -eq $role.Id }) {
+                Write-Log "  $roleName - already granted" -Level Success
+                Add-Summary "$Label role: $roleName" 'Already granted'
+            }
+            else {
+                New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $PrincipalId `
+                    -PrincipalId $PrincipalId -ResourceId $graphSp.Id -AppRoleId $role.Id | Out-Null
+                Write-Log "  $roleName - GRANTED" -Level Success
+                Add-Summary "$Label role: $roleName" 'Granted'
+                $count++
+            }
+        }
+        return $count
+    }
+
+    # ----- 1a. agent identity blueprint (owned by the deployment identity) ----
+    Write-Log 'Step 1a/4: agent identity blueprint' -Level Info
+    $shortName = if ($ConfigurationFile) { [string]$config.SolutionShortName } else { '' }
+    if (-not $shortName) {
+        # Derive from the deployment identity's name ('Neologik GitHub Service Connection - <short>').
+        $shortName = ($deploySp.DisplayName -split ' - ')[-1].Trim()
+    }
+    $blueprintName = "Neologik Agent Blueprint - $BlueprintKey - $shortName"
+    $escaped = $blueprintName -replace "'", "''"
+    $found = Invoke-MgGraphRequest -Method GET -Uri "$graph/applications?`$filter=displayName eq '$escaped'&`$select=id,appId"
+    $blueprint = @($found.value) | Select-Object -First 1
+    if ($blueprint) {
+        Write-Log "  blueprint '$blueprintName' - present (Client ID $($blueprint.appId))" -Level Success
+        Add-Summary 'Agent blueprint' 'Present'
+    }
+    else {
+        $sponsor = (Invoke-MgGraphRequest -Method GET -Uri "$graph/me?`$select=id").id
+        $body = @{
+            '@odata.type'         = 'Microsoft.Graph.AgentIdentityBlueprint'
+            displayName           = $blueprintName
+            'sponsors@odata.bind' = @("$graph/users/$sponsor")
+            'owners@odata.bind'   = @("$graph/directoryObjects/$($deploySp.Id)")
+        } | ConvertTo-Json -Depth 5 -Compress
+        $blueprint = Invoke-MgGraphRequest -Method POST -Uri "$graph/applications/microsoft.graph.agentIdentityBlueprint" `
+            -Headers $odataHeaders -Body $body -ContentType 'application/json'
+        Write-Log "  blueprint '$blueprintName' - CREATED (Client ID $($blueprint.appId); sponsor = you)" -Level Success
+        Add-Summary 'Agent blueprint' 'Created'
+    }
+    $blueprintObjectId = [string]$blueprint.id
+    $blueprintAppId = [string]$blueprint.appId
+
+    $owners = Invoke-MgGraphRequest -Method GET -Uri "$graph/applications/$blueprintObjectId/owners?`$select=id"
+    if (@($owners.value | ForEach-Object { $_.id }) -contains $deploySp.Id) {
+        Write-Log '  deployment identity owns the blueprint - already' -Level Success
+        Add-Summary 'Blueprint owner' 'Already in place'
+    }
+    else {
+        $ref = @{ '@odata.id' = "$graph/directoryObjects/$($deploySp.Id)" } | ConvertTo-Json -Compress
+        Invoke-MgGraphRequest -Method POST -Uri "$graph/applications/$blueprintObjectId/owners/`$ref" -Body $ref -ContentType 'application/json' | Out-Null
+        Write-Log '  deployment identity owns the blueprint - ADDED' -Level Success
+        Add-Summary 'Blueprint owner' 'Added'
+    }
+
+    $principal = @((Invoke-MgGraphRequest -Method GET -Uri "$graph/servicePrincipals?`$filter=appId eq '$blueprintAppId'&`$select=id").value) | Select-Object -First 1
+    if ($principal) {
+        Write-Log '  blueprint principal - present' -Level Success
+        Add-Summary 'Blueprint principal' 'Present'
+    }
+    else {
+        $body = @{ appId = $blueprintAppId } | ConvertTo-Json -Compress
+        for ($attempt = 1; $attempt -le 10; $attempt++) {
+            try {
+                $principal = Invoke-MgGraphRequest -Method POST -Uri "$graph/servicePrincipals/microsoft.graph.agentIdentityBlueprintPrincipal" `
+                    -Headers $odataHeaders -Body $body -ContentType 'application/json'
+                break
+            }
+            catch {
+                if ($attempt -lt 10 -and ($_.Exception.Message -match 'local tenant|does not exist')) {
+                    Write-Log "  blueprint not yet replicated - retrying in 15 seconds ($attempt of 10)" -Level Warning
+                    Start-Sleep -Seconds 15
+                    continue
+                }
+                throw
+            }
+        }
+        Write-Log '  blueprint principal - CREATED' -Level Success
+        Add-Summary 'Blueprint principal' 'Created'
+    }
+    $principalId = [string]$principal.id
+
+    $spOwners = Invoke-MgGraphRequest -Method GET -Uri "$graph/servicePrincipals/$principalId/owners?`$select=id"
+    if (-not (@($spOwners.value | ForEach-Object { $_.id }) -contains $deploySp.Id)) {
+        $ref = @{ '@odata.id' = "$graph/directoryObjects/$($deploySp.Id)" } | ConvertTo-Json -Compress
+        Invoke-MgGraphRequest -Method POST -Uri "$graph/servicePrincipals/$principalId/owners/`$ref" -Body $ref -ContentType 'application/json' | Out-Null
+        Write-Log '  deployment identity owns the blueprint principal - ADDED' -Level Success
+        Add-Summary 'Blueprint principal owner' 'Added'
+    }
+    else {
+        Write-Log '  deployment identity owns the blueprint principal - already' -Level Success
+        Add-Summary 'Blueprint principal owner' 'Already in place'
+    }
+
+    Write-Log 'Step 1b/4: blueprint principal Graph role' -Level Info
+    $null = Set-GraphAppRoles -PrincipalId $principalId -Label 'Blueprint principal' -RoleNames $script:BlueprintPrincipalGraphRoles
+
+    Write-Log 'Step 1c/4: GitHub OIDC federated credentials on the blueprint' -Level Info
+    $existingCreds = Invoke-MgGraphRequest -Method GET -Uri "$graphBeta/applications/$blueprintObjectId/federatedIdentityCredentials?`$select=name"
+    $existingNames = @($existingCreds.value | ForEach-Object { $_.name })
+    foreach ($repo in $script:PipelineRepositories) {
+        $credName = "github-oidc-$($repo.Name)"
+        if ($existingNames -contains $credName) {
+            Write-Log "  $credName - present" -Level Success
+            Add-Summary "Blueprint credential: $credName" 'Present'
             continue
         }
-        if ($existing | Where-Object { $_.AppRoleId -eq $role.Id }) {
-            Write-Log "  $roleName - already granted" -Level Success
-            Add-Summary "Graph role: $roleName" 'Already granted'
+        $expression = "claims['sub'] matches 'repo:Neologik-AI/$($repo.Name):*' and claims['repository_id'] eq '$($repo.Id)'"
+        $body = @{
+            name                     = $credName
+            issuer                   = 'https://token.actions.githubusercontent.com'
+            audiences                = @('api://AzureADTokenExchange')
+            description              = "Neologik deployment pipeline ($($repo.Name)) acts as this blueprint to mint agent identities and users"
+            claimsMatchingExpression = @{ value = $expression; languageVersion = 1 }
+        } | ConvertTo-Json -Depth 5 -Compress
+        Invoke-MgGraphRequest -Method POST -Uri "$graphBeta/applications/$blueprintObjectId/federatedIdentityCredentials" `
+            -Body $body -ContentType 'application/json' | Out-Null
+        Write-Log "  $credName - ADDED" -Level Success
+        Add-Summary "Blueprint credential: $credName" 'Added'
+    }
+
+    # ----- 1d. deployment identity Graph roles: retained first, then retired --
+    Write-Log 'Step 1d/4: deployment identity Graph roles (retained, then retired)' -Level Info
+    $granted = Set-GraphAppRoles -PrincipalId $deploySp.Id -Label 'Graph' -RoleNames $script:RequiredGraphRoles
+    $assignments = Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $deploySp.Id -All |
+        Where-Object { $_.ResourceId -eq $graphSp.Id }
+    foreach ($roleName in $script:RetiredGraphRoles) {
+        $role = $graphSp.AppRoles | Where-Object { $_.Value -eq $roleName }
+        $assignment = if ($role) { $assignments | Where-Object { $_.AppRoleId -eq $role.Id } | Select-Object -First 1 } else { $null }
+        if ($assignment) {
+            Remove-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $deploySp.Id -AppRoleAssignmentId $assignment.Id
+            Write-Log "  $roleName - REMOVED (retired, tenant-wide)" -Level Success
+            Add-Summary "Retired Graph role: $roleName" 'Removed'
         }
         else {
-            New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $deploySp.Id `
-                -PrincipalId $deploySp.Id -ResourceId $graphSp.Id -AppRoleId $role.Id | Out-Null
-            Write-Log "  $roleName - GRANTED" -Level Success
-            Add-Summary "Graph role: $roleName" 'Granted'
-            $granted++
+            Write-Log "  $roleName - not held (nothing to remove)" -Level Success
+            Add-Summary "Retired Graph role: $roleName" 'Not held'
         }
     }
     Write-Log "Graph roles complete ($granted newly granted)" -Level Info
 
     # ----- 2. sign-in group assignment ----------------------------------------
-    Write-Log 'Step 2/3: NCE user group assignment to the sign-in application' -Level Info
+    Write-Log 'Step 2/4: NCE user group assignment to the sign-in application' -Level Info
     if (-not $SignInAppClientId -or -not $NceUserGroupId) {
         Write-Log '  sign-in app id or NCE user group id not available - SKIPPED. On pre-v5-onboarded environments supply both (the migration email lists them).' -Level Warning
         Add-Summary 'NCE group assignment' 'SKIPPED - ids not supplied'
@@ -320,7 +487,7 @@ if ($Phase -eq 'Window') {
         }
 
         # ----- 3. admin consent check -----------------------------------------
-        Write-Log 'Step 3/3: admin consent for the sign-in application' -Level Info
+        Write-Log 'Step 3/4: admin consent for the sign-in application' -Level Info
         $grants = Get-MgServicePrincipalOauth2PermissionGrant -ServicePrincipalId $signInSp.Id -All |
             Where-Object { $_.ConsentType -eq 'AllPrincipals' }
         if ($grants) {

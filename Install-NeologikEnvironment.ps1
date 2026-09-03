@@ -998,7 +998,7 @@ function Connect-AzureEnvironment {
                 Write-Log "Azure token insufficient for Graph (consent may be required) — falling back to interactive login: $_" -Level Warning
                 Write-Host "`nℹ️  A browser window will open for Microsoft Graph login.`n" -ForegroundColor Cyan
                 Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
-                    -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory", "AppRoleAssignment.ReadWrite.All" `
+                    -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory", "AppRoleAssignment.ReadWrite.All", "AgentIdentityBlueprint.Create", "AgentIdentityBlueprint.AddRemoveCreds.All", "AgentIdentityBlueprintPrincipal.Create" `
                     -ErrorAction Stop
                 Write-Log "Connected to Microsoft Graph via interactive login" -Level Success
             }
@@ -2216,20 +2216,14 @@ function Grant-GraphAppRolePermissions {
     # Microsoft Graph well-known IDs (appId of Microsoft Graph + application-permission app role IDs)
     $graphAppId = '00000003-0000-0000-c000-000000000000'
     $knownGraphAppRoleIds = @{
-        'Application.Read.All'          = '9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30'
-        'Application.ReadWrite.OwnedBy' = '18a4783c-866b-4cc7-a460-3d5e5662c884'
-        # Microsoft Entra Agent ID (GA) — let the deployment SP provision agent identity
-        # blueprints (+ principal + FIC) for autonomous agents, scoped to agent-id only
-        # rather than the broad 'Agent ID Administrator' directory role.
-        'AgentIdentityBlueprint.Create'                  = 'ea4b2453-ad2d-4d94-9155-10d5d9493ce9'
-        'AgentIdentityBlueprint.AddRemoveCreds.All'      = '0510736e-bdfb-4b37-9a1f-89b4a074763a'
-        'AgentIdentityBlueprint.UpdateAuthProperties.All' = '19202363-278e-49c2-bf00-391e2ba00881'
-        'AgentIdentityBlueprintPrincipal.Create'         = '8959696d-d07e-4916-9b1e-3ba9ce459161'
-        # Create the agent IDENTITY itself. Blueprint ownership does NOT cover this (neoprd
-        # deploy-bots runs 59-61 failed 403 without it, 2026-07-02).
-        'AgentIdentity.Create.All'                       = 'ad25cc1d-84d8-47df-a08e-b34c2e800819'
-        # Create the agent USER (directory user) hung off an agent identity.
-        'AgentIdUser.ReadWrite.All'                      = 'b782c9ad-6f2b-4894-a21b-72bf22417f0a'
+        # Deployment SP (least-privilege model, project#2144): manage owned app registrations
+        # and add the per-agent Kubernetes credentials to the agent identity blueprint.
+        'Application.ReadWrite.OwnedBy'             = '18a4783c-866b-4cc7-a460-3d5e5662c884'
+        'AgentIdentityBlueprint.AddRemoveCreds.All' = '0510736e-bdfb-4b37-9a1f-89b4a074763a'
+        # Blueprint PRINCIPAL: create/manage agent users parented by that blueprint only. Agent
+        # identity creation needs no grant - AgentIdentity.CreateAsManager is inherent to every
+        # blueprint principal.
+        'AgentIdUser.ReadWrite.IdentityParentedBy'  = '4aa6e624-eee0-40ab-bdd8-f9639038a614'
     }
 
     Write-Log "Granting Microsoft Graph app permissions ($($AppRoles -join ', ')) to $PrincipalDescription..." -Level Info
@@ -2521,24 +2515,28 @@ function Set-AppRegistrationRoles {
             }
         }
 
-        # Grant lower-scoped Microsoft Graph application permissions to the service principal.
-        # Replaces the tenant-wide 'Application Administrator' Entra directory role with
-        # Application.Read.All + Application.ReadWrite.OwnedBy (manage owned apps only).
-        # Also grants the granular Microsoft Entra Agent ID permissions so the deployment SP
-        # can provision agent identity blueprints (+ principal + FIC) for autonomous agents,
-        # without the broad 'Agent ID Administrator' directory role (keeps the reduced model).
+        # Grant the least-privilege Microsoft Graph application permission set to the
+        # deployment service principal (project#2144):
+        #   - Application.ReadWrite.OwnedBy: create app registrations and manage ONLY the
+        #     ones it owns (bot/channel/sign-in apps). Replaces the tenant-wide 'Application
+        #     Administrator' directory role. Reads of applications and service principals
+        #     come with it, so Application.Read.All is not granted.
+        #   - AgentIdentityBlueprint.AddRemoveCreds.All: add the per-agent Kubernetes
+        #     federated identity credentials to the environment's agent identity blueprint.
+        #     The one residual tenant-wide Agent ID permission: Microsoft publishes no
+        #     ownership-scoped variant and blueprint ownership is not honoured for app-only
+        #     credential writes.
+        # Everything else agent-identity-shaped is done ONCE here under the Global
+        # Administrator (New-NeologikAgentBlueprint) or by the blueprint itself at deploy
+        # time, so the deployment SP holds no AgentIdentityBlueprint.Create /
+        # UpdateAuthProperties.All, AgentIdentityBlueprintPrincipal.Create,
+        # AgentIdentity.Create.All or AgentIdUser.ReadWrite.All.
         # No Group.Create: the platform never creates Entra groups - channels reuse the
         # onboarding group or an admin-supplied existing group id (project#1519).
         Grant-GraphAppRolePermissions -PrincipalId $ServicePrincipalId -PrincipalDescription 'App Registration service principal' `
             -AppRoles @(
-                'Application.Read.All',
                 'Application.ReadWrite.OwnedBy',
-                'AgentIdentityBlueprint.Create',
-                'AgentIdentityBlueprint.AddRemoveCreds.All',
-                'AgentIdentityBlueprint.UpdateAuthProperties.All',
-                'AgentIdentityBlueprintPrincipal.Create',
-                'AgentIdentity.Create.All',
-                'AgentIdUser.ReadWrite.All'
+                'AgentIdentityBlueprint.AddRemoveCreds.All'
             )
 
         # Update ConfigData with group membership
@@ -2554,6 +2552,184 @@ function Set-AppRegistrationRoles {
             throw  # Re-throw without adding more text
         }
         Write-Log "Failed to assign roles to App Registration: $_" -Level Error
+        throw
+    }
+}
+
+function New-NeologikAgentBlueprint {
+    <#
+    .SYNOPSIS
+        Creates the environment's Microsoft Entra Agent ID agent identity blueprint (and its
+        principal), owned by the deployment service principal, and gives the pipeline what it
+        needs to act AS the blueprint.
+
+    .DESCRIPTION
+        Least-privilege Graph model (project#2144). Creating a blueprint, its principal and
+        its credentials needs tenant-wide Graph application permissions, so those one-off
+        operations run HERE under the Global Administrator instead of being granted to the
+        deployment service principal. The deployment pipeline then:
+          - adds the per-agent Kubernetes federated identity credentials as the deployment SP
+            (AgentIdentityBlueprint.AddRemoveCreds.All - the one residual Agent ID role), and
+          - mints agent identities and agent users AS THE BLUEPRINT, exchanging its GitHub
+            OIDC token through the flexible federated identity credentials created below
+            (neo-env-config scripts/get-blueprint-token.sh). Agent identity creation is
+            inherent to every blueprint principal (AgentIdentity.CreateAsManager); agent
+            user creation uses AgentIdUser.ReadWrite.IdentityParentedBy, granted here to the
+            blueprint principal and scoped to that blueprint's children only.
+        Idempotent: get-or-create by display name; ownership, the principal, the Graph role
+        and each credential are added only when missing. The blueprint's display name is the
+        pipeline's lookup key and MUST match neo-infrastructure exactly:
+        'Neologik Agent Blueprint - <key> - <solutionShortName>'.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DeploySpObjectId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SponsorUserId,
+
+        [Parameter(Mandatory = $false)]
+        [string]$BlueprintKey = 'default'
+    )
+
+    $shortName = [string]$script:ConfigData['SolutionShortName']
+    $displayName = "Neologik Agent Blueprint - $BlueprintKey - $shortName"
+    $graph = 'https://graph.microsoft.com/v1.0'
+    $graphBeta = 'https://graph.microsoft.com/beta'
+    $odataHeaders = @{ 'OData-Version' = '4.0' }
+    # The deployment pipeline repositories allowed to obtain a token as the blueprint. Each
+    # credential is bound to the immutable repository id, so a renamed or forked repository
+    # gains nothing. Subject shape: repo:<org>/<repo>:environment:<env> (workflow_dispatch
+    # jobs bound to a GitHub environment) or repo:<org>/<repo>:ref:refs/heads/<branch>.
+    $pipelineRepositories = @(
+        @{ Name = 'neo-infrastructure'; Id = '995398788' },
+        @{ Name = 'neo-bot-service';    Id = '995400343' },
+        @{ Name = 'neo-env-config';     Id = '995441655' }
+    )
+
+    Write-Log "Ensuring the agent identity blueprint '$displayName'..." -Level Info
+
+    try {
+        # 1. Blueprint application (get-or-create by display name). Bodies go as JSON strings:
+        #    Invoke-MgGraphRequest's hashtable serialisation recurses into string indexers.
+        $escaped = $displayName -replace "'", "''"
+        $found = Invoke-MgGraphRequest -Method GET -Uri "$graph/applications?`$filter=displayName eq '$escaped'&`$select=id,appId" -ErrorAction Stop
+        $blueprint = @($found.value) | Select-Object -First 1
+        if ($blueprint) {
+            Write-Log "Blueprint already exists (Client ID: $($blueprint.appId))" -Level Info
+        }
+        else {
+            $body = @{
+                '@odata.type'        = 'Microsoft.Graph.AgentIdentityBlueprint'
+                displayName          = $displayName
+                'sponsors@odata.bind' = @("$graph/users/$SponsorUserId")
+                'owners@odata.bind'   = @("$graph/directoryObjects/$DeploySpObjectId")
+            } | ConvertTo-Json -Depth 5 -Compress
+            $blueprint = Invoke-MgGraphRequest -Method POST -Uri "$graph/applications/microsoft.graph.agentIdentityBlueprint" `
+                -Headers $odataHeaders -Body $body -ContentType 'application/json' -ErrorAction Stop
+            Write-Log "Blueprint created (Client ID: $($blueprint.appId))" -Level Success
+        }
+        $blueprintObjectId = [string]$blueprint.id
+        $blueprintAppId = [string]$blueprint.appId
+
+        # 2. Deployment SP as owner of the blueprint application (adoption of pipeline-created
+        #    blueprints; the creator above is already an owner).
+        $owners = Invoke-MgGraphRequest -Method GET -Uri "$graph/applications/$blueprintObjectId/owners?`$select=id" -ErrorAction Stop
+        if (@($owners.value | ForEach-Object { $_.id }) -contains $DeploySpObjectId) {
+            Write-Log "Deployment SP is already an owner of the blueprint" -Level Info
+        }
+        else {
+            $ref = @{ '@odata.id' = "$graph/directoryObjects/$DeploySpObjectId" } | ConvertTo-Json -Compress
+            Invoke-MgGraphRequest -Method POST -Uri "$graph/applications/$blueprintObjectId/owners/`$ref" -Body $ref -ContentType 'application/json' -ErrorAction Stop | Out-Null
+            Write-Log "Deployment SP added as owner of the blueprint" -Level Success
+        }
+
+        # 3. Blueprint principal (get-or-create by appId; a create fired within seconds of the
+        #    application's creation is rejected until it replicates - retry that only).
+        $principal = $null
+        $sp = Invoke-MgGraphRequest -Method GET -Uri "$graph/servicePrincipals?`$filter=appId eq '$blueprintAppId'&`$select=id" -ErrorAction Stop
+        $principal = @($sp.value) | Select-Object -First 1
+        if ($principal) {
+            Write-Log "Blueprint principal already exists" -Level Info
+        }
+        else {
+            $body = @{ appId = $blueprintAppId } | ConvertTo-Json -Compress
+            for ($attempt = 1; $attempt -le 10; $attempt++) {
+                try {
+                    $principal = Invoke-MgGraphRequest -Method POST -Uri "$graph/servicePrincipals/microsoft.graph.agentIdentityBlueprintPrincipal" `
+                        -Headers $odataHeaders -Body $body -ContentType 'application/json' -ErrorAction Stop
+                    Write-Log "Blueprint principal created" -Level Success
+                    break
+                }
+                catch {
+                    if ($attempt -lt 10 -and ($_.Exception.Message -match 'local tenant|does not exist')) {
+                        Write-Log "Blueprint not yet replicated - retrying in 15 seconds ($attempt of 10)" -Level Warning
+                        Start-Sleep -Seconds 15
+                        continue
+                    }
+                    throw
+                }
+            }
+        }
+        $principalId = [string]$principal.id
+
+        # 4. Deployment SP as owner of the principal too (application ownership does not extend
+        #    to the service principal object).
+        $spOwners = Invoke-MgGraphRequest -Method GET -Uri "$graph/servicePrincipals/$principalId/owners?`$select=id" -ErrorAction Stop
+        if (@($spOwners.value | ForEach-Object { $_.id }) -contains $DeploySpObjectId) {
+            Write-Log "Deployment SP is already an owner of the blueprint principal" -Level Info
+        }
+        else {
+            $ref = @{ '@odata.id' = "$graph/directoryObjects/$DeploySpObjectId" } | ConvertTo-Json -Compress
+            Invoke-MgGraphRequest -Method POST -Uri "$graph/servicePrincipals/$principalId/owners/`$ref" -Body $ref -ContentType 'application/json' -ErrorAction Stop | Out-Null
+            Write-Log "Deployment SP added as owner of the blueprint principal" -Level Success
+        }
+
+        # 5. The blueprint principal's own Graph role: agent users under this blueprint only.
+        Grant-GraphAppRolePermissions -PrincipalId $principalId -PrincipalDescription 'agent identity blueprint principal' `
+            -AppRoles @('AgentIdUser.ReadWrite.IdentityParentedBy')
+
+        # 6. GitHub OIDC flexible federated identity credentials - one per pipeline repository,
+        #    get-or-create by name. Flexible credentials are a beta Graph feature (claims
+        #    expression instead of a fixed subject); the token exchange they enable is what
+        #    lets the pipeline act as the blueprint without any stored secret.
+        $existingCreds = Invoke-MgGraphRequest -Method GET -Uri "$graphBeta/applications/$blueprintObjectId/federatedIdentityCredentials?`$select=name" -ErrorAction Stop
+        $existingNames = @($existingCreds.value | ForEach-Object { $_.name })
+        $credentialNames = @()
+        foreach ($repo in $pipelineRepositories) {
+            $credName = "github-oidc-$($repo.Name)"
+            $credentialNames += $credName
+            if ($existingNames -contains $credName) {
+                Write-Log "Federated credential '$credName' already present" -Level Info
+                continue
+            }
+            $expression = "claims['sub'] matches 'repo:Neologik-AI/$($repo.Name):*' and claims['repository_id'] eq '$($repo.Id)'"
+            $body = @{
+                name                     = $credName
+                issuer                   = 'https://token.actions.githubusercontent.com'
+                audiences                = @('api://AzureADTokenExchange')
+                description              = "Neologik deployment pipeline ($($repo.Name)) acts as this blueprint to mint agent identities and users"
+                claimsMatchingExpression = @{ value = $expression; languageVersion = 1 }
+            } | ConvertTo-Json -Depth 5 -Compress
+            Invoke-MgGraphRequest -Method POST -Uri "$graphBeta/applications/$blueprintObjectId/federatedIdentityCredentials" `
+                -Body $body -ContentType 'application/json' -ErrorAction Stop | Out-Null
+            Write-Log "Federated credential '$credName' added" -Level Success
+        }
+
+        $script:ConfigData['AgentBlueprint'] = @{
+            Key = $BlueprintKey
+            DisplayName = $displayName
+            ClientId = $blueprintAppId
+            ObjectId = $blueprintObjectId
+            PrincipalId = $principalId
+            SponsorUserId = $SponsorUserId
+            GitHubCredentials = $credentialNames
+        }
+        return $script:ConfigData['AgentBlueprint']
+    }
+    catch {
+        Write-Log "Failed to ensure the agent identity blueprint: $_" -Level Error
         throw
     }
 }
@@ -3714,6 +3890,7 @@ function Export-ConfigurationData {
             'SecurityGroups' = $script:ConfigData['SecurityGroups']
             'AppRegistration' = $script:ConfigData['AppRegistration']
             'NceAuthApp' = $script:ConfigData['NceAuthApp']
+            'AgentBlueprint' = $script:ConfigData['AgentBlueprint']
             'KeyVault' = $script:ConfigData['KeyVault']
             'StorageAccount' = $script:ConfigData['StorageAccount']
             'ManagedIdentities' = $script:ConfigData['ManagedIdentities']
@@ -5622,6 +5799,15 @@ function Start-NeologikOnboarding {
         $null = New-NeologikNceAuthApp -SecurityGroups $securityGroups `
             -DeploySpObjectId $appReg.ServicePrincipal.Id `
             -KeyVaultName $keyVaultName
+
+        # Step 12c: Entra Agent ID blueprint (project#2144). Created here - in the
+        # Global Admin session - so the deployment service principal never needs
+        # the tenant-wide blueprint-creation roles. The signed-in operator is the
+        # blueprint's sponsor (the accountable business owner; changeable later
+        # in the Entra admin centre); the deployment SP owns it and the pipeline
+        # acts as the blueprint through the GitHub credentials added here.
+        $null = New-NeologikAgentBlueprint -DeploySpObjectId $appReg.ServicePrincipal.Id `
+            -SponsorUserId $script:ConfigData['CurrentUserId']
 
         # Step 13: Register required Azure resource providers (full set unless the operator
         # opted out, in which case only the minimal set is registered here and the rest must be
