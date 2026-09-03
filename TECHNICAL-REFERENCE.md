@@ -36,7 +36,7 @@ This repository contains a robust PowerShell script that automates the complete 
 - **Skippable guest invitations**: `-SkipGuestInvitation` (or the answer file) skips inviting Neologik staff, for clients who provision accounts in their own tenant. Declining invitations offers a follow-up: add existing pre-created accounts to the security groups (from the guest file or typed addresses) with no invitation sent; non-existent addresses are reported and skipped without stopping the run.
 - **Platform Sign-in app**: the script creates the 'Neologik Platform Sign-in' app registration and assigns the NCE role groups to it, so NCE login works without a separate manual step.
 - **Non-interactive (CI) mode**: `-NonInteractive` runs the script unattended from a fully-populated answer file.
-- **Entra Agent ID permissions**: the deployment service principal is granted the granular Microsoft Entra Agent ID Graph roles needed to provision agent identities, instead of any broad directory role.
+- **Least-privilege Graph model**: the deployment service principal receives two Microsoft Graph application roles (`Application.ReadWrite.OwnedBy`, `AgentIdentityBlueprint.AddRemoveCreds.All`) and no directory role. The script itself creates the environment's Entra Agent ID agent identity blueprint and principal (owned by the deployment SP), grants the principal `AgentIdUser.ReadWrite.IdentityParentedBy` and adds the GitHub OIDC federated credentials through which the deployment pipeline acts as the blueprint to mint agent identities - so no tenant-wide agent-identity role is ever granted to the deployment SP.
 
 ## Prerequisites
 
@@ -306,7 +306,7 @@ Creates (or, with a client-provided service principal, reuses):
   - Reader (Subscription) - SKU/quota pre-flight reads only
   - Cost Management Contributor (Subscription) - cost-report configuration only
   - Contributor, Key Vault Certificates Officer, Key Vault Secrets Officer, Storage Blob Data Contributor, Azure Kubernetes Service RBAC Cluster Admin, Monitoring Contributor, Role Based Access Control Administrator (Resource Group)
-  - Microsoft Graph app roles: Application.Read.All, Application.ReadWrite.OwnedBy, plus the Entra Agent ID roles (AgentIdentityBlueprint.Create, AgentIdentityBlueprint.AddRemoveCreds.All, AgentIdentityBlueprint.UpdateAuthProperties.All, AgentIdentityBlueprintPrincipal.Create, AgentIdentity.Create.All, AgentIdUser.ReadWrite.All)
+  - Microsoft Graph app roles: Application.ReadWrite.OwnedBy (manage only the app registrations it owns; reads come with it) and AgentIdentityBlueprint.AddRemoveCreds.All (the per-agent Kubernetes credentials on the agent identity blueprint). The blueprint principal - not the SP - holds AgentIdUser.ReadWrite.IdentityParentedBy; see section 6a.
 - **Added to**: `Neologik Admin User Group - <short-name>`
 
 ### 6. Platform Sign-in App Registration
@@ -391,7 +391,7 @@ You do NOT need to manually copy or store the secrets.
 
 - All resource-write grants are resource-group-scoped. The deployment SP holds only read-only **Reader** and cost-configuration-only **Cost Management Contributor** at subscription scope.
 - `Role Based Access Control Administrator` (RG scope) replaces the legacy subscription-scoped User Access Administrator - it grants role-assignment writes only, with no deny-assignment powers.
-- Microsoft Graph permissions are scoped app roles (`Application.ReadWrite.OwnedBy` manages only apps the SP owns; the Agent ID roles are agent-identity-specific) - no tenant-wide directory roles such as Application Administrator are granted.
+- Microsoft Graph permissions are two scoped app roles (`Application.ReadWrite.OwnedBy` manages only apps the SP owns; `AgentIdentityBlueprint.AddRemoveCreds.All` adds credentials to the agent identity blueprint) - no tenant-wide directory roles such as Application Administrator are granted, and agent identities are minted by the blueprint itself rather than by the SP.
 
 ### Certificate Storage
 

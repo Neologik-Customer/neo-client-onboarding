@@ -148,14 +148,9 @@ The environment type joins the organisation code in every name (project#1576). E
 | **Azure Kubernetes Service RBAC Cluster Admin** | Resource Group | Service Principal |
 | **Monitoring Contributor** | Resource Group | Service Principal |
 | **Role Based Access Control Administrator** | Resource Group | Service Principal |
-| **Application.Read.All** | Microsoft Graph (app role) | Service Principal |
 | **Application.ReadWrite.OwnedBy** | Microsoft Graph (app role) | Service Principal |
-| **AgentIdentityBlueprint.Create** | Microsoft Graph (app role) | Service Principal |
 | **AgentIdentityBlueprint.AddRemoveCreds.All** | Microsoft Graph (app role) | Service Principal |
-| **AgentIdentityBlueprint.UpdateAuthProperties.All** | Microsoft Graph (app role) | Service Principal |
-| **AgentIdentityBlueprintPrincipal.Create** | Microsoft Graph (app role) | Service Principal |
-| **AgentIdentity.Create.All** | Microsoft Graph (app role) | Service Principal |
-| **AgentIdUser.ReadWrite.All** | Microsoft Graph (app role) | Service Principal |
+| **AgentIdUser.ReadWrite.IdentityParentedBy** | Microsoft Graph (app role) | Agent identity blueprint principal (not the Service Principal) |
 
 > The subscription-scoped roles are read-only (**Reader**, for SKU/quota pre-flight checks) and cost-configuration-only (**Cost Management Contributor**, for the scheduled cost-report emails) - all resource writes are resource-group-scoped. The six **AgentIdentity\*/AgentIdUser** roles let the deployment service principal provision **Microsoft Entra Agent ID** blueprints, principals, and agent users for autonomous agents - scoped to agent-id only, rather than granting the broad "Agent ID Administrator" directory role. No group-management permission is granted: the platform never creates Entra groups.
 
@@ -284,14 +279,9 @@ The script registers a minimal set of Azure resource providers on the subscripti
 ### Microsoft Graph (App Roles)
 | Principal | Role |
 |-----------|------|
-| Service Principal (GitHub) | Application.Read.All |
 | Service Principal (GitHub) | Application.ReadWrite.OwnedBy |
-| Service Principal (GitHub) | AgentIdentityBlueprint.Create |
 | Service Principal (GitHub) | AgentIdentityBlueprint.AddRemoveCreds.All |
-| Service Principal (GitHub) | AgentIdentityBlueprint.UpdateAuthProperties.All |
-| Service Principal (GitHub) | AgentIdentityBlueprintPrincipal.Create |
-| Service Principal (GitHub) | AgentIdentity.Create.All |
-| Service Principal (GitHub) | AgentIdUser.ReadWrite.All |
+| Agent identity blueprint principal | AgentIdUser.ReadWrite.IdentityParentedBy |
 
 ### Entra ID (Directory Roles)
 | Principal | Role |

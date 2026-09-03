@@ -9,6 +9,37 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Least-privilege Graph model for the deployment SP (project#2144)
+**Date**: 2026-09-03
+
+- The deployment service principal now receives two Microsoft Graph
+  application permissions instead of eight: `Application.ReadWrite.OwnedBy`
+  (manage only the app registrations it owns) and
+  `AgentIdentityBlueprint.AddRemoveCreds.All` (add the per-agent Kubernetes
+  credentials to the environment's agent identity blueprint). The six
+  tenant-wide roles it no longer holds: Application.Read.All,
+  AgentIdentityBlueprint.Create, AgentIdentityBlueprint.UpdateAuthProperties.All,
+  AgentIdentityBlueprintPrincipal.Create, AgentIdentity.Create.All,
+  AgentIdUser.ReadWrite.All.
+- New onboarding step (New-NeologikAgentBlueprint, after the Platform
+  Sign-in app): creates the environment's Entra Agent ID blueprint
+  `Neologik Agent Blueprint - default - <short-name>` and its principal under
+  the Global Administrator, sets the deployment SP as owner of both, grants
+  the principal `AgentIdUser.ReadWrite.IdentityParentedBy` (agent users under
+  that blueprint only), and adds three GitHub OIDC flexible federated
+  credentials (one per Neologik pipeline repository, bound to the repository
+  id) through which the deployment pipeline acts as the blueprint to mint
+  agent identities and users. Exported as `AgentBlueprint` in the
+  Configuration JSON.
+- `Update-NeologikEnvironmentAccess.ps1` phase Window retro-fits existing
+  environments: adopts the pipeline-created blueprint (ownership, principal,
+  principal role, GitHub credentials), ensures the two retained roles, then
+  removes the six retired roles from the deployment SP (narrow before broad).
+  `-BlueprintKey` targets a non-default blueprint archetype.
+- Graph delegated scopes requested by the scripts gain the Agent ID scopes
+  (AgentIdentityBlueprint.Create, AgentIdentityBlueprint.AddRemoveCreds.All,
+  AgentIdentityBlueprintPrincipal.Create).
+
 ## Unreleased - Email channel mailbox grants in the GA migration script (project#990)
 **Date**: 2026-09-03
 
