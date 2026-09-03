@@ -40,6 +40,25 @@ This document tracks the version history of the Neologik customer onboarding scr
   (AgentIdentityBlueprint.Create, AgentIdentityBlueprint.AddRemoveCreds.All,
   AgentIdentityBlueprintPrincipal.Create).
 
+## Unreleased - Email channel mailbox grants in the GA migration script (project#990)
+**Date**: 2026-09-03
+
+- Update-NeologikEnvironmentAccess.ps1 gains Window step 3b: with
+  -MailboxGrantsFile (JSON exported from the platform's email channel
+  registrations - IdentityAppId, IdentityObjectId, Mailbox, DisplayName) it
+  grants each agent's channel identity Application Mail.Read /
+  Mail.ReadWrite / Mail.Send in Exchange Online scoped to the one mailbox
+  (RBAC for Applications; nothing in Entra ID), reusing an existing
+  management scope that names the mailbox (Exchange refuses duplicate
+  recipient filters - the retired email monitor's scope is the usual
+  case) and verifying with Test-ServicePrincipalAuthorization.
+  -RemoveLegacyGrantAppIds removes a retired identity's assignments and
+  pointer (the monitor at its migration window, decision 6 on
+  https://github.com/Neologik-AI/project/issues/990). Both optional;
+  without them the script is unchanged. Exchange sign-in is device code,
+  like the Graph sign-in. A PENDING mailbox grant (propagation) is an
+  attention item (exit 1) until a re-run confirms InScope.
+
 ## Unreleased - Storage uploads verified and surfaced (project#1652 process item 4)
 **Date**: 2026-08-21
 

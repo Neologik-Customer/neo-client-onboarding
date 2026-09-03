@@ -44,6 +44,15 @@
          the sign-in application. If it is missing the script prints the
          consent URL for you to open and approve - consent itself stays
          interactive so you see exactly what you are approving.
+      3b. Shared-mailbox grants (only with -MailboxGrantsFile): for each
+         email channel registered in the Neologik Platform, grants the
+         agent's channel identity Application Mail.Read / Mail.ReadWrite /
+         Mail.Send in Exchange Online, scoped to that one mailbox (RBAC for
+         Applications - nothing is granted in Entra ID). With
+         -RemoveLegacyGrantAppIds it also removes the retired email
+         monitor identity's Exchange assignments. Needs the Exchange
+         Online PowerShell module and an Exchange Administrator or Global
+         Administrator sign-in.
 
     Phase 'PostWindow' - run ONLY after Neologik confirms the migration is
     verified (on an already-hardened environment the only change it makes
@@ -84,6 +93,17 @@
 .PARAMETER NceUserGroupId
     Object id of the Neologik NCE user group. Required only when no
     ConfigurationFile is given.
+
+.PARAMETER MailboxGrantsFile
+    Path to the JSON file Neologik exports from the platform's email
+    channel registrations: an array of objects with IdentityAppId,
+    IdentityObjectId, Mailbox and DisplayName. Optional; when given, step
+    3b applies the scoped Exchange Online grants.
+
+.PARAMETER RemoveLegacyGrantAppIds
+    Application ids of retired identities whose Exchange Online mailbox
+    assignments should be removed (the email monitor's identity at its
+    migration window). Optional; used with or without -MailboxGrantsFile.
 
 .PARAMETER SubscriptionId
     Azure subscription id. Required for -Phase PostWindow when no
@@ -128,7 +148,13 @@ param(
     [string]$ResourceGroupName,
 
     [Parameter(Mandatory = $false)]
-    [string]$BlueprintKey = 'default'
+    [string]$BlueprintKey = 'default',
+
+    [Parameter(Mandatory = $false)]
+    [string]$MailboxGrantsFile,
+
+    [Parameter(Mandatory = $false)]
+    [string[]]$RemoveLegacyGrantAppIds
 )
 
 Set-StrictMode -Version Latest
@@ -213,6 +239,90 @@ function Add-Summary {
     $script:Summary += [pscustomobject]@{ Item = $Item; Result = $Result }
 }
 
+
+# ----- shared-mailbox grants (email channels, project#990) ---------------------
+
+function Grant-NeologikMailboxAccess {
+    <#
+    Exchange Online RBAC for Applications, scoped to ONE mailbox: the channel
+    pod identity's Exchange service principal pointer, a management scope
+    whose recipient filter names the mailbox, and Application Mail.Read /
+    Mail.ReadWrite / Mail.Send assignments on that scope. Idempotent, and
+    Exchange refuses a second scope with the same recipient filter, so an
+    existing scope naming the mailbox (for example the retired email
+    monitor's) is reused whatever its name.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$IdentityAppId,
+        [Parameter(Mandatory)][string]$IdentityObjectId,
+        [Parameter(Mandatory)][string]$Mailbox,
+        [Parameter(Mandatory)][string]$DisplayName
+    )
+    $label = "Mailbox grant: $Mailbox -> $DisplayName"
+    $sp = Get-ServicePrincipal -Identity $IdentityAppId -ErrorAction SilentlyContinue
+    if (-not $sp) {
+        $sp = New-ServicePrincipal -AppId $IdentityAppId -ObjectId $IdentityObjectId -DisplayName $DisplayName
+        Write-Log "  service principal pointer created: $DisplayName" -Level Success
+    }
+    $scopeName = "Scope-$DisplayName"
+    $scope = Get-ManagementScope -Identity $scopeName -ErrorAction SilentlyContinue
+    if (-not $scope) {
+        $scope = Get-ManagementScope | Where-Object { $_.RecipientFilter -like "*$Mailbox*" } | Select-Object -First 1
+        if ($scope) { Write-Log "  reusing management scope '$($scope.Name)' (same recipient filter)" -Level Info }
+    }
+    if (-not $scope) {
+        $scope = New-ManagementScope -Name $scopeName -RecipientRestrictionFilter "PrimarySmtpAddress -eq '$Mailbox'" -ErrorAction Stop
+        Write-Log "  management scope created: $scopeName" -Level Success
+    }
+    $granted = 0
+    foreach ($role in @(
+            @{ Suffix = 'MailRead';      Role = 'Application Mail.Read' },
+            @{ Suffix = 'MailReadWrite'; Role = 'Application Mail.ReadWrite' },
+            @{ Suffix = 'MailSend';      Role = 'Application Mail.Send' })) {
+        $assignmentName = "Assignment-$DisplayName-$($role.Suffix)"
+        if (Get-ManagementRoleAssignment -Identity $assignmentName -ErrorAction SilentlyContinue) {
+            continue
+        }
+        New-ManagementRoleAssignment -Name $assignmentName -App $IdentityObjectId -Role $role.Role `
+            -CustomResourceScope $scope.Name -ErrorAction Stop | Out-Null
+        $granted++
+    }
+    $inScope = @(Test-ServicePrincipalAuthorization -Identity $IdentityObjectId -Resource $Mailbox |
+        Where-Object { $_.InScope })
+    if ($inScope.Count -ge 3) {
+        Write-Log "  $Mailbox -> $DisplayName - in scope for $($inScope.Count) role(s)" -Level Success
+        Add-Summary $label $(if ($granted -gt 0) { "Granted ($granted role(s) added)" } else { 'Already granted' })
+    }
+    else {
+        Write-Log "  $Mailbox -> $DisplayName - $granted role(s) added; Exchange reports $($inScope.Count) in scope (propagation can take up to two hours - re-run to confirm)" -Level Warning
+        Add-Summary $label 'PENDING - re-run to confirm InScope'
+    }
+}
+
+function Remove-NeologikMailboxAccess {
+    <#
+    Removes a retired identity's Exchange role assignments and service
+    principal pointer (the email monitor's identity, replaced by the
+    channel pod identity at the migration window). The management scope is
+    left in place: the replacement grant reuses it.
+    #>
+    param([Parameter(Mandatory)][string]$LegacyAppId)
+    $label = "Legacy mailbox grant: $LegacyAppId"
+    $sp = Get-ServicePrincipal -Identity $LegacyAppId -ErrorAction SilentlyContinue
+    if (-not $sp) {
+        Write-Log "  legacy identity $LegacyAppId - no Exchange service principal (nothing to remove)" -Level Success
+        Add-Summary $label 'Not present'
+        return
+    }
+    $assignments = @(Get-ManagementRoleAssignment -RoleAssignee $sp.Identity -ErrorAction SilentlyContinue)
+    foreach ($assignment in $assignments) {
+        Remove-ManagementRoleAssignment -Identity $assignment.Name -Confirm:$false -ErrorAction Stop
+    }
+    Remove-ServicePrincipal -Identity $sp.Identity -Confirm:$false -ErrorAction Stop
+    Write-Log "  legacy identity $LegacyAppId - $($assignments.Count) assignment(s) and the pointer REMOVED" -Level Success
+    Add-Summary $label "Removed ($($assignments.Count) assignment(s))"
+}
+
 # ----- input resolution -------------------------------------------------------
 
 if ($PSVersionTable.PSVersion -lt [version]'7.4') {
@@ -251,6 +361,29 @@ if ($Phase -eq 'PostWindow' -and (-not $SubscriptionId -or -not $ResourceGroupNa
     throw 'PostWindow needs SubscriptionId and ResourceGroupName - pass them explicitly or supply -ConfigurationFile.'
 }
 
+$script:MailboxGrants = @()
+if ($MailboxGrantsFile) {
+    if (-not (Test-Path $MailboxGrantsFile)) {
+        throw "Mailbox grants file not found: $MailboxGrantsFile"
+    }
+    $guidPattern = '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
+    foreach ($entry in @(Get-Content $MailboxGrantsFile -Raw | ConvertFrom-Json)) {
+        foreach ($field in @('IdentityAppId', 'IdentityObjectId', 'Mailbox', 'DisplayName')) {
+            if (-not $entry.PSObject.Properties[$field] -or -not $entry.$field) {
+                throw "Mailbox grants file: every entry needs $field."
+            }
+        }
+        if ($entry.IdentityAppId -notmatch $guidPattern -or $entry.IdentityObjectId -notmatch $guidPattern) {
+            throw "Mailbox grants file: IdentityAppId and IdentityObjectId must be GUIDs ($($entry.DisplayName))."
+        }
+        if ($entry.Mailbox -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+            throw "Mailbox grants file: '$($entry.Mailbox)' is not a mailbox address."
+        }
+        $script:MailboxGrants += $entry
+    }
+    Write-Log "Mailbox grants loaded: $($script:MailboxGrants.Count) email channel(s)" -Level Info
+}
+
 Write-Host ''
 Write-Host '=============================================================' -ForegroundColor Cyan
 Write-Host " Neologik environment access - phase: $Phase" -ForegroundColor Cyan
@@ -259,6 +392,8 @@ Write-Host "  Tenant:              $TenantId"
 Write-Host "  Deployment identity: $DeploySpClientId"
 if ($SignInAppClientId) { Write-Host "  Sign-in app:         $SignInAppClientId" }
 if ($NceUserGroupId) { Write-Host "  NCE user group:      $NceUserGroupId" }
+if ($script:MailboxGrants.Count -gt 0) { Write-Host "  Mailbox grants:      $($script:MailboxGrants.Count)" }
+if ($RemoveLegacyGrantAppIds) { Write-Host "  Legacy grants to remove: $($RemoveLegacyGrantAppIds -join ', ')" }
 if ($Phase -eq 'PostWindow') {
     Write-Host "  Subscription:        $SubscriptionId"
     Write-Host "  Resource group:      $ResourceGroupName"
@@ -504,6 +639,31 @@ if ($Phase -eq 'Window') {
             Add-Summary 'Admin consent' 'MISSING - consent URL printed'
         }
     }
+
+    # ----- 3b. shared-mailbox grants for email channels (project#990) ---------
+    if ($script:MailboxGrants.Count -gt 0 -or $RemoveLegacyGrantAppIds) {
+        Write-Log 'Step 3b: Exchange Online mailbox grants for email channels' -Level Info
+        if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
+            Write-Log 'Installing module ExchangeOnlineManagement (first run only)...' -Level Info
+            Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force -AllowClobber
+        }
+        Import-Module ExchangeOnlineManagement -ErrorAction Stop
+        Write-Log '  Signing in to Exchange Online (device code - the same Global Administrator account)...' -Level Info
+        Connect-ExchangeOnline -Device -ShowBanner:$false
+        if ((Get-OrganizationConfig).IsDehydrated) {
+            Write-Log '  Enabling organisation customisation (one-off; 60 s propagation)...' -Level Info
+            Enable-OrganizationCustomization
+            Start-Sleep -Seconds 60
+        }
+        foreach ($grant in $script:MailboxGrants) {
+            Grant-NeologikMailboxAccess -IdentityAppId $grant.IdentityAppId -IdentityObjectId $grant.IdentityObjectId `
+                -Mailbox $grant.Mailbox -DisplayName $grant.DisplayName
+        }
+        foreach ($legacyAppId in @($RemoveLegacyGrantAppIds | Where-Object { $_ })) {
+            Remove-NeologikMailboxAccess -LegacyAppId $legacyAppId
+        }
+        Disconnect-ExchangeOnline -Confirm:$false | Out-Null
+    }
 }
 else {
 
@@ -601,7 +761,7 @@ else {
 Write-Host ''
 Write-Host '============================ SUMMARY ============================' -ForegroundColor Cyan
 $script:Summary | Format-Table -AutoSize | Out-String | Write-Host
-$attention = @($script:Summary | Where-Object { $_.Result -match 'MISSING|SKIPPED|NOT FOUND' })
+$attention = @($script:Summary | Where-Object { $_.Result -match 'MISSING|SKIPPED|NOT FOUND|PENDING' })
 if ($attention.Count -gt 0) {
     Write-Log "$($attention.Count) item(s) need attention - see the summary above." -Level Warning
     exit 1
