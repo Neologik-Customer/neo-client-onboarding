@@ -188,7 +188,10 @@ $script:RetiredGraphRoles = @(
     'AgentIdentityBlueprint.UpdateAuthProperties.All',
     'AgentIdentityBlueprintPrincipal.Create',
     'AgentIdentity.Create.All',
-    'AgentIdUser.ReadWrite.All'
+    'AgentIdUser.ReadWrite.All',
+    # Granted by onboarding before project#1519 and never revoked on those
+    # environments; the platform never creates Entra groups.
+    'Group.Create'
 )
 # The blueprint PRINCIPAL's own role: agent users parented by that blueprint only.
 $script:BlueprintPrincipalGraphRoles = @('AgentIdUser.ReadWrite.IdentityParentedBy')
