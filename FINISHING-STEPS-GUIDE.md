@@ -304,6 +304,22 @@ Before considering the deployment complete, verify:
 
 ---
 
+## Later changes and migration windows
+
+After onboarding, the one script a Global Administrator ever runs again is
+`Update-NeologikEnvironmentAccess.ps1` (in this repository). Neologik asks
+for it at each migration window and whenever agents gain new permissions;
+it verifies before it writes, changes nothing on a compliant environment
+and is safe to re-run. Neologik supplies the files it reads: the onboarding
+configuration JSON, and - when agents or Apps need Microsoft 365 access as
+their own accounts - a grants file exported from the platform
+(`-AgentGrantsFile`). The script grants exactly what that file lists and
+nothing more, prints any consent URL you still need to open, and writes a
+JSON summary beside itself for Neologik's ticket. Full parameter help:
+`Get-Help ./Update-NeologikEnvironmentAccess.ps1 -Detailed`.
+
+---
+
 ## Need Help?
 
 If you encounter any issues during these steps, contact Neologik support:
