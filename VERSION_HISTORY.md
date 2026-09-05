@@ -9,6 +9,29 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - One Global Administrator script per migration: agent-user grants, component roles, SharePoint consent, JSON summary (project#2213)
+**Date**: 2026-09-05
+
+- `Update-NeologikEnvironmentAccess.ps1` gains `-AgentGrantsFile <json>` (the
+  file the platform exports from `GET /nce-api/v5/environment/agent-grants`):
+  step 3a creates or aligns the agent-user delegated grant of every agent
+  and App with ENABLED agent-lane permission packs, with exactly the
+  exported scope set (read back and compared as sets; rotated retry on a
+  refused scope string), grants the declared component Graph roles the
+  deployment identity could not (unscoped, tenant-scoped reads only; scoped
+  ones reported for the Exchange or SharePoint administrator), and checks
+  the SharePoint app's `Sites.Selected` consent only when the file says
+  SharePoint ingestion is part of the solution (consent URL printed when
+  missing). Least exposure: an agent or App with no packs is absent from the
+  file and gets no grant. The Window phase adds
+  `DelegatedPermissionGrant.ReadWrite.All` to the sign-in scopes only when a
+  grants file is given. The convergence of the deployment identity to exactly
+  `Application.ReadWrite.OwnedBy` + `AgentIdentityBlueprint.AddRemoveCreds.All`
+  is unchanged. Every run ends with a machine-readable summary
+  (`Neologik_EnvironmentAccess_<phase>_<stamp>.json` beside the script: the
+  deployment identity's Graph roles, every consent and grant state) for the
+  migration ticket (https://github.com/Neologik-AI/project/issues/2213).
+
 ## Unreleased - Least-privilege Graph model for the deployment SP (project#2144)
 **Date**: 2026-09-03
 

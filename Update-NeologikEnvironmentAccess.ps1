@@ -44,6 +44,20 @@
          the sign-in application. If it is missing the script prints the
          consent URL for you to open and approve - consent itself stays
          interactive so you see exactly what you are approving.
+      3a. Agent-user delegated grants (only with -AgentGrantsFile, the
+         file the platform exports from GET /nce-api/v5/environment/
+         agent-grants): for every agent and App with ENABLED agent-lane
+         permission packs, the oAuth2PermissionGrant that lets its agent
+         identity act as its own agent user with exactly the exported
+         scope set - created or aligned, verified by reading it back.
+         Nothing speculative: an agent or App with no packs is absent from
+         the file and gets no grant (least exposure, project#2213). The
+         file also carries the declared component Graph roles the
+         deployment identity could not grant itself - granted here to the
+         named workload identities (tenant-scoped reads only) - and
+         whether SharePoint ingestion is part of the solution, in which
+         case the Sites.Selected admin consent of the environment's
+         SharePoint app is checked and its consent URL printed when missing.
       3b. Shared-mailbox grants (only with -MailboxGrantsFile): for each
          email channel registered in the Neologik Platform, grants the
          agent's channel identity Application Mail.Read / Mail.ReadWrite /
@@ -93,6 +107,13 @@
 .PARAMETER NceUserGroupId
     Object id of the Neologik NCE user group. Required only when no
     ConfigurationFile is given.
+
+.PARAMETER AgentGrantsFile
+    Path to the JSON file the platform exports (NCE: GET
+    /nce-api/v5/environment/agent-grants): the agent-user delegated grants
+    driven by the packs actually enabled, the declared component Graph
+    roles and the SharePoint ingestion marker. Optional; when given, step
+    3a applies exactly those grants and nothing more (project#2213).
 
 .PARAMETER MailboxGrantsFile
     Path to the JSON file Neologik exports from the platform's email
@@ -157,6 +178,9 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$BlueprintKey = 'default',
+
+    [Parameter(Mandatory = $false)]
+    [string]$AgentGrantsFile,
 
     [Parameter(Mandatory = $false)]
     [string]$MailboxGrantsFile,
@@ -229,6 +253,9 @@ $script:RequiredSubRoles = @(
 )
 
 $script:GraphSpAppId = '00000003-0000-0000-c000-000000000000'
+# The SharePoint app's role (Sites.Selected) checked only when the exported
+# grants file says SharePoint ingestion is part of the solution.
+$script:SharePointAppDisplayNamePrefix = 'Neologik SharePoint Access - '
 $script:AppAdminRoleTemplateId = '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3'
 $script:Summary = @()
 
@@ -251,6 +278,111 @@ function Write-Log {
 function Add-Summary {
     param([string]$Item, [string]$Result)
     $script:Summary += [pscustomobject]@{ Item = $Item; Result = $Result }
+}
+
+# ----- agent-user delegated grants (project#2213) --------------------------
+
+function Get-NeologikScopeSet {
+    param([string]$Value)
+    @(($Value -split '\s+') | Where-Object { $_ } | Sort-Object -Unique) -join ' '
+}
+
+function Grant-NeologikAgentUserAccess {
+    <#
+    One delegated permission grant per agent or App: client = the agent
+    identity (the FOUNDATION identity, by its stored client id), principal =
+    the agent user (by its stored object id), resource = Microsoft Graph,
+    scope = exactly the exported set. Created or aligned (a differing scope
+    is PATCHed), success only after reading the grant back and comparing
+    the scope SETS - Entra refuses some scope strings transiently, so a
+    refused write is retried with the same scopes in a rotated order
+    (project#1732). The platform never reads these grants itself: the
+    operator confirms them in the NCE afterwards.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Kind,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$IdentityClientId,
+        [Parameter(Mandatory)][string]$AgentUserObjectId,
+        [Parameter(Mandatory)][string[]]$Scopes
+    )
+    $label = "Agent-user grant: $Kind $Name"
+    $graph = 'https://graph.microsoft.com/v1.0'
+    $graphBeta = 'https://graph.microsoft.com/beta'
+    $identity = @((Invoke-MgGraphRequest -Method GET -Uri "$graphBeta/servicePrincipals?`$filter=appId eq '$IdentityClientId'&`$select=id").value) | Select-Object -First 1
+    if (-not $identity) {
+        Write-Log "  $Kind '$Name': agent identity $IdentityClientId not found - re-run the platform provisioning, then this script" -Level Warning
+        Add-Summary $label 'MISSING - agent identity not found'
+        return
+    }
+    $graphSp = Get-MgServicePrincipal -Filter "appId eq '$script:GraphSpAppId'"
+    $desired = Get-NeologikScopeSet ($Scopes -join ' ')
+    $existing = @((Invoke-MgGraphRequest -Method GET -Uri "$graph/oauth2PermissionGrants?`$filter=clientId eq '$($identity.id)' and principalId eq '$AgentUserObjectId'").value) | Select-Object -First 1
+    if ($existing -and (Get-NeologikScopeSet $existing.scope) -eq $desired) {
+        Write-Log "  $Kind '$Name' - grant already present ($desired)" -Level Success
+        Add-Summary $label 'Already granted'
+        return
+    }
+    $words = @($desired -split ' ')
+    $applied = $false
+    for ($attempt = 0; $attempt -lt 3 -and -not $applied; $attempt++) {
+        $k = if ($words.Count -gt 0) { $attempt % $words.Count } else { 0 }
+        $rotated = @($words[$k..($words.Count - 1)]) + @($words[0..($k - 1)] | Where-Object { $k -gt 0 })
+        $scopeTry = ($rotated | Where-Object { $_ }) -join ' '
+        try {
+            if ($existing) {
+                Invoke-MgGraphRequest -Method PATCH -Uri "$graph/oauth2PermissionGrants/$($existing.id)" `
+                    -Body (@{ scope = $scopeTry } | ConvertTo-Json -Compress) -ContentType 'application/json' | Out-Null
+            }
+            else {
+                $body = @{ clientId = $identity.id; consentType = 'Principal'; principalId = $AgentUserObjectId
+                           resourceId = $graphSp.Id; scope = $scopeTry } | ConvertTo-Json -Compress
+                Invoke-MgGraphRequest -Method POST -Uri "$graph/oauth2PermissionGrants" -Body $body -ContentType 'application/json' | Out-Null
+            }
+            $applied = $true
+        }
+        catch {
+            Write-Log "  attempt $($attempt + 1) refused scope string '$scopeTry': $($_.Exception.Message)" -Level Warning
+        }
+    }
+    $readback = @((Invoke-MgGraphRequest -Method GET -Uri "$graph/oauth2PermissionGrants?`$filter=clientId eq '$($identity.id)' and principalId eq '$AgentUserObjectId'").value) | Select-Object -First 1
+    if ($readback -and (Get-NeologikScopeSet $readback.scope) -eq $desired) {
+        Write-Log "  $Kind '$Name' - GRANTED ($desired)" -Level Success
+        Add-Summary $label $(if ($existing) { "Updated ($desired)" } else { "Granted ($desired)" })
+    }
+    else {
+        Write-Log "  $Kind '$Name' - the scope set '$desired' did not land after 3 attempts; report the string to Neologik" -Level Error
+        Add-Summary $label 'PENDING - scope refused, report'
+    }
+}
+
+function Grant-NeologikComponentGraphRole {
+    <#
+    A declared component Graph role (project#1451) the deployment identity
+    could not grant: the application role on the named workload identity.
+    Only unscoped roles are granted here (tenant-scoped reads); a
+    mailbox- or site-scoped declaration is reported for the customer's
+    Exchange or SharePoint administrator.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$App,
+        [Parameter(Mandatory)][string]$IdentityName,
+        [Parameter(Mandatory)][string]$RoleName,
+        [string]$ScopeType
+    )
+    $label = "Component role: $App $RoleName"
+    if ($ScopeType) {
+        Write-Log "  $App '$RoleName' is $ScopeType-scoped - grant it in Exchange Online or SharePoint for the declared resource (not a Graph app role)" -Level Warning
+        Add-Summary $label "SKIPPED - $ScopeType-scoped, administrator grants per resource"
+        return
+    }
+    $sp = @((Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=displayName eq '$IdentityName'&`$select=id").value) | Select-Object -First 1
+    if (-not $sp) {
+        Write-Log "  workload identity '$IdentityName' not found - provision the app first" -Level Warning
+        Add-Summary $label 'MISSING - identity not found'
+        return
+    }
+    $null = Set-GraphAppRoles -PrincipalId $sp.id -Label "Component $App" -RoleNames @($RoleName)
 }
 
 
@@ -375,6 +507,25 @@ if ($Phase -eq 'PostWindow' -and (-not $SubscriptionId -or -not $ResourceGroupNa
     throw 'PostWindow needs SubscriptionId and ResourceGroupName - pass them explicitly or supply -ConfigurationFile.'
 }
 
+$script:AgentGrants = $null
+if ($AgentGrantsFile) {
+    if (-not (Test-Path $AgentGrantsFile)) {
+        throw "Agent grants file not found: $AgentGrantsFile"
+    }
+    $script:AgentGrants = Get-Content $AgentGrantsFile -Raw | ConvertFrom-Json
+    $guidPattern = '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
+    foreach ($entry in @($script:AgentGrants.grants)) {
+        if ($entry.status -ne 'ready') { continue }
+        if ($entry.identityClientId -notmatch $guidPattern -or $entry.agentUserObjectId -notmatch $guidPattern) {
+            throw "Agent grants file: identityClientId and agentUserObjectId must be GUIDs ($($entry.name))."
+        }
+        if (-not @($entry.scopes).Count) {
+            throw "Agent grants file: every ready entry needs scopes ($($entry.name))."
+        }
+    }
+    Write-Log "Agent grants loaded: $(@($script:AgentGrants.grants).Count) agent/app entries, $(@($script:AgentGrants.componentGraphRoles).Count) component role(s), SharePoint ingestion: $($script:AgentGrants.sharePointIngestion)" -Level Info
+}
+
 $script:MailboxGrants = @()
 if ($MailboxGrantsFile) {
     if (-not (Test-Path $MailboxGrantsFile)) {
@@ -406,6 +557,7 @@ Write-Host "  Tenant:              $TenantId"
 Write-Host "  Deployment identity: $DeploySpClientId"
 if ($SignInAppClientId) { Write-Host "  Sign-in app:         $SignInAppClientId" }
 if ($NceUserGroupId) { Write-Host "  NCE user group:      $NceUserGroupId" }
+if ($script:AgentGrants) { Write-Host "  Agent grants file:   $AgentGrantsFile" }
 if ($script:MailboxGrants.Count -gt 0) { Write-Host "  Mailbox grants:      $($script:MailboxGrants.Count)" }
 if ($RemoveLegacyGrantAppIds) { Write-Host "  Legacy grants to remove: $($RemoveLegacyGrantAppIds -join ', ')" }
 if ($Phase -eq 'PostWindow') {
@@ -425,6 +577,11 @@ foreach ($module in @('Microsoft.Graph.Applications', 'Microsoft.Graph.Groups', 
 
 $graphScopes = @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All', 'DelegatedPermissionGrant.Read.All',
     'AgentIdentityBlueprint.Create', 'AgentIdentityBlueprint.AddRemoveCreds.All', 'AgentIdentityBlueprintPrincipal.Create')
+if ($script:AgentGrants) {
+    # The agent-user grants are oAuth2PermissionGrants - a write scope only
+    # a Global Administrator holds (the deployment identity never does).
+    $graphScopes += 'DelegatedPermissionGrant.ReadWrite.All'
+}
 if ($Phase -eq 'PostWindow') {
     $graphScopes += 'RoleManagement.ReadWrite.Directory'
 }
@@ -664,6 +821,59 @@ if ($Phase -eq 'Window') {
         }
     }
 
+    # ----- 3a. agent-user grants, component roles, SharePoint consent (project#2213)
+    if ($script:AgentGrants) {
+        Write-Log 'Step 3a: agent-user delegated grants from the exported grants file' -Level Info
+        foreach ($entry in @($script:AgentGrants.grants)) {
+            if ($entry.status -ne 'ready') {
+                Write-Log "  $($entry.kind) '$($entry.name)': identity not stamped yet - run the platform provisioning, export again" -Level Warning
+                Add-Summary "Agent-user grant: $($entry.kind) $($entry.name)" 'SKIPPED - identity not stamped'
+                continue
+            }
+            Grant-NeologikAgentUserAccess -Kind $entry.kind -Name $entry.name `
+                -IdentityClientId $entry.identityClientId -AgentUserObjectId $entry.agentUserObjectId `
+                -Scopes @($entry.scopes)
+        }
+        foreach ($role in @($script:AgentGrants.componentGraphRoles)) {
+            if ($role.resource -and $role.resource -ne 'graph') {
+                Write-Log "  $($role.app) '$($role.roleName)' is a $($role.resource) role - granted through that service, not Graph" -Level Warning
+                Add-Summary "Component role: $($role.app) $($role.roleName)" "SKIPPED - $($role.resource) role"
+                continue
+            }
+            Grant-NeologikComponentGraphRole -App $role.app -IdentityName $role.identityName `
+                -RoleName $role.roleName -ScopeType $role.scopeType
+        }
+        if ($script:AgentGrants.sharePointIngestion) {
+            Write-Log 'Step 3a: SharePoint ingestion is part of the solution - checking the Sites.Selected consent' -Level Info
+            $spApp = @((Invoke-MgGraphRequest -Method GET -Uri "$graph/servicePrincipals?`$filter=startswith(displayName,'$script:SharePointAppDisplayNamePrefix')&`$select=id,appId,displayName").value) | Select-Object -First 1
+            if (-not $spApp) {
+                Write-Log '  SharePoint app not found in this tenant - the infrastructure deployment creates it' -Level Warning
+                Add-Summary 'SharePoint Sites.Selected consent' 'MISSING - app not found'
+            }
+            else {
+                $sitesSelected = $graphSp.AppRoles | Where-Object { $_.Value -eq 'Sites.Selected' }
+                $held = Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $spApp.id -All |
+                    Where-Object { $_.ResourceId -eq $graphSp.Id -and $sitesSelected -and $_.AppRoleId -eq $sitesSelected.Id }
+                if ($held) {
+                    Write-Log "  '$($spApp.displayName)' holds Sites.Selected - consent present (sites are granted per site by a site administrator)" -Level Success
+                    Add-Summary 'SharePoint Sites.Selected consent' 'Present'
+                }
+                else {
+                    $spConsentUrl = "https://login.microsoftonline.com/$TenantId/adminconsent?client_id=$($spApp.appId)"
+                    Write-Log '  Sites.Selected consent NOT found. Open this URL as Global Administrator and approve:' -Level Warning
+                    Write-Host ''
+                    Write-Host "    $spConsentUrl" -ForegroundColor Cyan
+                    Write-Host ''
+                    Add-Summary 'SharePoint Sites.Selected consent' 'MISSING - consent URL printed'
+                }
+            }
+        }
+        else {
+            Write-Log 'Step 3a: no SharePoint ingestion in the solution - Sites.Selected consent not checked (least exposure)' -Level Info
+            Add-Summary 'SharePoint Sites.Selected consent' 'Not needed'
+        }
+    }
+
     # ----- 3b. shared-mailbox grants for email channels (project#990) ---------
     if ($script:MailboxGrants.Count -gt 0 -or $RemoveLegacyGrantAppIds) {
         Write-Log 'Step 3b: Exchange Online mailbox grants for email channels' -Level Info
@@ -785,6 +995,33 @@ else {
 Write-Host ''
 Write-Host '============================ SUMMARY ============================' -ForegroundColor Cyan
 $script:Summary | Format-Table -AutoSize | Out-String | Write-Host
+# Machine-readable summary beside the log (project#2213): the deployment
+# identity's Graph roles as they stand and every consent state, for the
+# migration ticket. Written next to the script; never contains a secret.
+try {
+    $heldRoles = @()
+    if ($deploySp) {
+        $graphSpForSummary = Get-MgServicePrincipal -Filter "appId eq '$script:GraphSpAppId'"
+        $heldRoles = @(Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $deploySp.Id -All |
+            Where-Object { $_.ResourceId -eq $graphSpForSummary.Id } |
+            ForEach-Object { $roleId = $_.AppRoleId; ($graphSpForSummary.AppRoles | Where-Object { $_.Id -eq $roleId }).Value })
+    }
+    $summaryPath = Join-Path (Split-Path -Parent $PSCommandPath) ("Neologik_EnvironmentAccess_{0}_{1}.json" -f $Phase, (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    [pscustomobject]@{
+        tenantId               = $TenantId
+        deploymentIdentity     = $DeploySpClientId
+        phase                  = $Phase
+        ranAt                  = (Get-Date).ToUniversalTime().ToString('o')
+        deploymentGraphRoles   = $heldRoles
+        expectedGraphRoles     = $script:RequiredGraphRoles
+        agentGrantsFile        = $AgentGrantsFile
+        items                  = $script:Summary
+    } | ConvertTo-Json -Depth 5 | Set-Content -Path $summaryPath -Encoding UTF8
+    Write-Log "Summary written to $summaryPath - paste it on the migration ticket" -Level Info
+}
+catch {
+    Write-Log "Could not write the JSON summary: $($_.Exception.Message)" -Level Warning
+}
 $attention = @($script:Summary | Where-Object { $_.Result -match 'MISSING|SKIPPED|NOT FOUND|PENDING' })
 if ($attention.Count -gt 0) {
     Write-Log "$($attention.Count) item(s) need attention - see the summary above." -Level Warning
