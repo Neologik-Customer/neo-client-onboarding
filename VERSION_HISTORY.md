@@ -9,6 +9,48 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Global Administrator script: zero-error run, exhaustive review and test harness (project#2217)
+**Date**: 2026-09-06
+
+- `Update-NeologikEnvironmentAccess.ps1` no longer stops on the first
+  problem: every item is verified or applied independently, a failing item
+  is recorded in the summary as `FAILED - <reason>` (never a stack trace),
+  dependent items are recorded as `SKIPPED`, the summary table and the JSON
+  summary are always written, and the exit code is 1 whenever any item needs
+  attention. Pre-flight problems (missing or malformed input files, ids that
+  are not GUIDs, a grants file exported from another tenant, PowerShell
+  below 7.4, a module that cannot be installed, a sign-in that did not
+  complete or landed in the wrong tenant) end with an ACTION REQUIRED block
+  naming the correction.
+- Narrow before broad is now enforced on failure as well as in order: the
+  retired Graph roles (step 1d) and the legacy subscription roles and
+  Application Administrator membership (PostWindow) are removed only when
+  every retained or narrow role is confirmed in place.
+- Sign-in scopes gain `Directory.Read.All` and `User.Read`, the read scopes
+  the group, consent and directory-role checks need on a tenant where no
+  earlier consent exists.
+- Agent-user grants are matched by client, principal AND resource
+  (Microsoft Graph), so a grant to another resource is never patched; a
+  privilege refusal stops the rotation retries and names the missing
+  permission.
+- Microsoft Graph requests retry throttling (429) and transient service
+  errors (502/503/504) with `Retry-After` honoured, retry a not-found right
+  after a create (replication delay), and follow `@odata.nextLink` on every
+  collection read (owners, credentials, principals).
+- Module handling installs and imports ONE consistent version of the
+  Microsoft.Graph modules (2.x) and ExchangeOnlineManagement (3.x) - mixed
+  versions fail at import on an administrator's workstation; the Exchange
+  session is always disconnected; `-UseAzureCliToken` checks the CLI exists
+  and no longer terminates on a non-zero exit code.
+- The JSON summary falls back to the current folder, then the temp folder,
+  when the script folder is not writable; `UNKNOWN` results count as
+  attention.
+- New Pester 5 harness under `tests/` (every Graph, Azure, Exchange and
+  console call replaced by an in-memory tenant model that records writes):
+  `pwsh -NoProfile -Command "Invoke-Pester -Path tests -CI"`.
+  PSScriptAnalyzer (default rules and PSUseCompatibleSyntax 7.4) reports no
+  findings.
+
 ## Unreleased - Sites.Selected check resolves the environment's own SharePoint app (project#2213 dev03 finding)
 **Date**: 2026-09-06
 

@@ -315,7 +315,11 @@ configuration JSON, and - when agents or Apps need Microsoft 365 access as
 their own accounts - a grants file exported from the platform
 (`-AgentGrantsFile`). The script grants exactly what that file lists and
 nothing more, prints any consent URL you still need to open, and writes a
-JSON summary beside itself for Neologik's ticket. Full parameter help:
+JSON summary beside itself (or in the current folder when that location is
+read-only) for Neologik's ticket. It never stops on the first problem: every
+item is checked, anything that needs you is listed in the summary with the
+reason, and the exit code is 0 only when everything is in the expected state.
+Full parameter help:
 `Get-Help ./Update-NeologikEnvironmentAccess.ps1 -Detailed`.
 
 ---

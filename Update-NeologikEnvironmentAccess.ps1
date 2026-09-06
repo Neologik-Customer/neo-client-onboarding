@@ -369,6 +369,16 @@ function Get-NeologikProperty {
     return $Default
 }
 
+function Test-NeologikProperty {
+    # Whether an object carries a property or key at all (an empty array
+    # value is still present - Get-NeologikProperty cannot tell that apart
+    # from an absent one).
+    param($Object, [string]$Name)
+    if ($null -eq $Object) { return $false }
+    if ($Object -is [System.Collections.IDictionary]) { return [bool]$Object.Contains($Name) }
+    return ($null -ne $Object.PSObject.Properties[$Name])
+}
+
 function Test-NeologikGuid {
     param([string]$Value)
     return [bool]($Value -match $script:GuidPattern)
@@ -576,7 +586,10 @@ function Invoke-NeologikGraph {
             continue
         }
         $message = Get-NeologikGraphErrorMessage -StatusCode $status -Method $Method -Uri $Uri -Body $result.Body
-        throw [System.Net.Http.HttpRequestException]::new($message, $null, [System.Net.HttpStatusCode]$status)
+        if ([enum]::IsDefined([System.Net.HttpStatusCode], $status)) {
+            throw [System.Net.Http.HttpRequestException]::new($message, $null, [System.Net.HttpStatusCode]$status)
+        }
+        throw [System.Net.Http.HttpRequestException]::new($message)
     }
 }
 
@@ -592,7 +605,9 @@ function Get-NeologikGraphCollection {
         $next = [string](Get-NeologikProperty $page '@odata.nextLink' '')
         $pages++
     }
-    return , $items
+    # Emitted item by item: callers collect with @() (a comma-wrapped array
+    # would arrive nested inside that @()).
+    return $items
 }
 
 function Get-NeologikGraphAppRole {
@@ -614,7 +629,8 @@ function Read-NeologikJsonFile {
         throw [System.ArgumentException]::new("$Label is empty: $Path")
     }
     try {
-        return ($raw | ConvertFrom-Json -ErrorAction Stop)
+        $parsed = ConvertFrom-Json -InputObject $raw -NoEnumerate -ErrorAction Stop
+        return , $parsed
     }
     catch {
         throw [System.ArgumentException]::new("$Label is not valid JSON ($Path): $(Get-NeologikErrorText $_)")
@@ -696,7 +712,7 @@ function Resolve-NeologikInput {
 
     if ($state.AgentGrantsFile) {
         $grantsFile = Read-NeologikJsonFile -Path $state.AgentGrantsFile -Label 'Agent grants file'
-        if ($grantsFile -is [System.Array] -or $null -eq $grantsFile -or $null -eq (Get-NeologikProperty $grantsFile 'grants')) {
+        if ($grantsFile -is [System.Array] -or $null -eq $grantsFile -or -not (Test-NeologikProperty $grantsFile 'grants')) {
             throw [System.ArgumentException]::new("Agent grants file is not the platform export (expected an object with 'grants', 'componentGraphRoles' and 'sharePointIngestion'): $($state.AgentGrantsFile)")
         }
         $fileTenant = [string](Get-NeologikProperty $grantsFile 'tenantId' '')
@@ -1240,7 +1256,7 @@ function Get-NeologikExchangeAssignment {
                 $ids -contains [string](Get-NeologikProperty $_ 'RoleAssigneeName' '')
             })
     }
-    return , $assignments
+    return $assignments
 }
 
 function Remove-NeologikMailboxAccess {
@@ -2002,7 +2018,7 @@ function Get-NeologikHeldGraphRole {
     $held = @(Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $state.DeploySp.Id -All -ErrorAction Stop |
         Where-Object { $_.ResourceId -eq $graphSp.Id } |
         ForEach-Object { $roleId = $_.AppRoleId; @($graphSp.AppRoles | Where-Object { $_.Id -eq $roleId } | ForEach-Object { $_.Value }) })
-    return , @($held | Where-Object { $_ })
+    return @($held | Where-Object { $_ })
 }
 
 function Write-NeologikSummary {
