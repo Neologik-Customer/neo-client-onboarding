@@ -42,3 +42,5 @@ NeologikCheckpoint.json
 
 # JSON summaries written by Update-NeologikEnvironmentAccess.ps1 (never commit run output)
 Neologik_EnvironmentAccess_*.json
+# Pester -CI output
+testResults.xml
