@@ -845,8 +845,26 @@ if ($Phase -eq 'Window') {
         }
         if ($script:AgentGrants.sharePointIngestion) {
             Write-Log 'Step 3a: SharePoint ingestion is part of the solution - checking the Sites.Selected consent' -Level Info
-            $spApp = @((Invoke-MgGraphRequest -Method GET -Uri "$graph/servicePrincipals?`$filter=startswith(displayName,'$script:SharePointAppDisplayNamePrefix')&`$select=id,appId,displayName").value) | Select-Object -First 1
+            # The tenant may host several environments (the Neologik dev tenant
+            # holds eight): resolve THIS environment's app by its exact name
+            # first, and fall back to the prefix search only when it is the
+            # single match (dev03 finding 2026-09-06, project#2213).
+            $spShort = if ($ConfigurationFile) { [string]$config.SolutionShortName } else { '' }
+            $spApp = $null
+            if ($spShort) {
+                $spApp = @((Invoke-MgGraphRequest -Method GET -Uri "$graph/servicePrincipals?`$filter=displayName eq '$script:SharePointAppDisplayNamePrefix$spShort'&`$select=id,appId,displayName").value) | Select-Object -First 1
+            }
             if (-not $spApp) {
+                $spCandidates = @((Invoke-MgGraphRequest -Method GET -Uri "$graph/servicePrincipals?`$filter=startswith(displayName,'$script:SharePointAppDisplayNamePrefix')&`$select=id,appId,displayName").value)
+                if ($spCandidates.Count -eq 1) { $spApp = $spCandidates[0] }
+                elseif ($spCandidates.Count -gt 1) {
+                    Write-Log "  $($spCandidates.Count) SharePoint access apps in this tenant and no environment short name to pick by - supply -ConfigurationFile" -Level Warning
+                    Add-Summary 'SharePoint Sites.Selected consent' 'UNKNOWN - several apps, environment not identified'
+                    $spApp = 'ambiguous'
+                }
+            }
+            if ($spApp -eq 'ambiguous') { }
+            elseif (-not $spApp) {
                 Write-Log '  SharePoint app not found in this tenant - the infrastructure deployment creates it' -Level Warning
                 Add-Summary 'SharePoint Sites.Selected consent' 'MISSING - app not found'
             }

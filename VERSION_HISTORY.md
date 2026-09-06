@@ -9,6 +9,11 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Sites.Selected check resolves the environment's own SharePoint app (project#2213 dev03 finding)
+**Date**: 2026-09-06
+
+- Step 3a looked up the SharePoint access app by the name prefix alone and took the first match, so in a tenant hosting several environments it tested another environment's app (dev03 reported "consent missing" against neodev01's app while its own app held the consent). The check now resolves `Neologik SharePoint Access - <SolutionShortName>` from the configuration file first, accepts the prefix search only when it yields exactly one app, and otherwise reports the ambiguity instead of a wrong answer.
+
 ## Unreleased - One Global Administrator script per migration: agent-user grants, component roles, SharePoint consent, JSON summary (project#2213)
 **Date**: 2026-09-05
 
