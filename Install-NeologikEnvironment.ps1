@@ -2347,27 +2347,14 @@ function Set-AppRegistrationRoles {
     Write-Log "Assigning roles to App Registration..." -Level Info
 
     try {
-        # Add to Neologik Admin User Group (matches with or without suffix)
-        $adminGroup = $SecurityGroups | Where-Object { $_.Name -like 'Neologik Admin User Group*' }
-        
-        if ($adminGroup) {
-            Write-Log "Adding App Registration to $($adminGroup.Name)..." -Level Info
-            
-            try {
-                $isMember = Get-MgGroupMember -GroupId $adminGroup.Id -Filter "id eq '$ServicePrincipalId'" -ErrorAction SilentlyContinue
-
-                if ($isMember) {
-                    Write-Log "Service Principal is already a member of the group" -Level Info
-                }
-                else {
-                    New-MgGroupMember -GroupId $adminGroup.Id -DirectoryObjectId $ServicePrincipalId -ErrorAction Stop
-                    Write-Log "Service Principal added to $($adminGroup.Name)" -Level Success
-                }
-            }
-            catch {
-                Write-Log "Warning: Could not add Service Principal to group: $_" -Level Warning
-            }
-        }
+        # The deployment service principal is NOT a member of the Admin User
+        # Group (project#2269, owner decision 2026-09-07). Its SQL access is the
+        # SQL server's Microsoft Entra administrator setting, which the platform
+        # infrastructure deployment declares from the identity it signs in as;
+        # the Admin User Group (the human administrators) becomes a db_owner
+        # contained user in every platform and App database instead. A group
+        # membership would silently add every resource-group role the group
+        # holds to the deployment identity.
 
         # Subscription-scoped roles for the deployment SP. Resource writes are RG-scoped
         # (provider/feature registration and the resource group are handled by this
