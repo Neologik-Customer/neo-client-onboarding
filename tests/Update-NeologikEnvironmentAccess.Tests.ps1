@@ -1063,7 +1063,7 @@ Context 'Modules and sign-in' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UseAzureCliToken = $true }
         $code | Should -Be 0
-        Should -Invoke Invoke-NeologikAzureCli -Times 1 -ParameterFilter { ($Arguments -join ' ') -match "get-access-token --resource https://management.azure.com/ --tenant $($script:Ids.Tenant) --subscription $($script:Ids.Subscription)" }
+        Should -Invoke Invoke-NeologikAzureCli -Times 1 -ParameterFilter { ($Arguments -join ' ') -match "get-access-token --resource https://management.azure.com/ --subscription $($script:Ids.Subscription)" }
         Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $AccessToken -eq 'eyJ0b2tlbg' -and $AccountId -and -not $UseDeviceAuthentication }
         ($script:Console -join "`n") | Should -Not -Match 'device code'
         Get-SummaryResult 'RG role: Contributor' | Should -Be 'Already in place'

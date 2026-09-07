@@ -2099,8 +2099,10 @@ function Connect-NeologikAzure {
     $state = $script:State
     if ($state.UseAzureCliToken) {
         Write-Log 'Signing in to Azure with the Azure CLI session token (az account get-access-token)...' -Level Info
+        # --subscription alone: az resolves the owning account and tenant from it
+        # (it refuses --tenant and --subscription together).
         $cli = Invoke-NeologikAzureCli -Arguments @('account', 'get-access-token', '--resource', 'https://management.azure.com/',
-            '--tenant', $state.TenantId, '--subscription', $state.SubscriptionId, '--query', 'accessToken', '-o', 'tsv')
+            '--subscription', $state.SubscriptionId, '--query', 'accessToken', '-o', 'tsv')
         $cliToken = if ($cli.ExitCode -eq 0) { [string]($cli.Output | Select-Object -Last 1) } else { '' }
         if (-not $cliToken.Trim()) {
             Write-Log 'Azure sign-in failed: az account get-access-token returned no token for the subscription' -Level Error
