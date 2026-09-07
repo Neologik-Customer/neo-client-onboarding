@@ -9,6 +9,102 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Global Administrator script: single-session migration model, verify-only switch, adopted email identities (project#2234)
+**Date**: 2026-09-07
+
+- `Update-NeologikEnvironmentAccess.ps1` has no `-Phase` parameter: the
+  files given select the run
+  (https://github.com/Neologik-AI/project/issues/2234, owner decisions
+  2026-09-07). With no grants file it is the pre-window run every customer
+  has once before its migration window: the agent identity blueprint and
+  its principal role, the deployment identity's Graph roles, the NCE user
+  group assignment, the sign-in consent check, the SharePoint
+  `Sites.Selected` check (when the configuration file records
+  `SharePointIngestion`; otherwise the summary notes that the check runs
+  with the agent grants file, needing no attention) and then the guarded
+  permission reduction - the narrow resource-group roles and the two
+  retained subscription roles applied before the broad subscription roles
+  and the Application Administrator directory role are removed, nothing
+  removed if any narrow role failed. `RoleManagement.ReadWrite.Directory`
+  joins the pre-window sign-in scopes; `-SubscriptionId` and
+  `-ResourceGroupName` are required for the pre-window run when the
+  configuration file does not carry them.
+- With `-AgentGrantsFile` and/or `-MailboxGrantsFile` it is the post-window
+  run, needed only once an agent or App works unattended in Microsoft 365:
+  it applies exactly what the files list - agent-user delegated grants,
+  declared component Graph roles, the SharePoint check the file asks for,
+  mailbox grants - and nothing else. The header, the closing line and the
+  JSON summary (`run`: `PreWindow` or `PostWindow`, file name
+  `Neologik_EnvironmentAccess_<run>_<stamp>.json`) name the run.
+- `-Verify`: every step reports what it would change as a `WOULD ...`
+  summary item and nothing is written; exit code 1 when anything would
+  change. The gate sits in the two write seams every write passes through
+  (`Invoke-NeologikGraph` for non-GET requests, `Invoke-NeologikWrite` for
+  every SDK write cmdlet), so no step can bypass it.
+- The mailbox grants file may be an object with `grants` and
+  `adoptedIdentityAppIds` (client ids of the v4 email monitor identities
+  the v5 email channel adopted); `-RemoveLegacyGrantAppIds` skips those
+  ids with the summary line "Identity adopted by the v5 email channel -
+  assignment kept", and requires `-MailboxGrantsFile` so the adopted list
+  is always consulted. The bare array shape is still accepted.
+- Review points from https://github.com/Neologik-AI/project/issues/2217:
+  the read-only `Directory.Read.All` and `User.Read` sign-in scopes stay
+  and are explained in FINISHING-STEPS-GUIDE.md ("What the sign-in asks
+  you to approve"); scope-set comparison stays case-insensitive; the
+  consent URL keeps `client_id` only (the run happens on a v4 environment
+  where the confirmation page does not exist).
+- Documents: the script header, FINISHING-STEPS-GUIDE.md (the two runs and
+  the sign-in consent table), README.md and TECHNICAL-REFERENCE.md. The
+  PDF copies are not regenerated in this change.
+- Pester harness: 112 tests, 0 failed (`pwsh -NoProfile -Command
+  "Invoke-Pester -Path tests -CI"`): the pre-window run performs the
+  checks then the reduction, a narrow-role failure leaves the broad
+  grants, the post-window run touches nothing else, `-Verify` writes
+  nothing and exits 1, adopted identities are kept, and the parameter set
+  refuses `-Phase`. PSScriptAnalyzer: 0 findings.
+
+## Unreleased - Global Administrator script: zero-error run, exhaustive review and test harness (project#2217)
+**Date**: 2026-09-06
+
+- `Update-NeologikEnvironmentAccess.ps1` no longer stops on the first
+  problem: every item is verified or applied independently, a failing item
+  is recorded in the summary as `FAILED - <reason>` (never a stack trace),
+  dependent items are recorded as `SKIPPED`, the summary table and the JSON
+  summary are always written, and the exit code is 1 whenever any item needs
+  attention. Pre-flight problems (missing or malformed input files, ids that
+  are not GUIDs, a grants file exported from another tenant, PowerShell
+  below 7.4, a module that cannot be installed, a sign-in that did not
+  complete or landed in the wrong tenant) end with an ACTION REQUIRED block
+  naming the correction.
+- Narrow before broad is now enforced on failure as well as in order: the
+  retired Graph roles (step 1d) and the legacy subscription roles and
+  Application Administrator membership (PostWindow) are removed only when
+  every retained or narrow role is confirmed in place.
+- Sign-in scopes gain `Directory.Read.All` and `User.Read`, the read scopes
+  the group, consent and directory-role checks need on a tenant where no
+  earlier consent exists.
+- Agent-user grants are matched by client, principal AND resource
+  (Microsoft Graph), so a grant to another resource is never patched; a
+  privilege refusal stops the rotation retries and names the missing
+  permission.
+- Microsoft Graph requests retry throttling (429) and transient service
+  errors (502/503/504) with `Retry-After` honoured, retry a not-found right
+  after a create (replication delay), and follow `@odata.nextLink` on every
+  collection read (owners, credentials, principals).
+- Module handling installs and imports ONE consistent version of the
+  Microsoft.Graph modules (2.x) and ExchangeOnlineManagement (3.x) - mixed
+  versions fail at import on an administrator's workstation; the Exchange
+  session is always disconnected; `-UseAzureCliToken` checks the CLI exists
+  and no longer terminates on a non-zero exit code.
+- The JSON summary falls back to the current folder, then the temp folder,
+  when the script folder is not writable; `UNKNOWN` results count as
+  attention.
+- New Pester 5 harness under `tests/` (every Graph, Azure, Exchange and
+  console call replaced by an in-memory tenant model that records writes):
+  `pwsh -NoProfile -Command "Invoke-Pester -Path tests -CI"`.
+  PSScriptAnalyzer (default rules and PSUseCompatibleSyntax 7.4) reports no
+  findings.
+
 ## Unreleased - Sites.Selected check resolves the environment's own SharePoint app (project#2213 dev03 finding)
 **Date**: 2026-09-06
 
