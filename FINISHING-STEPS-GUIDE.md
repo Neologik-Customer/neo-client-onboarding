@@ -307,20 +307,74 @@ Before considering the deployment complete, verify:
 ## Later changes and migration windows
 
 After onboarding, the one script a Global Administrator ever runs again is
-`Update-NeologikEnvironmentAccess.ps1` (in this repository). Neologik asks
-for it at each migration window and whenever agents gain new permissions;
-it verifies before it writes, changes nothing on a compliant environment
-and is safe to re-run. Neologik supplies the files it reads: the onboarding
-configuration JSON, and - when agents or Apps need Microsoft 365 access as
-their own accounts - a grants file exported from the platform
-(`-AgentGrantsFile`). The script grants exactly what that file lists and
-nothing more, prints any consent URL you still need to open, and writes a
-JSON summary beside itself (or in the current folder when that location is
-read-only) for Neologik's ticket. It never stops on the first problem: every
-item is checked, anything that needs you is listed in the summary with the
-reason, and the exit code is 0 only when everything is in the expected state.
-Full parameter help:
+`Update-NeologikEnvironmentAccess.ps1` (in this repository). It verifies
+before it writes, changes nothing on a compliant environment and is safe
+to re-run; with `-Verify` it only reports what it would change (as
+`WOULD ...` items in its summary) and writes nothing, exiting 1 when
+anything would change. Neologik supplies the files it reads, and the files
+you give it select the run:
+
+- **Pre-window run** - `./Update-NeologikEnvironmentAccess.ps1
+  -ConfigurationFile <your onboarding configuration JSON>`, with no grants
+  file. Every customer has this one run, any time before the migration
+  window. It verifies or applies everything only a Global Administrator
+  can change: the agent identity blueprint and its principal role, the
+  deployment identity's two retained Microsoft Graph roles (its retired
+  tenant-wide roles are removed once those are in place), the NCE user
+  group assignment on the sign-in application, the sign-in application's
+  tenant-wide admin consent, the SharePoint `Sites.Selected` consent where
+  SharePoint ingestion is in use, and then the permission reduction: the
+  deployment identity receives the narrow resource-group role set and the
+  two retained subscription roles (Reader, Cost Management Contributor)
+  BEFORE its broad subscription roles (Contributor, User Access
+  Administrator) and its Application Administrator directory role are
+  removed. If any narrow role could not be applied, nothing is removed.
+  The account you sign in with needs Global Administrator in Entra ID and
+  Owner (or User Access Administrator) on the subscription.
+- **Post-window run** - the same script with `-AgentGrantsFile <json>`
+  and/or `-MailboxGrantsFile <json>`, files Neologik exports from the
+  platform. Needed only once an agent or App works unattended on your
+  organisation's behalf in Microsoft 365 - an autonomy-adoption event, not
+  a migration step; a customer with no unattended work never has this
+  run. It applies exactly what the files list and nothing else: the
+  agent-user delegated grants for the agents and Apps with enabled
+  permission packs, and/or the Exchange Online mailbox grants for email
+  channels. `-RemoveLegacyGrantAppIds` (with `-MailboxGrantsFile`) removes
+  a retired identity's mailbox assignments; an identity the file lists as
+  adopted by the v5 email channel keeps its assignment.
+
+Every run prints any consent URL you still need to open, writes a JSON
+summary beside itself (or in the current folder when that location is
+read-only) for Neologik's ticket, never stops on the first problem, lists
+anything that needs you in the summary with the reason, and exits 0 only
+when everything is in the expected state. Full parameter help:
 `Get-Help ./Update-NeologikEnvironmentAccess.ps1 -Detailed`.
+
+### What the sign-in asks you to approve
+
+The script signs in to Microsoft Graph under your own account (device
+code). On first use Microsoft shows a consent screen listing the
+delegated permissions the script requests. All of them are delegated:
+they let the script act as you for this session only and grant nothing
+to any application.
+
+| Permission | Why the script needs it |
+|---|---|
+| `Application.ReadWrite.All` | Read and adopt the agent identity blueprint and its principal; add the pipeline's federated credentials |
+| `AppRoleAssignment.ReadWrite.All` | Grant and remove the deployment identity's Microsoft Graph application roles; assign the NCE user group to the sign-in application |
+| `Directory.Read.All` | Read the service principals, groups and directory roles the checks compare against (read-only) |
+| `User.Read` | Resolve your own account as the sponsor when the agent identity blueprint has to be created (read-only) |
+| `DelegatedPermissionGrant.Read.All` | Read the sign-in application's tenant-wide admin consent |
+| `AgentIdentityBlueprint.Create`, `AgentIdentityBlueprint.AddRemoveCreds.All`, `AgentIdentityBlueprintPrincipal.Create` | Create the agent identity blueprint, its principal and its credentials when they do not exist yet |
+| `RoleManagement.ReadWrite.Directory` (pre-window run only) | Remove the deployment identity's Application Administrator directory role membership |
+| `DelegatedPermissionGrant.ReadWrite.All` (post-window run with `-AgentGrantsFile` only) | Create the agent-user delegated grants the file lists |
+
+`Directory.Read.All` and `User.Read` are read-only: the script can change
+nothing with them, and without them the group, consent and directory-role
+checks fail on a tenant where no earlier consent exists. The Azure sign-in
+(pre-window run) and the Exchange Online sign-in (post-window run with
+`-MailboxGrantsFile`) use the same account. A `-Verify` run signs in the
+same way and shows the same screen.
 
 ---
 
