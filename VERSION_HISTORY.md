@@ -9,6 +9,24 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - -UseAzureCliToken signs the Azure half in too (project#2234 follow-up)
+**Date**: 2026-09-07
+
+- `Update-NeologikEnvironmentAccess.ps1 -UseAzureCliToken` now also signs
+  in to Azure with the Azure CLI session (an ARM token from
+  `az account get-access-token --resource https://management.azure.com/`
+  for the tenant and subscription, the account read from the token's
+  claims), so an engineer's verify-only pre-window run needs no device-code
+  prompt for the permission reduction. Found on the first dev03 verify run
+  of the single-session model: the switch covered Microsoft Graph only and
+  the Azure sign-in fell back to a device code that expired. The CLI token
+  carries no MFA claims challenge, so the switch suits `-Verify` runs and
+  verification passes; a role write the tenant refuses with a claims
+  challenge means running again without the switch. Customers keep the
+  device-code sign-ins. Pester: 114 passed (two new cases: the CLI-token
+  Azure sign-in, and ACTION REQUIRED with the reduction skipped when the
+  CLI has no token for the subscription).
+
 ## Unreleased - Global Administrator script: single-session migration model, verify-only switch, adopted email identities (project#2234)
 **Date**: 2026-09-07
 
