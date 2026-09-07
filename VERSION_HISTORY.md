@@ -9,6 +9,38 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - The deployment principal leaves the Admin User Group; SQL access is the declared server administrator (project#2269)
+**Date**: 2026-09-07
+
+- Owner decision 2026-09-07 (option A on https://github.com/Neologik-AI/project/issues/2269): the deployment service
+  principal is the SQL server's Microsoft Entra administrator, declared by
+  the platform infrastructure deployment; the Admin User Group (the human
+  administrators) is a `db_owner` contained user in every platform and App
+  database, created by the platform deployments. The principal is never a
+  member of the Admin User Group - a membership silently added every
+  resource-group role the group holds to the deployment identity, and was
+  the principal's only SQL access.
+- `Install-NeologikEnvironment.ps1` no longer adds the service principal
+  to the Admin User Group.
+- `Update-NeologikEnvironmentAccess.ps1`: step 4d of the pre-window
+  permission reduction removes an existing membership, and does so ONLY
+  once every SQL server in the resource group names the deployment identity
+  as its Entra administrator (Az.Sql reads; otherwise the membership is
+  reported as HELD and kept, with the reason). The Admin User Group is read
+  from the configuration file's SecurityGroups or the new `-AdminGroupId`
+  parameter; with neither the item reads "Not checked" and needs no
+  attention. `-Verify` reports the removal as a pending change. The
+  pre-window run requests the delegated scope `GroupMember.ReadWrite.All`
+  for the removal.
+- Quick reference: section 5 "Group Membership" now states the rule.
+- Pester: 124 passed (ten new cases: not held, held while a server still
+  names the group, removed once every server names the identity, held with
+  one of two servers, held with no server yet, verify-only pending change,
+  not checked without an id, explicit `-AdminGroupId`, the requested
+  scopes, refused removal).
+  One fixture change: the missing-group test now uses an id no fake object
+  carries, since the Admin User Group is a real group in the fake tenant.
+
 ## Unreleased - -UseAzureCliToken signs the Azure half in too (project#2234 follow-up)
 **Date**: 2026-09-07
 

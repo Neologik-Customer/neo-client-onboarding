@@ -115,8 +115,9 @@
     Directory.Read.All, User.Read, DelegatedPermissionGrant.Read.All,
     AgentIdentityBlueprint.Create, AgentIdentityBlueprint.AddRemoveCreds.All,
     AgentIdentityBlueprintPrincipal.Create; plus
-    RoleManagement.ReadWrite.Directory in the pre-window run (the
-    Application Administrator directory role removal) and
+    RoleManagement.ReadWrite.Directory and GroupMember.ReadWrite.All in the
+    pre-window run (the Application Administrator directory role removal and
+    the Admin User Group membership removal of project#2269) and
     DelegatedPermissionGrant.ReadWrite.All in the post-window run with
     -AgentGrantsFile. The read-only Directory.Read.All and User.Read are
     what the group, consent and directory-role checks need on a tenant
@@ -159,6 +160,12 @@
 .PARAMETER NceUserGroupId
     Object id of the Neologik NCE user group. Required only when no
     ConfigurationFile is given.
+
+.PARAMETER AdminGroupId
+    Object id of the Neologik Admin User Group (the human administrators).
+    Read from the configuration file's SecurityGroups when not given; without
+    either, the Admin User Group membership check of the pre-window run
+    (project#2269) reports "Not checked".
 
 .PARAMETER AgentGrantsFile
     Path to the JSON file the platform exports (NCE: GET
@@ -262,6 +269,9 @@ param(
     [string]$NceUserGroupId,
 
     [Parameter(Mandatory = $false)]
+    [string]$AdminGroupId,
+
+    [Parameter(Mandatory = $false)]
     [string]$SubscriptionId,
 
     [Parameter(Mandatory = $false)]
@@ -343,6 +353,17 @@ $script:RequiredSubRoles = @(
 # The legacy subscription-scoped roles the pre-window run's permission
 # reduction (step 4) removes once the narrow set is in place.
 $script:LegacySubRoles = @('Contributor', 'User Access Administrator')
+
+# The deployment identity is never a member of the Admin User Group
+# (project#2269, owner decision 2026-09-07): its SQL access is the SQL
+# server's Microsoft Entra administrator setting, declared by the platform
+# infrastructure deployment; the Admin User Group (the human administrators)
+# is a db_owner contained user in every platform and App database instead.
+# The pre-window run removes an existing membership ONLY once every SQL
+# server in the resource group names the deployment identity as its
+# administrator - before that the membership is the identity's only SQL
+# access. The group is found in the configuration's SecurityGroups by name.
+$script:AdminGroupNamePattern = 'Neologik Admin User Group*'
 
 $script:GraphSpAppId = '00000003-0000-0000-c000-000000000000'
 # The SharePoint app's role (Sites.Selected), checked when the configuration
@@ -740,7 +761,7 @@ function Resolve-NeologikInput {
     param([hashtable]$Parameters)
     $state = $script:State
     foreach ($name in @('ConfigurationFile', 'TenantId', 'DeploySpClientId', 'SignInAppClientId', 'NceUserGroupId',
-            'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'AgentGrantsFile', 'MailboxGrantsFile')) {
+            'AdminGroupId', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'AgentGrantsFile', 'MailboxGrantsFile')) {
         $state[$name] = [string](Get-NeologikProperty $Parameters $name '')
     }
     if (-not $state.BlueprintKey) { $state.BlueprintKey = 'default' }
@@ -777,6 +798,12 @@ function Resolve-NeologikInput {
                 }) | Select-Object -First 1
             if ($nceGroup) { $state.NceUserGroupId = [string](Get-NeologikProperty $nceGroup 'Id' '') }
         }
+        if (-not $state.AdminGroupId) {
+            $adminGroup = @(@(Get-NeologikProperty $config 'SecurityGroups' @()) | Where-Object {
+                    [string](Get-NeologikProperty $_ 'Name' '') -like $script:AdminGroupNamePattern
+                }) | Select-Object -First 1
+            if ($adminGroup) { $state.AdminGroupId = [string](Get-NeologikProperty $adminGroup 'Id' '') }
+        }
         $state.ShortName = [string](Get-NeologikProperty $config 'SolutionShortName' '')
         Write-Log "Configuration loaded: $(Get-NeologikProperty $config 'OrganizationName' '') ($($state.ShortName))" -Level Info
     }
@@ -793,6 +820,7 @@ function Resolve-NeologikInput {
             @{ Name = 'DeploySpClientId'; Value = $state.DeploySpClientId },
             @{ Name = 'SignInAppClientId'; Value = $state.SignInAppClientId },
             @{ Name = 'NceUserGroupId'; Value = $state.NceUserGroupId },
+            @{ Name = 'AdminGroupId'; Value = $state.AdminGroupId },
             @{ Name = 'SubscriptionId'; Value = $state.SubscriptionId })) {
         if ($idCheck.Value -and -not (Test-NeologikGuid $idCheck.Value)) {
             throw [System.ArgumentException]::new("$($idCheck.Name) must be a GUID (got '$($idCheck.Value)').")
@@ -929,6 +957,7 @@ function Write-NeologikHeader {
     Write-Host "  Deployment identity: $($state.DeploySpClientId)"
     if ($state.SignInAppClientId) { Write-Host "  Sign-in app:         $($state.SignInAppClientId)" }
     if ($state.NceUserGroupId) { Write-Host "  NCE user group:      $($state.NceUserGroupId)" }
+    if ($state.AdminGroupId) { Write-Host "  Admin User Group:    $($state.AdminGroupId)" }
     if ($state.AgentGrants) { Write-Host "  Agent grants file:   $($state.AgentGrantsFile)" }
     if ($state.MailboxGrantsFile) { Write-Host "  Mailbox grants:      $($state.MailboxGrants.Count) ($($state.MailboxGrantsFile))" }
     if ($state.AdoptedIdentityAppIds.Count -gt 0) { Write-Host "  Adopted identities:  $($state.AdoptedIdentityAppIds -join ', ')" }
@@ -999,8 +1028,11 @@ function Get-NeologikGraphScope {
     }
     if ($state.Run -eq 'PreWindow') {
         # The permission reduction removes the deployment identity's
-        # Application Administrator directory role membership.
+        # Application Administrator directory role membership and, once the
+        # SQL server administrator is the deployment identity, its Admin User
+        # Group membership (project#2269).
         $scopes += 'RoleManagement.ReadWrite.Directory'
+        $scopes += 'GroupMember.ReadWrite.All'
     }
     return $scopes
 }
@@ -2255,6 +2287,73 @@ function Remove-NeologikAppAdminRole {
     }
 }
 
+function Test-NeologikSqlAdministratorIsDeployIdentity {
+    # project#2269: every SQL server in the resource group must name the
+    # deployment identity as its Microsoft Entra administrator before the
+    # Admin User Group membership can go. Returns $true, or $false with the
+    # reason logged. Az.Sql reads only.
+    $state = $script:State
+    $deploySp = $state.DeploySp
+    $servers = @(Get-AzSqlServer -ResourceGroupName $state.ResourceGroupName -ErrorAction Stop)
+    if ($servers.Count -eq 0) {
+        Write-Log '  no SQL server in the resource group yet - the infrastructure deployment has not run' -Level Warning
+        return $false
+    }
+    foreach ($server in $servers) {
+        $serverName = [string](Get-NeologikProperty $server 'ServerName' '')
+        $admin = Get-AzSqlServerActiveDirectoryAdministrator -ResourceGroupName $state.ResourceGroupName -ServerName $serverName -ErrorAction Stop
+        $adminId = [string](Get-NeologikProperty $admin 'ObjectId' '')
+        if ($adminId.ToLowerInvariant() -ne ([string]$deploySp.Id).ToLowerInvariant()) {
+            $adminName = [string](Get-NeologikProperty $admin 'DisplayName' '')
+            Write-Log "  SQL server $serverName - the Entra administrator is '$adminName' ($adminId), not the deployment identity: run the infrastructure deployment first" -Level Warning
+            return $false
+        }
+    }
+    return $true
+}
+
+function Remove-NeologikAdminGroupMembership {
+    # 4d. The deployment identity's membership of the Admin User Group
+    # (project#2269): removed only once the SQL server administrator is the
+    # deployment identity, because until then the membership is its only
+    # SQL access.
+    $state = $script:State
+    $deploySp = $state.DeploySp
+    $label = 'Admin User Group membership'
+    if (-not $state.AdminGroupId) {
+        Write-Log '  Admin User Group membership - not checked (no Admin User Group id: configuration file SecurityGroups or -AdminGroupId)' -Level Warning
+        Add-Summary $label 'Not checked - no Admin User Group id (configuration file SecurityGroups or -AdminGroupId)'
+        return
+    }
+    try {
+        $isMember = @(Get-MgGroupMember -GroupId $state.AdminGroupId -All -ErrorAction Stop |
+            Where-Object { $_.Id -eq $deploySp.Id }).Count -gt 0
+        if (-not $isMember) {
+            Write-Log '  Admin User Group membership - not held (nothing to remove)' -Level Success
+            Add-Summary $label 'Not held'
+            return
+        }
+        if (-not (Test-NeologikSqlAdministratorIsDeployIdentity)) {
+            Write-Log '  Admin User Group membership - HELD and kept: it is the deployment identity''s only SQL access until every SQL server names the identity as its Entra administrator' -Level Warning
+            Add-Summary $label 'HELD - kept until every SQL server names the deployment identity as its Entra administrator (run the infrastructure deployment)'
+            return
+        }
+        if (Test-NeologikVerifyOnly) {
+            Add-NeologikPendingChange $label 'REMOVE'
+            return
+        }
+        Invoke-NeologikWrite -Command 'Remove-MgGroupMemberByRef' -Parameters @{ GroupId = $state.AdminGroupId; DirectoryObjectId = $deploySp.Id } | Out-Null
+        Write-Log '  Admin User Group membership - REMOVED (SQL access is the declared server administrator)' -Level Success
+        Add-Summary $label 'Removed'
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges - sign in as a Global Administrator or an owner of the group' }
+        Write-Log "  Admin User Group membership - FAILED ($reason)" -Level Error
+        Add-Summary $label "FAILED - $reason"
+    }
+}
+
 function Invoke-NeologikPermissionReduction {
     <#
     Step 4 of the pre-window run: the deployment identity moves to the
@@ -2269,15 +2368,17 @@ function Invoke-NeologikPermissionReduction {
     foreach ($roleName in $script:RequiredRgRoles) { $azureItems += "RG role: $roleName" }
     foreach ($roleName in $script:RequiredSubRoles) { $azureItems += "Sub role: $roleName" }
     foreach ($roleName in $script:LegacySubRoles) { $azureItems += "Legacy Sub role: $roleName" }
-    if (-not (Import-NeologikModuleSet -Names @('Az.Accounts', 'Az.Resources') -MinimumVersion ([version]'2.0.0') `
-                -InstallHint 'Install-Module Az.Accounts, Az.Resources -Scope CurrentUser -Force')) {
+    if (-not (Import-NeologikModuleSet -Names @('Az.Accounts', 'Az.Resources', 'Az.Sql') -MinimumVersion ([version]'2.0.0') `
+                -InstallHint 'Install-Module Az.Accounts, Az.Resources, Az.Sql -Scope CurrentUser -Force')) {
         foreach ($item in $azureItems) { Add-Summary $item 'SKIPPED - Az modules not available' }
         Add-Summary 'Application Administrator role' 'SKIPPED - narrow Azure roles not confirmed'
+        Add-Summary 'Admin User Group membership' 'SKIPPED - narrow Azure roles not confirmed'
         return
     }
     if (-not (Connect-NeologikAzure)) {
         foreach ($item in $azureItems) { Add-Summary $item 'SKIPPED - Azure sign-in failed' }
         Add-Summary 'Application Administrator role' 'SKIPPED - narrow Azure roles not confirmed'
+        Add-Summary 'Admin User Group membership' 'SKIPPED - narrow Azure roles not confirmed'
         return
     }
 
@@ -2302,6 +2403,7 @@ function Invoke-NeologikPermissionReduction {
         Write-Log '  the narrow role set is not complete - the legacy broad grants are left in place (narrow before broad)' -Level Warning
         foreach ($roleName in $script:LegacySubRoles) { Add-Summary "Legacy subscription role: $roleName" 'SKIPPED - narrow roles not all in place' }
         Add-Summary 'Application Administrator role' 'SKIPPED - narrow roles not all in place'
+        Add-Summary 'Admin User Group membership' 'SKIPPED - narrow roles not all in place'
         return
     }
 
@@ -2312,6 +2414,10 @@ function Invoke-NeologikPermissionReduction {
 
     # 4c. remove the Application Administrator directory role membership.
     Remove-NeologikAppAdminRole
+
+    # 4d. remove the Admin User Group membership (project#2269) - only once
+    # the SQL server administrator is the deployment identity.
+    Remove-NeologikAdminGroupMembership
 }
 
 # ----- the two runs ---------------------------------------------------------------
@@ -2433,6 +2539,7 @@ function Invoke-NeologikEnvironmentAccess {
         [string]$DeploySpClientId,
         [string]$SignInAppClientId,
         [string]$NceUserGroupId,
+        [string]$AdminGroupId,
         [string]$SubscriptionId,
         [string]$ResourceGroupName,
         [string]$BlueprintKey = 'default',
@@ -2456,6 +2563,7 @@ function Invoke-NeologikEnvironmentAccess {
             DeploySpClientId        = $DeploySpClientId
             SignInAppClientId       = $SignInAppClientId
             NceUserGroupId          = $NceUserGroupId
+            AdminGroupId            = $AdminGroupId
             SubscriptionId          = $SubscriptionId
             ResourceGroupName       = $ResourceGroupName
             BlueprintKey            = $BlueprintKey

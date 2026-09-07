@@ -37,6 +37,9 @@ BeforeAll {
     function Get-MgDirectoryRole { [CmdletBinding()] param([switch]$All, $Filter) }
     function Get-MgDirectoryRoleMember { [CmdletBinding()] param($DirectoryRoleId, [switch]$All) }
     function Remove-MgDirectoryRoleMemberDirectoryObjectByRef { [CmdletBinding()] param($DirectoryRoleId, $DirectoryObjectId) }
+    function Remove-MgGroupMemberByRef { [CmdletBinding()] param($GroupId, $DirectoryObjectId) }
+    function Get-AzSqlServer { [CmdletBinding()] param($ResourceGroupName) }
+    function Get-AzSqlServerActiveDirectoryAdministrator { [CmdletBinding()] param($ResourceGroupName, $ServerName) }
     function Connect-AzAccount { [CmdletBinding()] param($Tenant, $Subscription, $UseDeviceAuthentication, $ClaimsChallenge, $AccessToken, $AccountId) }
     function Get-AzContext { [CmdletBinding()] param() }
     function Get-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $Scope) }
@@ -152,11 +155,18 @@ BeforeAll {
             PageSize              = 0
             PrincipalCreateDelays = 0
             GrantRefusals         = @()
+            SqlServers            = @()
         }
         $t.ServicePrincipals += New-FakeSp -Id $script:Ids.GraphSpId -AppId '00000003-0000-0000-c000-000000000000' -DisplayName 'Microsoft Graph'
         $t.ServicePrincipals += New-FakeSp -Id $script:Ids.DeploySpId -AppId $script:Ids.DeployAppId -DisplayName "Neologik GitHub Service Connection - $script:ShortName"
         $t.ServicePrincipals += New-FakeSp -Id $script:Ids.SignInSpId -AppId $script:Ids.SignInAppId -DisplayName "Neologik Platform Sign-in - $script:ShortName"
         $t.Groups += @{ id = $script:Ids.Group; displayName = "Neologik NCE User Group - $script:ShortName"; members = @(@{ id = $script:Ids.Me }); appRoleAssignments = @() }
+        # project#2269: the Admin User Group (human administrators) and the
+        # environment's SQL server, whose Entra administrator is the group
+        # until the platform infrastructure deployment declares the
+        # deployment identity.
+        $t.Groups += @{ id = $script:Ids.AdminGroup; displayName = "Neologik Admin User Group - $script:ShortName"; members = @(@{ id = $script:Ids.Me }); appRoleAssignments = @() }
+        $t.SqlServers += @{ ServerName = "sql-main-$script:ShortName"; AdminObjectId = $script:Ids.AdminGroup; AdminDisplayName = 'SQL Administrators' }
         return $t
     }
 
@@ -228,6 +238,33 @@ BeforeAll {
             $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = $roleName; Scope = $script:SubScope }
         }
         $t.DirectoryRoles += @{ Id = $script:Ids.AppAdminRole; RoleTemplateId = $script:AppAdminRoleTemplateId; members = @($script:Ids.DeploySpId) }
+        # project#2269: a pre-v5 onboarding added the deployment identity to
+        # the Admin User Group (its only SQL access while the group is the
+        # server administrator).
+        Add-AdminGroupMembership
+    }
+
+    function Get-FakeGroup {
+        param([string]$Id)
+        return @($script:Tenant.Groups | Where-Object { $_.id -eq $Id }) | Select-Object -First 1
+    }
+
+    function Add-AdminGroupMembership {
+        $group = Get-FakeGroup -Id $script:Ids.AdminGroup
+        if (@($group.members | Where-Object { $_.id -eq $script:Ids.DeploySpId }).Count -eq 0) {
+            $group.members += @{ id = $script:Ids.DeploySpId }
+        }
+    }
+
+    function Set-SqlAdministrator {
+        # The platform infrastructure deployment's effect: the server's Entra
+        # administrator becomes the given object (every server unless named).
+        param([string]$ObjectId, [string]$ServerName)
+        foreach ($server in $script:Tenant.SqlServers) {
+            if ($ServerName -and $server.ServerName -ne $ServerName) { continue }
+            $server.AdminObjectId = $ObjectId
+            $server.AdminDisplayName = if ($ObjectId -eq $script:Ids.DeploySpId) { "Neologik GitHub Service Connection - $script:ShortName" } else { 'SQL Administrators' }
+        }
     }
 
     function Add-CompliantPreWindowState {
@@ -617,6 +654,23 @@ BeforeAll {
         $role = @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $DirectoryRoleId }) | Select-Object -First 1
         $role.members = @($role.members | Where-Object { $_ -ne $DirectoryObjectId })
         Add-Write "REMOVE directory role member $DirectoryObjectId"
+    }
+    Mock Remove-MgGroupMemberByRef {
+        param($GroupId, $DirectoryObjectId)
+        $group = @($script:Tenant.Groups | Where-Object { $_.id -eq $GroupId }) | Select-Object -First 1
+        if (-not $group) { throw (New-NotFoundException) }
+        $group.members = @($group.members | Where-Object { $_.id -ne $DirectoryObjectId })
+        Add-Write "REMOVE group member $DirectoryObjectId"
+    }
+    Mock Get-AzSqlServer {
+        param($ResourceGroupName)
+        @($script:Tenant.SqlServers | ForEach-Object { [pscustomobject]@{ ServerName = $_.ServerName; ResourceGroupName = $ResourceGroupName } })
+    }
+    Mock Get-AzSqlServerActiveDirectoryAdministrator {
+        param($ResourceGroupName, $ServerName)
+        $server = @($script:Tenant.SqlServers | Where-Object { $_.ServerName -eq $ServerName }) | Select-Object -First 1
+        if (-not $server) { throw (New-NotFoundException) }
+        [pscustomobject]@{ ObjectId = $server.AdminObjectId; DisplayName = $server.AdminDisplayName; ResourceGroupName = $ResourceGroupName; ServerName = $ServerName }
     }
     Mock Connect-AzAccount { $script:AzConnected = $true }
     Mock Get-AzContext { [pscustomobject]@{ Subscription = [pscustomobject]@{ Id = $script:AzContextSubscription } } }
@@ -1345,7 +1399,8 @@ Context 'Pre-window run on an environment with missing state' {
 
     It 'reports a missing group and a missing sign-in application as MISSING, not as a crash' {
         Add-CompliantPreWindowState
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Overrides @{ SecurityGroups = @(@{ Name = "Neologik NCE User Group - $script:ShortName"; Id = $script:Ids.AdminGroup }) }) }
+        # an id no object in the fake tenant carries (the Admin User Group id is a real group since project#2269)
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Overrides @{ SecurityGroups = @(@{ Name = "Neologik NCE User Group - $script:ShortName"; Id = '55555555-ffff-5555-5555-555555555555' }) }) }
         $code | Should -Be 1
         Get-SummaryResult 'NCE group assignment' | Should -Be 'MISSING - group not found (check the id)'
         Get-SummaryResult 'Admin consent' | Should -Be 'Present'
@@ -2081,6 +2136,104 @@ Context 'Summary and exit code' {
         $code | Should -Be 1
         ($script:Console -join "`n") | Should -Match 'could not be read for the summary'
         @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter '*.json') | Should -HaveCount 1
+    }
+}
+
+Context 'Pre-window run: Admin User Group membership (step 4d, project#2269)' {
+    BeforeEach {
+        Add-CompliantDirectoryState
+        Add-CompliantAzureState
+    }
+
+    It 'reports the membership as not held on a compliant environment' {
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not held'
+        Should -Invoke Remove-MgGroupMemberByRef -Times 0
+    }
+
+    It 'keeps the membership while a SQL server still names the group as its administrator' {
+        Add-AdminGroupMembership
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Admin User Group membership' | Should -Match '^HELD - kept until every SQL server names the deployment identity'
+        Should -Invoke Remove-MgGroupMemberByRef -Times 0
+        @((Get-FakeGroup -Id $script:Ids.AdminGroup).members | ForEach-Object { $_.id }) | Should -Contain $script:Ids.DeploySpId
+        ($script:Console -join "`n") | Should -Match 'run the infrastructure deployment first'
+    }
+
+    It 'removes the membership once every SQL server names the deployment identity as its administrator' {
+        Add-AdminGroupMembership
+        Set-SqlAdministrator -ObjectId $script:Ids.DeploySpId
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Admin User Group membership' | Should -Be 'Removed'
+        Should -Invoke Remove-MgGroupMemberByRef -Times 1
+        @((Get-FakeGroup -Id $script:Ids.AdminGroup).members | ForEach-Object { $_.id }) | Should -Not -Contain $script:Ids.DeploySpId
+        $script:Writes | Should -Contain "REMOVE group member $($script:Ids.DeploySpId)"
+        # the other members of the group are untouched
+        @((Get-FakeGroup -Id $script:Ids.AdminGroup).members | ForEach-Object { $_.id }) | Should -Contain $script:Ids.Me
+    }
+
+    It 'keeps the membership when one of two servers still names the group' {
+        Add-AdminGroupMembership
+        $script:Tenant.SqlServers += @{ ServerName = 'sql-custom-01'; AdminObjectId = $script:Ids.AdminGroup; AdminDisplayName = 'SQL Administrators' }
+        Set-SqlAdministrator -ObjectId $script:Ids.DeploySpId -ServerName "sql-main-$script:ShortName"
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Admin User Group membership' | Should -Match '^HELD'
+        Should -Invoke Remove-MgGroupMemberByRef -Times 0
+    }
+
+    It 'keeps the membership when the resource group has no SQL server yet' {
+        Add-AdminGroupMembership
+        $script:Tenant.SqlServers = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        Get-SummaryResult 'Admin User Group membership' | Should -Match '^HELD'
+        Should -Invoke Remove-MgGroupMemberByRef -Times 0
+    }
+
+    It 'records the removal as a pending change in a verify-only run and writes nothing' {
+        Add-AdminGroupMembership
+        Set-SqlAdministrator -ObjectId $script:Ids.DeploySpId
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 1
+        Get-SummaryResult 'Admin User Group membership' | Should -Be 'WOULD REMOVE'
+        Should -Invoke Remove-MgGroupMemberByRef -Times 0
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'reports not checked, without needing attention, when no Admin User Group id is known' {
+        $cfg = New-ConfigFile -Overrides @{ SecurityGroups = @(@{ Name = "Neologik NCE User Group - $script:ShortName"; Id = $script:Ids.Group }) }
+        $code = Invoke-Run @{ ConfigurationFile = $cfg }
+        $code | Should -Be 0
+        Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not checked - no Admin User Group id (configuration file SecurityGroups or -AdminGroupId)'
+        Should -Invoke Remove-MgGroupMemberByRef -Times 0
+    }
+
+    It 'takes the Admin User Group id as an explicit parameter' {
+        Add-AdminGroupMembership
+        Set-SqlAdministrator -ObjectId $script:Ids.DeploySpId
+        $cfg = New-ConfigFile -Overrides @{ SecurityGroups = @(@{ Name = "Neologik NCE User Group - $script:ShortName"; Id = $script:Ids.Group }) }
+        $code = Invoke-Run @{ ConfigurationFile = $cfg; AdminGroupId = $script:Ids.AdminGroup }
+        $code | Should -Be 0
+        Get-SummaryResult 'Admin User Group membership' | Should -Be 'Removed'
+    }
+
+    It 'requests the group-member write scope for the pre-window run' {
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { @($Scopes) -contains 'GroupMember.ReadWrite.All' -and @($Scopes) -contains 'RoleManagement.ReadWrite.Directory' }
+    }
+
+    It 'reports a refused removal without touching anything else' {
+        Add-AdminGroupMembership
+        Set-SqlAdministrator -ObjectId $script:Ids.DeploySpId
+        Mock Remove-MgGroupMemberByRef { throw (New-ForbiddenException) }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        (Get-SummaryResult 'Admin User Group membership') | Should -Match '^FAILED - insufficient privileges'
+        @((Get-FakeGroup -Id $script:Ids.AdminGroup).members | ForEach-Object { $_.id }) | Should -Contain $script:Ids.DeploySpId
     }
 }
 

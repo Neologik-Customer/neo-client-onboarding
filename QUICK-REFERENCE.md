@@ -129,7 +129,7 @@ The environment type joins the organisation code in every name (project#1576). E
 | **Secret Storage** | Stored in Key Vault (`neologik-deployment-service-principle-secret`) |
 
 ### Group Membership
-- Added to: `Neologik Admin User Group - {short}`
+- None. The deployment service principal is NOT a member of `Neologik Admin User Group - {short}` (project#2269, owner decision 2026-09-07): its SQL access is the SQL server's Microsoft Entra administrator setting, which the platform infrastructure deployment declares from the identity it signs in as. The Admin User Group (the human administrators) is a `db_owner` contained user in every platform and App database, created by the platform deployments. On an environment that predates this rule, the `Update-NeologikEnvironmentAccess.ps1` pre-window run removes the membership once every SQL server in the resource group names the principal as its administrator.
 
 ---
 
