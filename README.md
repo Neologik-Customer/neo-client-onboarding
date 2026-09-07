@@ -271,6 +271,8 @@ Once you've completed the steps above and Neologik has deployed the environment 
 
 These final steps will make the application accessible to your users.
 
+📋 **See: [AGENT-ACCOUNT-ACCESS-GUIDE.md](AGENT-ACCOUNT-ACCESS-GUIDE.md)** when an agent works on its own (scheduled reports, files from a library, email from a shared mailbox): how to licence its agent account, give it a shared mailbox, and make it a member of a site or team. The admin tool shows a chip per resource that turns green once the step is done.
+
 ---
 
 ## Need Help?
