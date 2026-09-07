@@ -37,7 +37,7 @@ BeforeAll {
     function Get-MgDirectoryRole { [CmdletBinding()] param([switch]$All, $Filter) }
     function Get-MgDirectoryRoleMember { [CmdletBinding()] param($DirectoryRoleId, [switch]$All) }
     function Remove-MgDirectoryRoleMemberDirectoryObjectByRef { [CmdletBinding()] param($DirectoryRoleId, $DirectoryObjectId) }
-    function Connect-AzAccount { [CmdletBinding()] param($Tenant, $Subscription, $UseDeviceAuthentication, $ClaimsChallenge) }
+    function Connect-AzAccount { [CmdletBinding()] param($Tenant, $Subscription, $UseDeviceAuthentication, $ClaimsChallenge, $AccessToken, $AccountId) }
     function Get-AzContext { [CmdletBinding()] param() }
     function Get-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $Scope) }
     function New-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $Scope) }
@@ -1057,6 +1057,26 @@ Context 'Modules and sign-in' {
         Should -Invoke Invoke-NeologikAzureCli -Times 1 -ParameterFilter { ($Arguments -join ' ') -match "get-access-token --resource-type ms-graph --tenant $($script:Ids.Tenant)" }
         Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $AccessToken -is [securestring] -and -not $UseDeviceCode }
         ($script:Console -join "`n") | Should -Not -Match 'eyJ0b2tlbg'
+    }
+
+    It 'signs in to Azure with the Azure CLI token as well when asked' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UseAzureCliToken = $true }
+        $code | Should -Be 0
+        Should -Invoke Invoke-NeologikAzureCli -Times 1 -ParameterFilter { ($Arguments -join ' ') -match "get-access-token --resource https://management.azure.com/ --tenant $($script:Ids.Tenant) --subscription $($script:Ids.Subscription)" }
+        Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $AccessToken -eq 'eyJ0b2tlbg' -and $AccountId -and -not $UseDeviceAuthentication }
+        ($script:Console -join "`n") | Should -Not -Match 'device code'
+        Get-SummaryResult 'RG role: Contributor' | Should -Be 'Already in place'
+    }
+
+    It 'reports ACTION REQUIRED and skips the reduction when the Azure CLI has no token for the subscription' {
+        Add-CompliantPreWindowState
+        Mock Invoke-NeologikAzureCli { param($Arguments) if (($Arguments -join ' ') -match 'management\.azure\.com') { @{ ExitCode = 1; Output = @() } } else { @{ ExitCode = 0; Output = @('eyJ0b2tlbg') } } }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UseAzureCliToken = $true }
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'get-access-token failed for subscription'
+        Get-SummaryResult 'RG role: Contributor' | Should -Be 'SKIPPED - Azure sign-in failed'
+        Should -Invoke Connect-AzAccount -Times 0
     }
 
     It 'stops with ACTION REQUIRED when the Azure CLI is absent or not signed in' {

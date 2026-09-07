@@ -187,12 +187,15 @@
     its assignment kept.
 
 .PARAMETER UseAzureCliToken
-    Sign in to Microsoft Graph with the Azure CLI session's token for the
-    tenant (az account get-access-token) instead of the device-code prompt.
-    For Neologik engineers running the script from a workstation whose az
-    session in the tenant already satisfies multi-factor authentication -
-    the device-code prompt allows only 120 seconds to complete. Customers
-    keep the default device-code sign-in.
+    Sign in to Microsoft Graph AND Azure with the Azure CLI session's tokens
+    for the tenant (az account get-access-token) instead of the device-code
+    prompts. For Neologik engineers running the script from a workstation
+    whose az session in the tenant already satisfies multi-factor
+    authentication - the device-code prompt allows only 120 seconds to
+    complete. The CLI's Azure token carries no MFA claims challenge, so it
+    suits -Verify runs and verification passes; a role write the tenant
+    refuses with a claims challenge means run again without the switch.
+    Customers keep the default device-code sign-ins.
 
 .PARAMETER SubscriptionId
     Azure subscription id. Required for the pre-window run (the permission
@@ -2067,25 +2070,72 @@ function Set-NeologikMailboxGrant {
 
 # ----- pre-window step 4: permission reduction ----------------------------------
 
-function Connect-NeologikAzure {
-    # Signs in to Azure for the role-assignment writes; returns $true or
-    # $false after printing what to do.
-    $state = $script:State
-    Write-Log 'Signing in to Azure (device code - same administrator account)...' -Level Info
+function Get-NeologikTokenAccountId {
+    # The signed-in account named by an access token (upn, unique_name or
+    # preferred_username claim) - the AccountId Connect-AzAccount needs with
+    # -AccessToken. '' when the token is not a readable JWT.
+    param([string]$Token)
     try {
-        $connectParams = @{ Tenant = $state.TenantId; Subscription = $state.SubscriptionId; UseDeviceAuthentication = $true }
-        # Azure mandatory MFA (ARM-layer): request the 'p1' authentication-context claim so the
-        # role-assignment writes below are not rejected with a claims-challenge error.
-        # Decodes to {"access_token":{"acrs":{"essential":true,"values":["p1"]}}}; needs Az.Accounts >= 5.2.0.
-        if ((Get-Command Connect-AzAccount -ErrorAction Stop).Parameters.ContainsKey('ClaimsChallenge')) {
-            $connectParams['ClaimsChallenge'] = 'eyJhY2Nlc3NfdG9rZW4iOnsiYWNycyI6eyJlc3NlbnRpYWwiOnRydWUsInZhbHVlcyI6WyJwMSJdfX19'
+        $parts = $Token.Split('.')
+        if ($parts.Count -lt 2) { return '' }
+        $payload = $parts[1].Replace('-', '+').Replace('_', '/')
+        switch ($payload.Length % 4) { 2 { $payload += '==' } 3 { $payload += '=' } }
+        $claims = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($payload)) | ConvertFrom-Json
+        foreach ($name in @('upn', 'unique_name', 'preferred_username', 'appid')) {
+            $value = [string](Get-NeologikProperty $claims $name '')
+            if ($value) { return $value }
         }
-        Connect-AzAccount @connectParams -ErrorAction Stop | Out-Null
+        return ''
     }
-    catch {
-        Write-Log "Azure sign-in failed: $(Get-NeologikErrorText $_)" -Level Error
-        Write-ActionRequired "Sign in to Azure did not complete.`nRun the script again and finish the device-code sign-in with an account that holds Owner (or User Access Administrator) on subscription $($state.SubscriptionId) in tenant $($state.TenantId)."
-        return $false
+    catch { return '' }
+}
+
+function Connect-NeologikAzure {
+    # Signs in to Azure for the role-assignment reads and writes; returns
+    # $true or $false after printing what to do. With -UseAzureCliToken the
+    # Azure CLI session supplies the ARM token (the same session that signed
+    # in to Graph); otherwise the device-code prompt carrying the MFA claims
+    # challenge the role writes need.
+    $state = $script:State
+    if ($state.UseAzureCliToken) {
+        Write-Log 'Signing in to Azure with the Azure CLI session token (az account get-access-token)...' -Level Info
+        $cli = Invoke-NeologikAzureCli -Arguments @('account', 'get-access-token', '--resource', 'https://management.azure.com/',
+            '--tenant', $state.TenantId, '--subscription', $state.SubscriptionId, '--query', 'accessToken', '-o', 'tsv')
+        $cliToken = if ($cli.ExitCode -eq 0) { [string]($cli.Output | Select-Object -Last 1) } else { '' }
+        if (-not $cliToken.Trim()) {
+            Write-Log 'Azure sign-in failed: az account get-access-token returned no token for the subscription' -Level Error
+            Write-ActionRequired "az account get-access-token failed for subscription $($state.SubscriptionId) in tenant $($state.TenantId).`nSign in first: az login --tenant $($state.TenantId)`nthen run this script again (or run it without -UseAzureCliToken for the device-code sign-in)."
+            return $false
+        }
+        $accountId = Get-NeologikTokenAccountId -Token $cliToken.Trim()
+        if (-not $accountId) { $accountId = 'azure-cli' }
+        try {
+            Connect-AzAccount -AccessToken $cliToken.Trim() -AccountId $accountId -Tenant $state.TenantId -Subscription $state.SubscriptionId -ErrorAction Stop | Out-Null
+        }
+        catch {
+            Write-Log "Azure sign-in failed: $(Get-NeologikErrorText $_)" -Level Error
+            Write-ActionRequired "Sign in to Azure with the Azure CLI token did not complete.`nSign in first: az login --tenant $($state.TenantId)`nthen run this script again (or run it without -UseAzureCliToken for the device-code sign-in)."
+            return $false
+        }
+        Write-Log '  the CLI token carries no MFA claims challenge - a role write refused with a claims error means run again without -UseAzureCliToken' -Level Info
+    }
+    else {
+        Write-Log 'Signing in to Azure (device code - same administrator account)...' -Level Info
+        try {
+            $connectParams = @{ Tenant = $state.TenantId; Subscription = $state.SubscriptionId; UseDeviceAuthentication = $true }
+            # Azure mandatory MFA (ARM-layer): request the 'p1' authentication-context claim so the
+            # role-assignment writes below are not rejected with a claims-challenge error.
+            # Decodes to {"access_token":{"acrs":{"essential":true,"values":["p1"]}}}; needs Az.Accounts >= 5.2.0.
+            if ((Get-Command Connect-AzAccount -ErrorAction Stop).Parameters.ContainsKey('ClaimsChallenge')) {
+                $connectParams['ClaimsChallenge'] = 'eyJhY2Nlc3NfdG9rZW4iOnsiYWNycyI6eyJlc3NlbnRpYWwiOnRydWUsInZhbHVlcyI6WyJwMSJdfX19'
+            }
+            Connect-AzAccount @connectParams -ErrorAction Stop | Out-Null
+        }
+        catch {
+            Write-Log "Azure sign-in failed: $(Get-NeologikErrorText $_)" -Level Error
+            Write-ActionRequired "Sign in to Azure did not complete.`nRun the script again and finish the device-code sign-in with an account that holds Owner (or User Access Administrator) on subscription $($state.SubscriptionId) in tenant $($state.TenantId)."
+            return $false
+        }
     }
     try {
         $context = Get-AzContext -ErrorAction Stop
