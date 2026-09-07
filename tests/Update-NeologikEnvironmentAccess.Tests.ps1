@@ -1,7 +1,8 @@
 #Requires -Version 7.4
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
-    Test harness for Update-NeologikEnvironmentAccess.ps1 (project#2217).
+    Test harness for Update-NeologikEnvironmentAccess.ps1 (project#2217,
+    project#2234: the single-session migration model).
 
     Every external call is replaced: Microsoft Graph (the SDK cmdlets and the
     raw request seam), Azure (Az.Accounts / Az.Resources), Exchange Online,
@@ -159,8 +160,9 @@ BeforeAll {
         return $t
     }
 
-    function Add-CompliantWindowState {
-        # Everything the Window phase verifies, already in place.
+    function Add-CompliantDirectoryState {
+        # Everything the pre-window run verifies in the directory (steps
+        # 1-3), already in place.
         $t = $script:Tenant
         $app = New-FakeApp -Id $script:Ids.BlueprintAppObj -AppId $script:Ids.BlueprintAppId -DisplayName "Neologik Agent Blueprint - default - $script:ShortName"
         $app.owners = @($script:Ids.Me, $script:Ids.DeploySpId)
@@ -205,7 +207,9 @@ BeforeAll {
         }
     }
 
-    function Add-CompliantPostWindowState {
+    function Add-CompliantAzureState {
+        # The narrow Azure role set and the retained subscription roles in
+        # place, the Application Administrator role held by nobody (step 4).
         $t = $script:Tenant
         foreach ($roleName in $script:RequiredRgRoles) {
             $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = $roleName; Scope = $script:RgScope }
@@ -216,12 +220,21 @@ BeforeAll {
         $t.DirectoryRoles += @{ Id = $script:Ids.AppAdminRole; RoleTemplateId = $script:AppAdminRoleTemplateId; members = @() }
     }
 
-    function Add-LegacyPostWindowState {
+    function Add-LegacyAzureState {
+        # The broad grants of a v4 environment: subscription Contributor and
+        # User Access Administrator, Application Administrator held.
         $t = $script:Tenant
         foreach ($roleName in @('Contributor', 'User Access Administrator')) {
             $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = $roleName; Scope = $script:SubScope }
         }
         $t.DirectoryRoles += @{ Id = $script:Ids.AppAdminRole; RoleTemplateId = $script:AppAdminRoleTemplateId; members = @($script:Ids.DeploySpId) }
+    }
+
+    function Add-CompliantPreWindowState {
+        # Everything the pre-window run verifies, directory and Azure,
+        # already in place: a pure verification pass.
+        Add-CompliantDirectoryState
+        Add-CompliantAzureState
     }
 
     function Add-CompliantExchangeState {
@@ -491,10 +504,18 @@ BeforeAll {
     }
 
     function New-MailboxFile {
-        param([string]$Path = (Join-Path $TestDrive 'mailboxes.json'), [object[]]$Entries, [switch]$Raw, [string]$RawContent)
+        # The bare array shape by default; -AsObject (or adopted ids) writes
+        # the object shape with 'grants' and 'adoptedIdentityAppIds'.
+        param([string]$Path = (Join-Path $TestDrive 'mailboxes.json'), [object[]]$Entries, [string[]]$AdoptedIdentityAppIds = @(),
+            [switch]$AsObject, [string]$TenantId = $script:Ids.Tenant, [switch]$Raw, [string]$RawContent)
         if ($Raw) { Set-Content -LiteralPath $Path -Value $RawContent -Encoding UTF8 -NoNewline; return $Path }
         if ($null -eq $Entries) {
             $Entries = @(@{ IdentityAppId = $script:Ids.MailboxAppId; IdentityObjectId = $script:Ids.MailboxObjectId; Mailbox = 'support@contoso.com'; DisplayName = 'neo-support' })
+        }
+        if ($AsObject -or $AdoptedIdentityAppIds.Count -gt 0) {
+            $payload = [ordered]@{ schemaVersion = 1; tenantId = $TenantId; grants = @($Entries); adoptedIdentityAppIds = @($AdoptedIdentityAppIds) }
+            ConvertTo-Json -InputObject $payload -Depth 4 | Set-Content -LiteralPath $Path -Encoding UTF8
+            return $Path
         }
         ConvertTo-Json -InputObject @($Entries) -Depth 4 | Set-Content -LiteralPath $Path -Encoding UTF8
         return $Path
@@ -808,14 +829,23 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
         Should -Invoke Connect-MgGraph -Times 0
     }
 
-    It 'requires the subscription and resource group for PostWindow' {
-        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; Phase = 'PostWindow' }
+    It 'requires the subscription and resource group for the pre-window run' {
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'PostWindow needs SubscriptionId'
+        ($script:Console -join "`n") | Should -Match 'pre-window run needs SubscriptionId'
+        Should -Invoke Connect-MgGraph -Times 0
+    }
+
+    It 'does not require the subscription for the post-window run' {
+        Add-AgentIdentities
+        $grants = New-GrantsFile -Grants @((New-AgentGrantEntry))
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; AgentGrantsFile = $grants }
+        $code | Should -Be 0
+        Should -Invoke Connect-AzAccount -Times 0
     }
 
     It 'tolerates a configuration file without AppRegistration or SecurityGroups when the ids are explicit' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $cfg = New-ConfigFile -Remove @('AppRegistration', 'SecurityGroups', 'NceAuthApp')
         $code = Invoke-Run @{ ConfigurationFile = $cfg; DeploySpClientId = $script:Ids.DeployAppId }
         $code | Should -Be 1
@@ -868,7 +898,7 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
     }
 
     It 'accepts grant entries that are not ready without validating their ids' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $cfg = New-ConfigFile
         $entry = New-AgentGrantEntry -Status 'identity-not-stamped' -ClientId $null -UserId $null
         $grants = New-GrantsFile -Grants @($entry)
@@ -902,11 +932,34 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
         (Invoke-Run @{ ConfigurationFile = $cfg; RemoveLegacyGrantAppIds = @('old-monitor') }) | Should -Be 1
         ($script:Console -join "`n") | Should -Match 'RemoveLegacyGrantAppIds must be'
     }
+
+    It 'refuses -RemoveLegacyGrantAppIds without the mailbox grants file that lists the adopted identities' {
+        $cfg = New-ConfigFile
+        (Invoke-Run @{ ConfigurationFile = $cfg; RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }) | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'belongs to the post-window run'
+        Should -Invoke Connect-MgGraph -Times 0
+    }
+
+    It 'rejects a mailbox grants file of the wrong shape, adopted ids that are not GUIDs, and another tenant''s export' {
+        $cfg = New-ConfigFile
+        $file = New-MailboxFile -Raw -RawContent '{"IdentityAppId": "x"}'
+        (Invoke-Run @{ ConfigurationFile = $cfg; MailboxGrantsFile = $file }) | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'not the platform export'
+        $script:Console = @()
+        $file = New-MailboxFile -Entries @() -AdoptedIdentityAppIds @('not-a-guid')
+        (Invoke-Run @{ ConfigurationFile = $cfg; MailboxGrantsFile = $file }) | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'adoptedIdentityAppIds must be'
+        $script:Console = @()
+        $file = New-MailboxFile -AsObject -TenantId $script:Ids.OtherTenant
+        (Invoke-Run @{ ConfigurationFile = $cfg; MailboxGrantsFile = $file }) | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'exported from tenant'
+        Should -Invoke Connect-MgGraph -Times 0
+    }
 }
 
 Context 'Modules and sign-in' {
     It 'installs a missing Graph module before importing one consistent version' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         Mock Get-NeologikAvailableModuleVersion {
             param($Name)
             if ($Name -eq 'Microsoft.Graph.Groups' -and $script:Installs -notcontains $Name) { return @() }
@@ -920,7 +973,7 @@ Context 'Modules and sign-in' {
     }
 
     It 'imports the highest version every Graph module has in common' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         Mock Get-NeologikAvailableModuleVersion {
             param($Name)
             if ($Name -eq 'Microsoft.Graph.Authentication') { return @([version]'2.40.0', [version]'2.38.0') }
@@ -933,7 +986,7 @@ Context 'Modules and sign-in' {
     }
 
     It 'pins to the Graph version already loaded in the session' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         Mock Get-NeologikLoadedModuleVersion { param($Name) if ($Name -eq 'Microsoft.Graph.Authentication') { [version]'2.30.0' } }
         Mock Get-NeologikAvailableModuleVersion { @([version]'2.38.0', [version]'2.30.0') }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
@@ -968,35 +1021,37 @@ Context 'Modules and sign-in' {
     }
 
     It 'requests the read scopes the verification steps need' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter {
             $Scopes -contains 'Directory.Read.All' -and $Scopes -contains 'User.Read' -and $Scopes -contains 'AppRoleAssignment.ReadWrite.All' -and
-            $Scopes -notcontains 'DelegatedPermissionGrant.ReadWrite.All' -and $Scopes -notcontains 'RoleManagement.ReadWrite.Directory' -and $UseDeviceCode
+            $Scopes -contains 'RoleManagement.ReadWrite.Directory' -and $Scopes -notcontains 'DelegatedPermissionGrant.ReadWrite.All' -and $UseDeviceCode
         }
     }
 
-    It 'adds the grant write scope only with a grants file and the role scope only for PostWindow' {
-        Add-CompliantWindowState
+    It 'adds the grant write scope only with a grants file and the directory role scope only in the pre-window run' {
         Add-AgentIdentities
         $grants = New-GrantsFile -Grants @((New-AgentGrantEntry))
         $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
-        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $Scopes -contains 'DelegatedPermissionGrant.ReadWrite.All' }
-        Add-CompliantPostWindowState
-        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Phase = 'PostWindow' }
-        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $Scopes -contains 'RoleManagement.ReadWrite.Directory' }
+        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $Scopes -contains 'DelegatedPermissionGrant.ReadWrite.All' -and $Scopes -notcontains 'RoleManagement.ReadWrite.Directory' }
+        Add-CompliantExchangeState
+        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
+        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $Scopes -notcontains 'DelegatedPermissionGrant.ReadWrite.All' -and $Scopes -notcontains 'RoleManagement.ReadWrite.Directory' }
+        Add-CompliantPreWindowState
+        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $Scopes -contains 'RoleManagement.ReadWrite.Directory' -and $Scopes -notcontains 'DelegatedPermissionGrant.ReadWrite.All' }
     }
 
     It 'warns when the session lacks a requested permission' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $script:ContextScopes = @('Application.ReadWrite.All')
         $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         ($script:Console -join "`n") | Should -Match 'lacks the permission'
     }
 
     It 'uses the Azure CLI token when asked and never prints it' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UseAzureCliToken = $true }
         $code | Should -Be 0
         Should -Invoke Invoke-NeologikAzureCli -Times 1 -ParameterFilter { ($Arguments -join ' ') -match "get-access-token --resource-type ms-graph --tenant $($script:Ids.Tenant)" }
@@ -1035,9 +1090,9 @@ Context 'Modules and sign-in' {
     }
 }
 
-Context 'Window phase on a compliant environment' {
+Context 'Pre-window run on a compliant environment' {
     It 'is a pure verification pass: exit 0, no writes, every item in place' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $script:Writes | Should -HaveCount 0
@@ -1053,18 +1108,39 @@ Context 'Window phase on a compliant environment' {
         Get-SummaryResult 'Retired Graph role: Group.Create' | Should -Be 'Not held'
         Get-SummaryResult 'NCE group assignment' | Should -Be 'Already assigned'
         Get-SummaryResult 'Admin consent' | Should -Be 'Present'
-        ($script:Console -join "`n") | Should -Match "Phase 'Window' complete"
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'Not checked - runs with the agent grants file'
+        Get-SummaryResult 'RG role: Contributor' | Should -Be 'Already in place'
+        Get-SummaryResult 'subscription role: Cost Management Contributor' | Should -Be 'Already in place'
+        Get-SummaryResult 'Legacy subscription role: Contributor' | Should -Be 'Not present'
+        Get-SummaryResult 'Application Administrator role' | Should -Be 'Not held'
+        Should -Invoke Connect-AzAccount -Times 1
+        ($script:Console -join "`n") | Should -Match 'pre-window run'
+        ($script:Console -join "`n") | Should -Match 'Pre-window run complete'
+    }
+
+    It 'checks the Sites.Selected consent when the configuration file records SharePoint ingestion' {
+        Add-CompliantPreWindowState
+        Add-SharePointApp -WithConsent
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Overrides @{ SharePointIngestion = $true }) }
+        $code | Should -Be 0
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'Present'
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Overrides @{ SharePointIngestion = $false }) }
+        $code | Should -Be 0
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'Not needed'
+        $script:Writes | Should -HaveCount 0
     }
 
     It 'writes the JSON summary beside the script with the held roles and every item' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
-        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentAccess_Window_*.json')
+        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentAccess_PreWindow_*.json')
         $files | Should -HaveCount 1
         $json = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
         $json.tenantId | Should -Be $script:Ids.Tenant
         $json.deploymentIdentity | Should -Be $script:Ids.DeployAppId
-        $json.phase | Should -Be 'Window'
+        $json.run | Should -Be 'PreWindow'
+        $json.verifyOnly | Should -BeFalse
+        $json.pendingChangeCount | Should -Be 0
         @($json.deploymentGraphRoles) | Should -Contain 'Application.ReadWrite.OwnedBy'
         @($json.deploymentGraphRoles) | Should -Contain 'AgentIdentityBlueprint.AddRemoveCreds.All'
         @($json.expectedGraphRoles) | Should -HaveCount 2
@@ -1075,7 +1151,7 @@ Context 'Window phase on a compliant environment' {
     }
 
     It 'falls back to the next summary location when the first is not writable' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $second = Join-Path $TestDrive 'summary2'
         New-Item -ItemType Directory -Path $second -Force | Out-Null
         $script:SummaryDirs = @((Join-Path $TestDrive 'does-not-exist\nested'), $second)
@@ -1086,24 +1162,51 @@ Context 'Window phase on a compliant environment' {
     }
 
     It 'derives the short name from the deployment identity when no configuration file is given' {
-        Add-CompliantWindowState
-        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group }
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 0
         Get-SummaryResult 'Agent blueprint' | Should -Be 'Present'
         $script:Writes | Should -HaveCount 0
     }
 
     It 'skips the group assignment and consent check when the ids are not supplied' {
-        Add-CompliantWindowState
-        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId }
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 1
         Get-SummaryResult 'NCE group assignment' | Should -Be 'SKIPPED - ids not supplied'
         Get-SummaryResult 'Admin consent' | Should -BeNullOrEmpty
     }
 }
 
-Context 'Window phase on an environment with missing state' {
+Context 'Pre-window run on an environment with missing state' {
+    It 'performs the directory checks and then the guarded permission reduction, in that order' {
+        Add-CompliantPreWindowState
+        $deploy = Get-FakeSp -Id $script:Ids.DeploySpId
+        $deploy.appRoleAssignments = @()
+        Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.Read.All'
+        $script:Tenant.AzRoleAssignments = @()
+        $script:Tenant.DirectoryRoles = @()
+        Add-LegacyAzureState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Graph role: Application.ReadWrite.OwnedBy' | Should -Be 'Granted'
+        Get-SummaryResult 'Retired Graph role: Application.Read.All' | Should -Be 'Removed'
+        Get-SummaryResult 'RG role: Contributor' | Should -Be 'Created'
+        Get-SummaryResult 'Legacy subscription role: User Access Administrator' | Should -Be 'Removed'
+        Get-SummaryResult 'Application Administrator role' | Should -Be 'Removed'
+        $kinds = @($script:Writes | ForEach-Object {
+                if ($_ -like 'NEW approle*') { 'graph-grant' }
+                elseif ($_ -like 'REMOVE approle*') { 'graph-remove' }
+                elseif ($_ -like 'NEW az role*') { 'az-create' }
+                elseif ($_ -like 'REMOVE az role*') { 'az-remove' }
+                elseif ($_ -like 'REMOVE directory role member*') { 'role-remove' }
+                else { $_ } })
+        @($kinds | Select-Object -Unique) | Should -Be @('graph-grant', 'graph-remove', 'az-create', 'az-remove', 'role-remove')
+        Should -Invoke Connect-AzAccount -Times 1
+    }
+
     It 'creates the blueprint, its principal, ownership, role and credentials, then verifies clean on a second run' {
+        Add-CompliantAzureState
         Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.ReadWrite.OwnedBy'
         Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'AgentIdentityBlueprint.AddRemoveCreds.All'
         $group = @($script:Tenant.Groups)[0]
@@ -1133,7 +1236,7 @@ Context 'Window phase on an environment with missing state' {
     }
 
     It 'adopts a pipeline-created blueprint the deployment identity does not own yet' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $app = Get-FakeApp -Id $script:Ids.BlueprintAppObj
         $app.owners = @($script:Ids.Me)
         $principal = Get-FakeSp -Id $script:Ids.BlueprintSpId
@@ -1151,7 +1254,7 @@ Context 'Window phase on an environment with missing state' {
     }
 
     It 'grants the retained Graph roles before removing the retired ones' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $deploy = Get-FakeSp -Id $script:Ids.DeploySpId
         $deploy.appRoleAssignments = @()
         foreach ($roleName in @('Application.Read.All', 'AgentIdentity.Create.All', 'Group.Create')) { Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName $roleName }
@@ -1173,7 +1276,7 @@ Context 'Window phase on an environment with missing state' {
     }
 
     It 'leaves the retired roles in place when a retained role could not be granted' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $deploy = Get-FakeSp -Id $script:Ids.DeploySpId
         $deploy.appRoleAssignments = @()
         Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.Read.All'
@@ -1187,7 +1290,7 @@ Context 'Window phase on an environment with missing state' {
     }
 
     It 'reports a Graph role the cloud does not publish without stopping' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $script:AppRoleIds.Remove('AgentIdentityBlueprint.AddRemoveCreds.All')
         try {
             $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
@@ -1201,7 +1304,7 @@ Context 'Window phase on an environment with missing state' {
     }
 
     It 'assigns the NCE user group to the sign-in application when missing' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $group = @($script:Tenant.Groups)[0]
         $group.appRoleAssignments = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
@@ -1212,7 +1315,7 @@ Context 'Window phase on an environment with missing state' {
     }
 
     It 'warns when the NCE user group has no direct members' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $group = @($script:Tenant.Groups)[0]
         $group.members = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
@@ -1221,13 +1324,13 @@ Context 'Window phase on an environment with missing state' {
     }
 
     It 'reports a missing group and a missing sign-in application as MISSING, not as a crash' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Overrides @{ SecurityGroups = @(@{ Name = "Neologik NCE User Group - $script:ShortName"; Id = $script:Ids.AdminGroup }) }) }
         $code | Should -Be 1
         Get-SummaryResult 'NCE group assignment' | Should -Be 'MISSING - group not found (check the id)'
         Get-SummaryResult 'Admin consent' | Should -Be 'Present'
         $script:Tenant = New-EmptyTenant
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $script:Tenant.ServicePrincipals = @($script:Tenant.ServicePrincipals | Where-Object { $_.id -ne $script:Ids.SignInSpId })
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
@@ -1236,7 +1339,7 @@ Context 'Window phase on an environment with missing state' {
     }
 
     It 'prints the consent URL when tenant-wide admin consent is missing' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         (Get-FakeSp -Id $script:Ids.SignInSpId).grants = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
@@ -1246,7 +1349,7 @@ Context 'Window phase on an environment with missing state' {
     }
 
     It 'treats a user-level grant as no tenant-wide consent' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         (Get-FakeSp -Id $script:Ids.SignInSpId).grants = @(@{ id = 'p'; clientId = $script:Ids.SignInSpId; consentType = 'Principal'; principalId = $script:Ids.Me; resourceId = $script:Ids.GraphSpId; scope = 'User.Read' })
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
@@ -1254,7 +1357,7 @@ Context 'Window phase on an environment with missing state' {
     }
 
     It 'continues past a blueprint failure and records the dependents as skipped' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $script:Faults += @{ Match = 'GET /applications$'; Status = 403; Code = 'Authorization_RequestDenied'; Message = 'Insufficient privileges'; Remaining = 1 }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
@@ -1265,9 +1368,29 @@ Context 'Window phase on an environment with missing state' {
     }
 }
 
-Context 'Agent grants file (step 3a)' {
-    BeforeEach {
-        Add-CompliantWindowState
+Context 'Post-window run: agent grants file (step 5)' {
+    It 'touches nothing else: no blueprint, no roles, no group assignment, no reduction' {
+        # A tenant where every pre-window item is missing or legacy.
+        Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.Read.All'
+        Add-LegacyAzureState
+        Add-AgentIdentities -NoGrants
+        $grants = New-GrantsFile -Grants @((New-AgentGrantEntry -Scopes @('User.Read')))
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
+        $code | Should -Be 0
+        Get-SummaryResult 'Agent-user grant: agent Support Agent' | Should -Be 'Granted (User.Read)'
+        $script:Writes | Should -HaveCount 1
+        $script:Writes[0] | Should -BeLike 'POST grant*'
+        foreach ($item in @('Agent blueprint', 'Graph role: Application.ReadWrite.OwnedBy', 'Retired Graph role: Application.Read.All', 'NCE group assignment',
+                'Admin consent', 'RG role: Contributor', 'Legacy subscription role: Contributor', 'Application Administrator role')) {
+            Get-SummaryResult $item | Should -BeNullOrEmpty -Because "the post-window run must not touch '$item'"
+        }
+        Should -Invoke Connect-AzAccount -Times 0
+        Should -Invoke Connect-ExchangeOnline -Times 0
+        @($script:Tenant.Apps) | Should -HaveCount 0
+        (Get-FakeSp -Id $script:Ids.DeploySpId).appRoleAssignments | Should -HaveCount 1
+        @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
+        ($script:Console -join "`n") | Should -Match 'post-window run'
+        ($script:Console -join "`n") | Should -Match 'Post-window run complete'
     }
 
     It 'does nothing beyond the SharePoint marker for a file with no entries' {
@@ -1439,11 +1562,7 @@ Context 'Agent grants file (step 3a)' {
     }
 }
 
-Context 'Mailbox grants (step 3b)' {
-    BeforeEach {
-        Add-CompliantWindowState
-    }
-
+Context 'Post-window run: mailbox grants file (step 6)' {
     It 'verifies a fully granted mailbox without writing, and always disconnects' {
         Add-CompliantExchangeState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
@@ -1539,7 +1658,7 @@ Context 'Mailbox grants (step 3b)' {
         $x.Scopes += @{ Name = 'Scope-email-monitor'; RecipientFilter = "PrimarySmtpAddress -eq 'support@contoso.com'" }
         $x.Assignments += @{ Name = 'Assignment-email-monitor-MailRead'; Role = 'Application Mail.Read'; RoleAssigneeName = $script:Ids.LegacyObjectId }
         $x.Assignments += @{ Name = 'Assignment-email-monitor-MailSend'; Role = 'Application Mail.Send'; RoleAssigneeName = $script:Ids.LegacyObjectId }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile -Entries @()); RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }
         $code | Should -Be 0
         Get-SummaryResult "Legacy mailbox grant: $($script:Ids.LegacyAppId)" | Should -Be 'Removed (2 assignment(s))'
         @($x.Assignments) | Should -HaveCount 0
@@ -1554,23 +1673,64 @@ Context 'Mailbox grants (step 3b)' {
         $x.ServicePrincipals += @{ Identity = $script:Ids.LegacyObjectId; ObjectId = $script:Ids.LegacyObjectId; AppId = $script:Ids.LegacyAppId; DisplayName = 'email-monitor' }
         $x.Assignments += @{ Name = 'Assignment-email-monitor-MailRead'; Role = 'Application Mail.Read'; RoleAssigneeName = $script:Ids.LegacyObjectId }
         $x.Assignments += @{ Name = 'Assignment-other-MailRead'; Role = 'Application Mail.Read'; RoleAssigneeName = 'someone-else' }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile -Entries @()); RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }
         $code | Should -Be 0
         Get-SummaryResult "Legacy mailbox grant: $($script:Ids.LegacyAppId)" | Should -Be 'Removed (1 assignment(s))'
         @($x.Assignments) | Should -HaveCount 1
     }
 
     It 'reports a retired identity that is not present' {
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile -Entries @()); RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }
         $code | Should -Be 0
         Get-SummaryResult "Legacy mailbox grant: $($script:Ids.LegacyAppId)" | Should -Be 'Not present'
         $script:Writes | Should -HaveCount 0
+    }
+
+    It 'keeps the assignment of an identity the file lists as adopted by the v5 email channel' {
+        $x = $script:Tenant.Exchange
+        $x.ServicePrincipals += @{ Identity = $script:Ids.LegacyObjectId; ObjectId = $script:Ids.LegacyObjectId; AppId = $script:Ids.LegacyAppId; DisplayName = 'email-monitor' }
+        $x.Assignments += @{ Name = 'Assignment-email-monitor-MailRead'; Role = 'Application Mail.Read'; RoleAssigneeName = $script:Ids.LegacyObjectId }
+        $file = New-MailboxFile -Entries @() -AdoptedIdentityAppIds @($script:Ids.LegacyAppId.ToUpperInvariant())
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = $file; RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }
+        $code | Should -Be 0
+        Get-SummaryResult "Legacy mailbox grant: $($script:Ids.LegacyAppId)" | Should -Be 'Identity adopted by the v5 email channel - assignment kept'
+        ($script:Console -join "`n") | Should -Match 'identity adopted by the v5 email channel - assignment kept'
+        @($x.Assignments) | Should -HaveCount 1
+        @($x.ServicePrincipals) | Should -HaveCount 1
+        $script:Writes | Should -HaveCount 0
+        Should -Invoke Connect-ExchangeOnline -Times 0 -Because 'nothing is left to apply or remove'
+    }
+
+    It 'removes the identities that are not adopted alongside one that is' {
+        $x = $script:Tenant.Exchange
+        $otherAppId = [guid]::NewGuid().ToString()
+        $otherObjectId = [guid]::NewGuid().ToString()
+        $x.ServicePrincipals += @{ Identity = $script:Ids.LegacyObjectId; ObjectId = $script:Ids.LegacyObjectId; AppId = $script:Ids.LegacyAppId; DisplayName = 'email-monitor' }
+        $x.ServicePrincipals += @{ Identity = $otherObjectId; ObjectId = $otherObjectId; AppId = $otherAppId; DisplayName = 'old-monitor' }
+        $x.Assignments += @{ Name = 'Assignment-email-monitor-MailRead'; Role = 'Application Mail.Read'; RoleAssigneeName = $script:Ids.LegacyObjectId }
+        $x.Assignments += @{ Name = 'Assignment-old-monitor-MailRead'; Role = 'Application Mail.Read'; RoleAssigneeName = $otherObjectId }
+        $file = New-MailboxFile -Entries @() -AdoptedIdentityAppIds @($script:Ids.LegacyAppId)
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = $file; RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId, $otherAppId) }
+        $code | Should -Be 0
+        Get-SummaryResult "Legacy mailbox grant: $($script:Ids.LegacyAppId)" | Should -Be 'Identity adopted by the v5 email channel - assignment kept'
+        Get-SummaryResult "Legacy mailbox grant: $otherAppId" | Should -Be 'Removed (1 assignment(s))'
+        @($x.Assignments | Where-Object { $_.RoleAssigneeName -eq $script:Ids.LegacyObjectId }) | Should -HaveCount 1
+        @($x.ServicePrincipals | Where-Object { $_.AppId -eq $otherAppId }) | Should -HaveCount 0
+        $script:ExchangeDisconnected | Should -BeTrue
+    }
+
+    It 'applies the grants of the object-shaped file, with no adopted identity named' {
+        $file = New-MailboxFile -AsObject
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = $file }
+        $code | Should -Be 0
+        Get-SummaryResult 'Mailbox grant: support@contoso.com -> neo-support' | Should -Be 'Granted (3 role(s) added)'
+        ($script:Console -join "`n") | Should -Match '1 email channel\(s\), 0 adopted identity'
     }
 }
 
 Context 'Graph resilience' {
     BeforeEach {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
     }
 
     It 'retries throttling with the Retry-After delay and succeeds' {
@@ -1589,7 +1749,7 @@ Context 'Graph resilience' {
         Get-SummaryResult 'Blueprint owner' | Should -Be 'Already in place'
         @($script:Sleeps) | Should -HaveCount 2
         $script:Tenant = New-EmptyTenant
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $script:Faults = @(@{ Match = 'GET /applications/[^/]+/owners$'; Status = 500; Code = 'InternalServerError'; Message = 'boom'; Remaining = 99 })
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
@@ -1658,11 +1818,11 @@ Context 'Graph resilience' {
     }
 }
 
-Context 'PostWindow phase' {
+Context 'Pre-window run: permission reduction (step 4)' {
     It 'on an already-hardened environment creates only the Cost Management Contributor grant' {
-        Add-CompliantPostWindowState
+        Add-CompliantPreWindowState
         $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -ne 'Cost Management Contributor' })
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Phase = 'PostWindow' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $script:Writes | Should -HaveCount 1
         $script:Writes[0] | Should -Be "NEW az role Cost Management Contributor $script:SubScope"
@@ -1674,14 +1834,15 @@ Context 'PostWindow phase' {
         Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $Tenant -eq $script:Ids.Tenant -and $Subscription -eq $script:Ids.Subscription -and $UseDeviceAuthentication -and $ClaimsChallenge }
         # Second run: pure verification.
         $script:Writes = @()
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Phase = 'PostWindow' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $script:Writes | Should -HaveCount 0
     }
 
     It 'on a legacy environment applies the narrow set before removing the broad grants' {
-        Add-LegacyPostWindowState
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Phase = 'PostWindow' }
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $news = @($script:Writes | Where-Object { $_ -like 'NEW az role*' })
         $removes = @($script:Writes | Where-Object { $_ -like 'REMOVE*' })
@@ -1696,17 +1857,19 @@ Context 'PostWindow phase' {
     }
 
     It 'does not mistake an inherited subscription role for the resource-group assignment' {
-        Add-LegacyPostWindowState
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Phase = 'PostWindow' }
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'RG role: Contributor' | Should -Be 'Created'
         @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq 'Contributor' -and $_.Scope -eq $script:RgScope }) | Should -HaveCount 1
     }
 
-    It 'leaves the broad grants in place when a narrow role could not be applied' {
-        Add-LegacyPostWindowState
+    It 'leaves the broad grants in place when a narrow role could not be applied, after the directory checks ran' {
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
         Mock New-AzRoleAssignment { param($RoleDefinitionName) if ($RoleDefinitionName -eq 'Monitoring Contributor') { throw 'AuthorizationFailed: The client does not have authorization to perform action' }; $script:Tenant.AzRoleAssignments += @{ ObjectId = $ObjectId; RoleDefinitionName = $RoleDefinitionName; Scope = $Scope }; Add-Write "NEW az role $RoleDefinitionName $Scope" }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Phase = 'PostWindow' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         (Get-SummaryResult 'RG role: Monitoring Contributor') | Should -Match '^FAILED - insufficient privileges'
         Get-SummaryResult 'Legacy subscription role: Contributor' | Should -Be 'SKIPPED - narrow roles not all in place'
@@ -1714,21 +1877,26 @@ Context 'PostWindow phase' {
         Should -Invoke Remove-AzRoleAssignment -Times 0
         Should -Invoke Remove-MgDirectoryRoleMemberDirectoryObjectByRef -Times 0
         @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.Scope -eq $script:SubScope -and $_.RoleDefinitionName -eq 'Contributor' }) | Should -HaveCount 1
+        Get-SummaryResult 'Agent blueprint' | Should -Be 'Present'
+        Get-SummaryResult 'Retired Graph role: Group.Create' | Should -Be 'Not held'
+        Get-SummaryResult 'Admin consent' | Should -Be 'Present'
     }
 
     It 'treats a RoleAssignmentExists race as already in place' {
-        Add-CompliantPostWindowState
+        Add-CompliantPreWindowState
         $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -ne 'Reader' })
         Mock New-AzRoleAssignment { throw 'RoleAssignmentExists: The role assignment already exists.' }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Phase = 'PostWindow' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'subscription role: Reader' | Should -Be 'Already in place'
     }
 
     It 'stops with ACTION REQUIRED when the Azure sign-in fails, touching nothing' {
-        Add-LegacyPostWindowState
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
         Mock Connect-AzAccount { throw 'Device code expired' }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Phase = 'PostWindow' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         ($script:Console -join "`n") | Should -Match 'Owner \(or User Access Administrator\)'
         Get-SummaryResult 'RG role: Contributor' | Should -Be 'SKIPPED - Azure sign-in failed'
@@ -1737,60 +1905,156 @@ Context 'PostWindow phase' {
     }
 
     It 'stops when the Azure session selected another subscription' {
-        Add-LegacyPostWindowState
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
         $script:AzContextSubscription = [guid]::NewGuid().ToString()
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Phase = 'PostWindow' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         ($script:Console -join "`n") | Should -Match 'selected subscription'
         $script:Writes | Should -HaveCount 0
     }
 
     It 'installs the Az modules when absent' {
-        Add-CompliantPostWindowState
+        Add-CompliantPreWindowState
         Mock Get-NeologikAvailableModuleVersion { param($Name) if ($Name -like 'Az.*' -and $script:Installs -notcontains $Name) { @() } else { @([version]'5.5.0') } }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Phase = 'PostWindow' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $script:Installs | Should -Contain 'Az.Accounts'
         $script:Installs | Should -Contain 'Az.Resources'
     }
 
     It 'reports the directory role removal as failed when Graph refuses it' {
-        Add-LegacyPostWindowState
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
         Mock Remove-MgDirectoryRoleMemberDirectoryObjectByRef { throw (New-ForbiddenException) }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Phase = 'PostWindow' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         (Get-SummaryResult 'Application Administrator role') | Should -Match '^FAILED - insufficient privileges'
         Get-SummaryResult 'Legacy subscription role: Contributor' | Should -Be 'Removed'
     }
 
     It 'reads the directory role without a filter so a read error is never mistaken for not held' {
-        Add-LegacyPostWindowState
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
         Mock Get-MgDirectoryRole { throw (New-ForbiddenException) }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Phase = 'PostWindow' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         (Get-SummaryResult 'Application Administrator role') | Should -Match '^FAILED'
     }
 
     It 'accepts explicit parameters instead of a configuration file' {
-        Add-CompliantPostWindowState
-        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName; Phase = 'PostWindow' }
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 0
         $script:Writes | Should -HaveCount 0
     }
 }
 
+Context 'Verify-only run (-Verify)' {
+    It 'reports every pending change on a legacy environment, writes nothing and exits 1' {
+        Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.Read.All'
+        Add-LegacyAzureState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 1
+        $script:Writes | Should -HaveCount 0
+        @($script:Tenant.Apps) | Should -HaveCount 0
+        (Get-SummaryResult 'Agent blueprint') | Should -BeLike 'WOULD CREATE*'
+        Get-SummaryResult 'Blueprint principal' | Should -Be 'WOULD CREATE'
+        Get-SummaryResult 'Blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'WOULD ADD'
+        Get-SummaryResult 'Graph role: Application.ReadWrite.OwnedBy' | Should -Be 'WOULD GRANT'
+        Get-SummaryResult 'Retired Graph role: Application.Read.All' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'NCE group assignment' | Should -Be 'WOULD ASSIGN'
+        Get-SummaryResult 'Admin consent' | Should -Be 'MISSING - consent URL printed'
+        Get-SummaryResult 'RG role: Contributor' | Should -Be 'WOULD CREATE'
+        Get-SummaryResult 'subscription role: Cost Management Contributor' | Should -Be 'WOULD CREATE'
+        Get-SummaryResult 'Legacy subscription role: Contributor' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'Application Administrator role' | Should -Be 'WOULD REMOVE'
+        @($script:Summary | Where-Object { $_.Result -match '^(FAILED|SKIPPED)' }) | Should -HaveCount 0
+        ($script:Console -join "`n") | Should -Match 'verify-only'
+        ($script:Console -join "`n") | Should -Match 'nothing was written'
+        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentAccess_PreWindow_*.json')
+        $files | Should -HaveCount 1
+        $json = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
+        $json.verifyOnly | Should -BeTrue
+        $json.pendingChangeCount | Should -BeGreaterThan 10
+        (Get-FakeSp -Id $script:Ids.DeploySpId).appRoleAssignments | Should -HaveCount 1
+        @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
+        Should -Invoke Connect-MgGraph -Times 1
+        Should -Invoke Connect-AzAccount -Times 1
+    }
+
+    It 'is a clean pass on a compliant environment: exit 0, nothing pending' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 0
+        $script:Writes | Should -HaveCount 0
+        ($script:Console -join "`n") | Should -Match 'nothing would change'
+    }
+
+    It 'reports pending agent-user and mailbox grants in the post-window run without writing' {
+        Add-AgentIdentities -NoGrants
+        $x = $script:Tenant.Exchange
+        $x.ServicePrincipals += @{ Identity = $script:Ids.LegacyObjectId; ObjectId = $script:Ids.LegacyObjectId; AppId = $script:Ids.LegacyAppId; DisplayName = 'email-monitor' }
+        $x.Assignments += @{ Name = 'Assignment-email-monitor-MailRead'; Role = 'Application Mail.Read'; RoleAssigneeName = $script:Ids.LegacyObjectId }
+        $grants = New-GrantsFile -Grants @((New-AgentGrantEntry -Scopes @('User.Read', 'Mail.Read')))
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants; MailboxGrantsFile = (New-MailboxFile); RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId); Verify = $true }
+        $code | Should -Be 1
+        $script:Writes | Should -HaveCount 0
+        Get-SummaryResult 'Agent-user grant: agent Support Agent' | Should -Be 'WOULD GRANT (Mail.Read User.Read)'
+        (Get-SummaryResult 'Mailbox grant: support@contoso.com -> neo-support') | Should -BeLike 'WOULD GRANT (service principal pointer, management scope Scope-neo-support, assignment*'
+        Get-SummaryResult "Legacy mailbox grant: $($script:Ids.LegacyAppId)" | Should -Be 'WOULD REMOVE (1 assignment(s) and the pointer)'
+        @((Get-FakeSp -Id $script:Ids.AgentIdentitySp).grants) | Should -HaveCount 0
+        @($x.Assignments) | Should -HaveCount 1
+        @($x.ServicePrincipals) | Should -HaveCount 1
+        $script:ExchangeDisconnected | Should -BeTrue
+    }
+
+    It 'the write seams refuse every write in a verify-only run, whatever the caller does' {
+        $script:State = @{ Verify = $true }
+        { Invoke-NeologikGraph -Method POST -Uri "$script:GraphV1/oauth2PermissionGrants" -Body '{}' } | Should -Throw -ExpectedMessage '*verify-only run*'
+        { Invoke-NeologikWrite -Command 'New-AzRoleAssignment' -Parameters @{ ObjectId = 'x'; RoleDefinitionName = 'Reader'; Scope = '/subscriptions/x' } } | Should -Throw -ExpectedMessage '*verify-only run*'
+        $script:GraphCalls | Should -HaveCount 0
+        $script:Writes | Should -HaveCount 0
+        Should -Invoke New-AzRoleAssignment -Times 0
+        # A read passes.
+        $null = Invoke-NeologikGraph -Method GET -Uri "$script:GraphV1/me"
+        $script:GraphCalls | Should -Contain 'GET /me'
+        # Without -Verify the seam performs the write.
+        $script:State = @{ Verify = $false }
+        Invoke-NeologikWrite -Command 'New-AzRoleAssignment' -Parameters @{ ObjectId = 'x'; RoleDefinitionName = 'Reader'; Scope = '/subscriptions/x' }
+        $script:Writes | Should -HaveCount 1
+    }
+}
+
+Context 'Parameter surface' {
+    It 'has no -Phase parameter: the files given select the run' {
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$tokens, [ref]$parseErrors)
+        @($parseErrors) | Should -HaveCount 0
+        $names = @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+        $names | Should -Not -Contain 'Phase'
+        $names | Should -Contain 'Verify'
+        $names | Should -Contain 'AgentGrantsFile'
+        $names | Should -Contain 'MailboxGrantsFile'
+        { Invoke-NeologikEnvironmentAccess -ConfigurationFile (New-ConfigFile) -Phase 'PostWindow' } | Should -Throw -ExpectedMessage "*'Phase'*"
+        Should -Invoke Connect-MgGraph -Times 0
+    }
+}
+
 Context 'Summary and exit code' {
-    It 'flags FAILED, UNKNOWN, MISSING, SKIPPED, PENDING and NOT FOUND as attention' {
-        foreach ($result in @('FAILED - x', 'UNKNOWN - x', 'MISSING - x', 'SKIPPED - x', 'PENDING - x', 'NOT FOUND - x')) {
+    It 'flags FAILED, UNKNOWN, MISSING, SKIPPED, PENDING, NOT FOUND and WOULD as attention' {
+        foreach ($result in @('FAILED - x', 'UNKNOWN - x', 'MISSING - x', 'SKIPPED - x', 'PENDING - x', 'NOT FOUND - x', 'WOULD GRANT', 'WOULD REMOVE (2 assignment(s))')) {
             $result | Should -Match $script:AttentionPattern
         }
-        foreach ($result in @('Present', 'Created', 'Already granted', 'Granted (User.Read)', 'Removed', 'Not held', 'Not present', 'Not needed', 'Updated (a b)')) {
+        foreach ($result in @('Present', 'Created', 'Already granted', 'Granted (User.Read)', 'Removed', 'Not held', 'Not present', 'Not needed', 'Updated (a b)',
+                'Not checked - runs with the agent grants file', 'Identity adopted by the v5 email channel - assignment kept')) {
             $result | Should -Not -Match $script:AttentionPattern
         }
     }
 
     It 'returns 1 and keeps going when the summary roles cannot be read' {
-        Add-CompliantWindowState
+        Add-CompliantPreWindowState
         $script:Tenant.Exchange.InScope = $false
         Mock Get-NeologikHeldGraphRole { throw 'read failed' }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
