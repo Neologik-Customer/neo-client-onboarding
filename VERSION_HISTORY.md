@@ -29,12 +29,15 @@ This document tracks the version history of the Neologik customer onboarding scr
   reported as HELD and kept, with the reason). The Admin User Group is read
   from the configuration file's SecurityGroups or the new `-AdminGroupId`
   parameter; with neither the item reads "Not checked" and needs no
-  attention. `-Verify` reports the removal as a pending change.
+  attention. `-Verify` reports the removal as a pending change. The
+  pre-window run requests the delegated scope `GroupMember.ReadWrite.All`
+  for the removal.
 - Quick reference: section 5 "Group Membership" now states the rule.
-- Pester: 123 passed (nine new cases: not held, held while a server still
+- Pester: 124 passed (ten new cases: not held, held while a server still
   names the group, removed once every server names the identity, held with
   one of two servers, held with no server yet, verify-only pending change,
-  not checked without an id, explicit `-AdminGroupId`, refused removal).
+  not checked without an id, explicit `-AdminGroupId`, the requested
+  scopes, refused removal).
   One fixture change: the missing-group test now uses an id no fake object
   carries, since the Admin User Group is a real group in the fake tenant.
 

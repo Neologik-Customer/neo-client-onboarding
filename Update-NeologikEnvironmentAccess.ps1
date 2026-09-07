@@ -115,10 +115,9 @@
     Directory.Read.All, User.Read, DelegatedPermissionGrant.Read.All,
     AgentIdentityBlueprint.Create, AgentIdentityBlueprint.AddRemoveCreds.All,
     AgentIdentityBlueprintPrincipal.Create; plus
-    RoleManagement.ReadWrite.Directory in the pre-window run (the
-    Application Administrator directory role removal; the Admin User Group
-    membership removal of project#2269 uses the group write the same scopes
-    cover) and
+    RoleManagement.ReadWrite.Directory and GroupMember.ReadWrite.All in the
+    pre-window run (the Application Administrator directory role removal and
+    the Admin User Group membership removal of project#2269) and
     DelegatedPermissionGrant.ReadWrite.All in the post-window run with
     -AgentGrantsFile. The read-only Directory.Read.All and User.Read are
     what the group, consent and directory-role checks need on a tenant
@@ -1029,8 +1028,11 @@ function Get-NeologikGraphScope {
     }
     if ($state.Run -eq 'PreWindow') {
         # The permission reduction removes the deployment identity's
-        # Application Administrator directory role membership.
+        # Application Administrator directory role membership and, once the
+        # SQL server administrator is the deployment identity, its Admin User
+        # Group membership (project#2269).
         $scopes += 'RoleManagement.ReadWrite.Directory'
+        $scopes += 'GroupMember.ReadWrite.All'
     }
     return $scopes
 }

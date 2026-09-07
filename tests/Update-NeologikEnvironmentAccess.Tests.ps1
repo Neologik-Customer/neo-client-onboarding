@@ -2220,6 +2220,12 @@ Context 'Pre-window run: Admin User Group membership (step 4d, project#2269)' {
         Get-SummaryResult 'Admin User Group membership' | Should -Be 'Removed'
     }
 
+    It 'requests the group-member write scope for the pre-window run' {
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { @($Scopes) -contains 'GroupMember.ReadWrite.All' -and @($Scopes) -contains 'RoleManagement.ReadWrite.Directory' }
+    }
+
     It 'reports a refused removal without touching anything else' {
         Add-AdminGroupMembership
         Set-SqlAdministrator -ObjectId $script:Ids.DeploySpId
