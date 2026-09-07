@@ -71,7 +71,7 @@ Get-MailboxPermission   -Identity $mailbox -User $account    | Format-Table User
 Get-RecipientPermission -Identity $mailbox -Trustee $account | Format-Table Trustee, AccessRights
 ```
 
-The two Get commands should each list the account. Both rights take effect within a few minutes. `-AutoMapping $false` keeps the mailbox out of any Outlook profile, which the account never has.
+The two Get commands should each list the account. Both rights usually take effect within minutes, occasionally over an hour: press Refresh on the loop page in the Neologik admin tool until the mailbox row reads Access confirmed. `-AutoMapping $false` keeps the mailbox out of any Outlook profile, which the account never has.
 
 ## 3. Make the account a member of a SharePoint site
 
