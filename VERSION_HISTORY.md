@@ -12,6 +12,14 @@ This document tracks the version history of the Neologik customer onboarding scr
 ## Unreleased
 
 ### Changes
+- **Agent account access guide** (project#2239, owner decision 2026-09-07):
+  new `AGENT-ACCOUNT-ACCESS-GUIDE.md` tells a customer's administrators how
+  to licence an agent account, give it Full Access and Send As on a shared
+  mailbox, and make it a member of a SharePoint site or a Teams team - the
+  portals' pickers cannot find agent accounts, so each step is a short
+  command - and how the admin tool's chips confirm each step. Linked from
+  the README's post-deployment section and as Step 5 of the
+  post-deployment guide.
 - **Pooja Pandey added to `NeologikGuestUsers.txt`** (project#1448): future
   onboarding runs invite Pooja.Pandey@neologik.ai as a B2B guest and seed
   her into the per-environment security groups.
