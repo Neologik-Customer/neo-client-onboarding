@@ -220,6 +220,9 @@
     ./Update-NeologikEnvironmentAccess.ps1 -ConfigurationFile ./Neologik_abcprd_Configuration_20250101_120000.json
 
     The pre-window run: checks and grants, then the guarded permission reduction.
+    The reduction is "declared set or nothing" (project#2297): every directory
+    role, group membership and Azure role assignment the deployment identity
+    holds outside the declared set is reported (-Verify) and removed.
 
 .EXAMPLE
     ./Update-NeologikEnvironmentAccess.ps1 -ConfigurationFile ./Neologik_abcprd_Configuration_20250101_120000.json -Verify
@@ -364,6 +367,16 @@ $script:LegacySubRoles = @('Contributor', 'User Access Administrator')
 # administrator - before that the membership is the identity's only SQL
 # access. The group is found in the configuration's SecurityGroups by name.
 $script:AdminGroupNamePattern = 'Neologik Admin User Group*'
+
+# Declared set or nothing (project#2297, owner decision 2026-09-08): the
+# deployment identity holds the roles above and nothing else. The one
+# declared resource-scoped role - allowed at any scope BELOW the resource
+# group - is granted by the platform infrastructure deployment on the Content
+# Understanding account (it sets the account defaults). Everything else the
+# identity holds in the subscription, every directory role and every group
+# membership is removed by the pre-window run. The evaluation harness runs as
+# the test-runner managed identity, so it needs nothing on this identity.
+$script:DeclaredResourceRoles = @('Cognitive Services Content Understanding Contributor')
 
 $script:GraphSpAppId = '00000003-0000-0000-c000-000000000000'
 # The SharePoint app's role (Sites.Selected), checked when the configuration
@@ -2361,6 +2374,151 @@ function Remove-NeologikAdminGroupMembership {
     }
 }
 
+function ConvertTo-NeologikScopeLabel {
+    # A short scope label for the summary: 'subscription', 'resource group',
+    # or the resource name below the group.
+    param([string]$Scope)
+    if ($Scope -match '^/subscriptions/[^/]+$') { return 'subscription' }
+    if ($Scope -match '^/subscriptions/[^/]+/resourceGroups/[^/]+$') { return 'resource group' }
+    return ($Scope -split '/')[-1]
+}
+
+function Test-NeologikDeclaredAzureRole {
+    # Is this assignment part of the declared set?
+    param([string]$RoleName, [string]$Scope, [string]$RgScope, [string]$SubScope)
+    if ($Scope -eq $RgScope) { return [bool]($script:RequiredRgRoles -contains $RoleName) }
+    if ($Scope -eq $SubScope) { return [bool]($script:RequiredSubRoles -contains $RoleName) }
+    if ($Scope.StartsWith("$RgScope/", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return [bool]($script:DeclaredResourceRoles -contains $RoleName)
+    }
+    return $false
+}
+
+function Remove-NeologikUndeclaredAzureRole {
+    # 4e. Declared set or nothing (project#2297): every Azure role assignment
+    # the deployment identity holds in the subscription outside the declared
+    # set is removed - the narrow set at resource-group scope, the two retained
+    # subscription roles and the declared resource-scoped roles are the set.
+    $state = $script:State
+    $deploySp = $state.DeploySp
+    $rgScope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)"
+    $subScope = "/subscriptions/$($state.SubscriptionId)"
+    try {
+        $assignments = @(Get-AzRoleAssignment -ObjectId $deploySp.Id -ErrorAction Stop)
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        Write-Log "  undeclared Azure roles - could not be listed ($reason)" -Level Error
+        Add-Summary 'Undeclared Azure roles' "FAILED - $reason"
+        return
+    }
+    $undeclared = @($assignments | Where-Object {
+            -not (Test-NeologikDeclaredAzureRole -RoleName ([string]$_.RoleDefinitionName) -Scope ([string]$_.Scope) -RgScope $rgScope -SubScope $subScope)
+        })
+    if ($undeclared.Count -eq 0) {
+        Write-Log '  undeclared Azure roles - none' -Level Success
+        Add-Summary 'Undeclared Azure roles' 'None'
+        return
+    }
+    foreach ($assignment in $undeclared) {
+        $roleName = [string]$assignment.RoleDefinitionName
+        $scope = [string]$assignment.Scope
+        $label = "Undeclared Azure role: $roleName @ $(ConvertTo-NeologikScopeLabel $scope)"
+        if (Test-NeologikVerifyOnly) {
+            Add-NeologikPendingChange $label 'REMOVE'
+            continue
+        }
+        try {
+            Invoke-NeologikWrite -Command 'Remove-AzRoleAssignment' -Parameters @{ ObjectId = $deploySp.Id; RoleDefinitionName = $roleName; Scope = $scope } | Out-Null
+            Write-Log "  $label - REMOVED" -Level Success
+            Add-Summary $label 'Removed'
+        }
+        catch {
+            $reason = Get-NeologikErrorText $_
+            Write-Log "  $label - FAILED ($reason)" -Level Error
+            Add-Summary $label "FAILED - $reason"
+        }
+    }
+}
+
+function Remove-NeologikUndeclaredDirectoryRole {
+    # 4f. Declared set or nothing (project#2297): the deployment identity
+    # holds no directory role at all. Application Administrator keeps its own
+    # step (4c); this removes every other one held (Agent ID Administrator on
+    # dev03 was one).
+    $deploySp = $script:State.DeploySp
+    try {
+        $roles = @(Get-MgDirectoryRole -All -ErrorAction Stop | Where-Object { $_.RoleTemplateId -ne $script:AppAdminRoleTemplateId })
+        $held = @()
+        foreach ($role in $roles) {
+            if (@(Get-MgDirectoryRoleMember -DirectoryRoleId $role.Id -All -ErrorAction Stop | Where-Object { $_.Id -eq $deploySp.Id }).Count -gt 0) {
+                $held += $role
+            }
+        }
+        if ($held.Count -eq 0) {
+            Write-Log '  undeclared directory roles - none' -Level Success
+            Add-Summary 'Undeclared directory roles' 'None'
+            return
+        }
+        foreach ($role in $held) {
+            $name = [string](Get-NeologikProperty $role 'DisplayName' '')
+            if (-not $name) { $name = [string]$role.RoleTemplateId }
+            $label = "Undeclared directory role: $name"
+            if (Test-NeologikVerifyOnly) {
+                Add-NeologikPendingChange $label 'REMOVE'
+                continue
+            }
+            Invoke-NeologikWrite -Command 'Remove-MgDirectoryRoleMemberDirectoryObjectByRef' -Parameters @{ DirectoryRoleId = $role.Id; DirectoryObjectId = $deploySp.Id } | Out-Null
+            Write-Log "  $label - REMOVED" -Level Success
+            Add-Summary $label 'Removed'
+        }
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges - sign in as a Global Administrator or Privileged Role Administrator' }
+        Write-Log "  undeclared directory roles - FAILED ($reason)" -Level Error
+        Add-Summary 'Undeclared directory roles' "FAILED - $reason"
+    }
+}
+
+function Remove-NeologikUndeclaredGroupMembership {
+    # 4g. Declared set or nothing (project#2297): the deployment identity is a
+    # member of no group. The Admin User Group keeps its guarded step (4d);
+    # this removes every other membership (Neologik Dev Team on dev03 was one).
+    $state = $script:State
+    $deploySp = $state.DeploySp
+    try {
+        $groups = @(Get-MgServicePrincipalMemberOf -ServicePrincipalId $deploySp.Id -All -ErrorAction Stop | Where-Object {
+                $extra = Get-NeologikProperty $_ 'AdditionalProperties' @{}
+                ([string]$extra['@odata.type']) -eq '#microsoft.graph.group' -and $_.Id -ne $state.AdminGroupId
+            })
+        if ($groups.Count -eq 0) {
+            Write-Log '  undeclared group memberships - none' -Level Success
+            Add-Summary 'Undeclared group memberships' 'None'
+            return
+        }
+        foreach ($group in $groups) {
+            $extra = Get-NeologikProperty $group 'AdditionalProperties' @{}
+            $name = [string]$extra['displayName']
+            if (-not $name) { $name = [string]$group.Id }
+            $label = "Undeclared group membership: $name"
+            if (Test-NeologikVerifyOnly) {
+                Add-NeologikPendingChange $label 'REMOVE'
+                continue
+            }
+            Invoke-NeologikWrite -Command 'Remove-MgGroupMemberByRef' -Parameters @{ GroupId = $group.Id; DirectoryObjectId = $deploySp.Id } | Out-Null
+            Write-Log "  $label - REMOVED" -Level Success
+            Add-Summary $label 'Removed'
+        }
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges - sign in as a Global Administrator or an owner of the group' }
+        Write-Log "  undeclared group memberships - FAILED ($reason)" -Level Error
+        Add-Summary 'Undeclared group memberships' "FAILED - $reason"
+    }
+}
+
 function Invoke-NeologikPermissionReduction {
     <#
     Step 4 of the pre-window run: the deployment identity moves to the
@@ -2380,12 +2538,14 @@ function Invoke-NeologikPermissionReduction {
         foreach ($item in $azureItems) { Add-Summary $item 'SKIPPED - Az modules not available' }
         Add-Summary 'Application Administrator role' 'SKIPPED - narrow Azure roles not confirmed'
         Add-Summary 'Admin User Group membership' 'SKIPPED - narrow Azure roles not confirmed'
+        foreach ($item in @('Undeclared Azure roles', 'Undeclared directory roles', 'Undeclared group memberships')) { Add-Summary $item 'SKIPPED - narrow Azure roles not confirmed' }
         return
     }
     if (-not (Connect-NeologikAzure)) {
         foreach ($item in $azureItems) { Add-Summary $item 'SKIPPED - Azure sign-in failed' }
         Add-Summary 'Application Administrator role' 'SKIPPED - narrow Azure roles not confirmed'
         Add-Summary 'Admin User Group membership' 'SKIPPED - narrow Azure roles not confirmed'
+        foreach ($item in @('Undeclared Azure roles', 'Undeclared directory roles', 'Undeclared group memberships')) { Add-Summary $item 'SKIPPED - narrow Azure roles not confirmed' }
         return
     }
 
@@ -2411,6 +2571,7 @@ function Invoke-NeologikPermissionReduction {
         foreach ($roleName in $script:LegacySubRoles) { Add-Summary "Legacy subscription role: $roleName" 'SKIPPED - narrow roles not all in place' }
         Add-Summary 'Application Administrator role' 'SKIPPED - narrow roles not all in place'
         Add-Summary 'Admin User Group membership' 'SKIPPED - narrow roles not all in place'
+        foreach ($item in @('Undeclared Azure roles', 'Undeclared directory roles', 'Undeclared group memberships')) { Add-Summary $item 'SKIPPED - narrow roles not all in place' }
         return
     }
 
@@ -2425,6 +2586,12 @@ function Invoke-NeologikPermissionReduction {
     # 4d. remove the Admin User Group membership (project#2269) - only once
     # the SQL server administrator is the deployment identity.
     Remove-NeologikAdminGroupMembership
+
+    # 4e-4g. declared set or nothing (project#2297): every other Azure role
+    # assignment, directory role and group membership goes.
+    Remove-NeologikUndeclaredAzureRole
+    Remove-NeologikUndeclaredDirectoryRole
+    Remove-NeologikUndeclaredGroupMembership
 }
 
 # ----- the two runs ---------------------------------------------------------------

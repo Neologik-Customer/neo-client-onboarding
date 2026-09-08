@@ -33,6 +33,7 @@ BeforeAll {
     function New-MgGroupAppRoleAssignment { [CmdletBinding()] param($GroupId, $PrincipalId, $ResourceId, $AppRoleId) }
     function Get-MgGroup { [CmdletBinding()] param($GroupId) }
     function Get-MgGroupMember { [CmdletBinding()] param($GroupId, [switch]$All) }
+    function Get-MgServicePrincipalMemberOf { [CmdletBinding()] param($ServicePrincipalId, [switch]$All) }
     function Get-MgServicePrincipalOauth2PermissionGrant { [CmdletBinding()] param($ServicePrincipalId, [switch]$All) }
     function Get-MgDirectoryRole { [CmdletBinding()] param([switch]$All, $Filter) }
     function Get-MgDirectoryRoleMember { [CmdletBinding()] param($DirectoryRoleId, [switch]$All) }
@@ -91,6 +92,8 @@ BeforeAll {
         SharePoint2SpId  = 'bbbbbbbb-3333-bbbb-bbbb-bbbbbbbbbbbb'
         SharePoint2AppId = 'bbbbbbbb-4444-bbbb-bbbb-bbbbbbbbbbbb'
         AppAdminRole     = 'cccccccc-1111-cccc-cccc-cccccccccccc'
+        AgentIdAdminRole = 'cccccccc-2222-cccc-cccc-cccccccccccc'
+        DevTeamGroup     = '55555555-bbbb-5555-5555-555555555555'
         MailboxAppId     = 'dddddddd-1111-dddd-dddd-dddddddddddd'
         MailboxObjectId  = 'dddddddd-2222-dddd-dddd-dddddddddddd'
         LegacyAppId      = 'eeeeeeee-1111-eeee-eeee-eeeeeeeeeeee'
@@ -242,6 +245,24 @@ BeforeAll {
         # the Admin User Group (its only SQL access while the group is the
         # server administrator).
         Add-AdminGroupMembership
+    }
+
+    function Add-UndeclaredState {
+        # project#2297: what the audit found beyond the declared set - the
+        # evals self-grants at resource-group scope, a subscription-scope
+        # leftover, an undeclared resource-scoped role, the declared
+        # resource-scoped Content Understanding role (kept), a directory role
+        # other than Application Administrator, and a group other than the
+        # Admin User Group.
+        $t = $script:Tenant
+        foreach ($roleName in @('Azure AI Developer', 'Foundry User', 'Reader', 'Search Index Data Reader')) {
+            $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = $roleName; Scope = $script:RgScope }
+        }
+        $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = 'Key Vault Secrets Officer'; Scope = $script:SubScope }
+        $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = 'Search Index Data Reader'; Scope = "$script:RgScope/providers/Microsoft.Search/searchServices/srch-$script:ShortName" }
+        $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = 'Cognitive Services Content Understanding Contributor'; Scope = "$script:RgScope/providers/Microsoft.CognitiveServices/accounts/ais-cu-$script:ShortName" }
+        $t.DirectoryRoles += @{ Id = $script:Ids.AgentIdAdminRole; RoleTemplateId = 'db506228-d27e-4b7d-95e5-295956d6615f'; DisplayName = 'Agent ID Administrator'; members = @($script:Ids.DeploySpId) }
+        $t.Groups += @{ id = $script:Ids.DevTeamGroup; displayName = 'Neologik Dev Team'; members = @(@{ id = $script:Ids.DeploySpId }, @{ id = $script:Ids.Me }); appRoleAssignments = @() }
     }
 
     function Get-FakeGroup {
@@ -643,7 +664,12 @@ BeforeAll {
         if (-not $sp) { throw (New-NotFoundException) }
         @($sp.grants | ForEach-Object { [pscustomobject]@{ Id = $_.id; ConsentType = $_.consentType; Scope = $_.scope; ResourceId = $_.resourceId } })
     }
-    Mock Get-MgDirectoryRole { @($script:Tenant.DirectoryRoles | ForEach-Object { [pscustomobject]@{ Id = $_.Id; RoleTemplateId = $_.RoleTemplateId } }) }
+    Mock Get-MgDirectoryRole { @($script:Tenant.DirectoryRoles | ForEach-Object { [pscustomobject]@{ Id = $_.Id; RoleTemplateId = $_.RoleTemplateId; DisplayName = [string](Get-NeologikProperty $_ 'DisplayName' '') } }) }
+    Mock Get-MgServicePrincipalMemberOf {
+        param($ServicePrincipalId)
+        @($script:Tenant.Groups | Where-Object { @($_.members | Where-Object { $_.id -eq $ServicePrincipalId }).Count -gt 0 } |
+            ForEach-Object { [pscustomobject]@{ Id = $_.id; AdditionalProperties = @{ '@odata.type' = '#microsoft.graph.group'; displayName = $_.displayName } } })
+    }
     Mock Get-MgDirectoryRoleMember {
         param($DirectoryRoleId)
         $role = @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $DirectoryRoleId }) | Select-Object -First 1
@@ -678,7 +704,9 @@ BeforeAll {
         param($ObjectId, $RoleDefinitionName, $Scope)
         # Azure returns the assignment at the scope and every inherited one above it.
         @($script:Tenant.AzRoleAssignments | Where-Object {
-                $_.ObjectId -eq $ObjectId -and $_.RoleDefinitionName -eq $RoleDefinitionName -and $Scope.StartsWith($_.Scope, [System.StringComparison]::OrdinalIgnoreCase)
+                $_.ObjectId -eq $ObjectId -and
+                ((-not $RoleDefinitionName) -or $_.RoleDefinitionName -eq $RoleDefinitionName) -and
+                ((-not $Scope) -or $Scope.StartsWith($_.Scope, [System.StringComparison]::OrdinalIgnoreCase))
             } | ForEach-Object { [pscustomobject]$_ })
     }
     Mock New-AzRoleAssignment {
@@ -2243,6 +2271,77 @@ Context 'Pre-window run: Admin User Group membership (step 4d, project#2269)' {
         $code | Should -Be 1
         (Get-SummaryResult 'Admin User Group membership') | Should -Match '^FAILED - insufficient privileges'
         @((Get-FakeGroup -Id $script:Ids.AdminGroup).members | ForEach-Object { $_.id }) | Should -Contain $script:Ids.DeploySpId
+    }
+}
+
+Context 'Pre-window run: declared set or nothing (steps 4e-4g, project#2297)' {
+    BeforeEach {
+        Add-CompliantDirectoryState
+        Add-CompliantAzureState
+    }
+
+    It 'reports nothing undeclared on a compliant environment' {
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Undeclared Azure roles' | Should -Be 'None'
+        Get-SummaryResult 'Undeclared directory roles' | Should -Be 'None'
+        Get-SummaryResult 'Undeclared group memberships' | Should -Be 'None'
+        Should -Invoke Remove-AzRoleAssignment -Times 0
+        Should -Invoke Remove-MgGroupMemberByRef -Times 0
+    }
+
+    It 'removes every undeclared Azure role, directory role and group membership and keeps the declared set' {
+        Add-UndeclaredState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        foreach ($item in @('Undeclared Azure role: Azure AI Developer @ resource group', 'Undeclared Azure role: Foundry User @ resource group',
+                'Undeclared Azure role: Reader @ resource group', 'Undeclared Azure role: Search Index Data Reader @ resource group',
+                'Undeclared Azure role: Key Vault Secrets Officer @ subscription', "Undeclared Azure role: Search Index Data Reader @ srch-$script:ShortName",
+                'Undeclared directory role: Agent ID Administrator', 'Undeclared group membership: Neologik Dev Team')) {
+            Get-SummaryResult $item | Should -Be 'Removed' -Because "$item must go"
+        }
+        Get-SummaryResult 'Undeclared Azure role: Cognitive Services Content Understanding Contributor @ ais-cu-abcprd01' | Should -BeNullOrEmpty -Because 'the Content Understanding role is declared at resource scope'
+        $left = @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $script:Ids.DeploySpId })
+        @($left | Where-Object { $_.RoleDefinitionName -eq 'Cognitive Services Content Understanding Contributor' }) | Should -HaveCount 1
+        @($left | Where-Object { $_.RoleDefinitionName -in @('Azure AI Developer', 'Foundry User') }) | Should -HaveCount 0
+        @($left | Where-Object { $_.Scope -eq $script:SubScope }).RoleDefinitionName | Sort-Object | Should -Be @('Cost Management Contributor', 'Reader')
+        @($left | Where-Object { $_.Scope -eq $script:RgScope }).RoleDefinitionName | Sort-Object | Should -Be @($script:RequiredRgRoles | Sort-Object)
+        @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $script:Ids.AgentIdAdminRole })[0].members | Should -HaveCount 0
+        @((Get-FakeGroup -Id $script:Ids.DevTeamGroup).members | ForEach-Object { $_.id }) | Should -Not -Contain $script:Ids.DeploySpId
+        @((Get-FakeGroup -Id $script:Ids.DevTeamGroup).members | ForEach-Object { $_.id }) | Should -Contain $script:Ids.Me
+    }
+
+    It 'reports every undeclared item as a pending removal in a verify-only run and writes nothing' {
+        Add-UndeclaredState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 1
+        Get-SummaryResult 'Undeclared Azure role: Foundry User @ resource group' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'Undeclared directory role: Agent ID Administrator' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'Undeclared group membership: Neologik Dev Team' | Should -Be 'WOULD REMOVE'
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'leaves everything undeclared in place while the narrow set is incomplete' {
+        Add-UndeclaredState
+        Mock New-AzRoleAssignment { param($RoleDefinitionName) if ($RoleDefinitionName -eq 'Monitoring Contributor') { throw 'AuthorizationFailed: The client does not have authorization to perform action' }; $script:Tenant.AzRoleAssignments += @{ ObjectId = $ObjectId; RoleDefinitionName = $RoleDefinitionName; Scope = $Scope }; Add-Write "NEW az role $RoleDefinitionName $Scope" }
+        $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -ne 'Monitoring Contributor' })
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        Get-SummaryResult 'Undeclared Azure roles' | Should -Be 'SKIPPED - narrow roles not all in place'
+        Get-SummaryResult 'Undeclared directory roles' | Should -Be 'SKIPPED - narrow roles not all in place'
+        Get-SummaryResult 'Undeclared group memberships' | Should -Be 'SKIPPED - narrow roles not all in place'
+        Should -Invoke Remove-AzRoleAssignment -Times 0
+        Should -Invoke Remove-MgGroupMemberByRef -Times 0
+        @((Get-FakeGroup -Id $script:Ids.DevTeamGroup).members | ForEach-Object { $_.id }) | Should -Contain $script:Ids.DeploySpId
+    }
+
+    It 'reports a refused group removal and continues' {
+        Add-UndeclaredState
+        Mock Remove-MgGroupMemberByRef { throw (New-ForbiddenException) }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        (Get-SummaryResult 'Undeclared group memberships') | Should -Match '^FAILED - insufficient privileges'
+        Get-SummaryResult 'Undeclared directory role: Agent ID Administrator' | Should -Be 'Removed'
     }
 }
 

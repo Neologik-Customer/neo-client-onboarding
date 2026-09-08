@@ -151,6 +151,9 @@ The environment type joins the organisation code in every name (project#1576). E
 | **Application.ReadWrite.OwnedBy** | Microsoft Graph (app role) | Service Principal |
 | **AgentIdentityBlueprint.AddRemoveCreds.All** | Microsoft Graph (app role) | Service Principal |
 | **AgentIdUser.ReadWrite.IdentityParentedBy** | Microsoft Graph (app role) | Agent identity blueprint principal (not the Service Principal) |
+| **Cognitive Services Content Understanding Contributor** | The Content Understanding account (resource scope) | Service Principal - granted by the platform infrastructure deployment, not by this script (project#2297) |
+
+> **Declared set or nothing (project#2297):** the table above is everything the deployment service principal holds. The `Update-NeologikEnvironmentAccess.ps1` pre-window run reports (`-Verify`) and removes every directory role, group membership and Azure role assignment the principal holds outside it, at any scope in the subscription. The evaluation harness runs as the environment's test-runner managed identity, which carries its own resource-scoped roles, so nothing is granted to the deployment principal for it.
 
 > The subscription-scoped roles are read-only (**Reader**, for SKU/quota pre-flight checks) and cost-configuration-only (**Cost Management Contributor**, for the scheduled cost-report emails) - all resource writes are resource-group-scoped. The six **AgentIdentity\*/AgentIdUser** roles let the deployment service principal provision **Microsoft Entra Agent ID** blueprints, principals, and agent users for autonomous agents - scoped to agent-id only, rather than granting the broad "Agent ID Administrator" directory role. No group-management permission is granted: the platform never creates Entra groups.
 
