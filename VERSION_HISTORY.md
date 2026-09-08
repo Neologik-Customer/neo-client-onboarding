@@ -9,6 +9,32 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Declared set or nothing: the pre-window run removes every undeclared role and membership (project#2297)
+**Date**: 2026-09-08
+
+- Owner decision 2026-09-08 (https://github.com/Neologik-AI/project/issues/2297):
+  the deployment service principal holds the declared set and nothing else.
+  `Update-NeologikEnvironmentAccess.ps1` step 4 gains three parts after the
+  Admin User Group step: 4e removes every Azure role assignment the principal
+  holds in the subscription outside the declared set (the narrow
+  resource-group roles, the two retained subscription roles, and the declared
+  resource-scoped Cognitive Services Content Understanding Contributor below
+  the group); 4f removes every directory role other than Application
+  Administrator (which keeps step 4c); 4g removes every group membership
+  other than the Admin User Group (which keeps the guarded step 4d).
+  `-Verify` reports each as a pending removal; the early returns of step 4
+  report the three items as skipped. Found by the audit under project#2269:
+  the neo-evals harness had been granting the principal Azure AI Developer,
+  Foundry User, Reader and Search Index Data Reader on every run (it now runs
+  as the test-runner identity), and dev03 carried a legacy Agent ID
+  Administrator role, a Neologik Dev Team membership and subscription-scope
+  leftovers.
+- Quick reference: the declared table gains the Content Understanding row and
+  the declared-set-or-nothing note.
+- Pester: 130 passed (five new cases: compliant, removal with the declared
+  resource-scoped role kept, verify-only pending changes, narrow set
+  incomplete, refused group removal).
+
 ## Unreleased - Az modules import at their own versions (project#2269 dev03 finding)
 **Date**: 2026-09-08
 
