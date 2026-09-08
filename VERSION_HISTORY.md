@@ -9,6 +9,17 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Az modules import at their own versions (project#2269 dev03 finding)
+**Date**: 2026-09-08
+
+- The first dev03 `-Verify` run after the Admin User Group step failed its
+  Azure half with "module 'Az.Accounts' with version '7.1.0' was not loaded":
+  `Import-NeologikModuleSet` pins one common version across a module set,
+  which is right for the Microsoft.Graph family and wrong for the Az family
+  (Az.Accounts 5.5, Az.Resources 10.0 and Az.Sql 7.1 never share a
+  version). The Az set now imports with `-Independent`: each module at its
+  own highest available version, no common pin. Pester 125.
+
 ## Unreleased - The deployment principal leaves the Admin User Group; SQL access is the declared server administrator (project#2269)
 **Date**: 2026-09-07
 

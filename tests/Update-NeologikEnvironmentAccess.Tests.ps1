@@ -2220,6 +2220,15 @@ Context 'Pre-window run: Admin User Group membership (step 4d, project#2269)' {
         Get-SummaryResult 'Admin User Group membership' | Should -Be 'Removed'
     }
 
+    It 'imports the Az modules at their own versions, never a common pin' {
+        Mock Get-NeologikAvailableModuleVersion { param($Name) switch -Wildcard ($Name) { 'Az.Accounts' { @([version]'5.5.3') } 'Az.Resources' { @([version]'10.0.0') } 'Az.Sql' { @([version]'7.1.0') } default { @([version]'2.38.0') } } }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        @($script:Imports | Where-Object { $_ -like 'Az.*' }) | Should -Be @('Az.Accounts ', 'Az.Resources ', 'Az.Sql ')
+        Get-SummaryResult 'RG role: Contributor' | Should -Be 'Already in place'
+        Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not held'
+    }
+
     It 'requests the group-member write scope for the pre-window run' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
