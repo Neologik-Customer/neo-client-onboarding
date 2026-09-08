@@ -978,8 +978,11 @@ function Import-NeologikModuleSet {
     module versions fail at import with an assembly conflict, the most
     common cause of a broken run on an administrator's workstation.
     Returns $true, or $false after printing what to do.
+    -Independent: the modules are versioned independently (the Az family:
+    Az.Accounts, Az.Resources and Az.Sql never share a version number) -
+    each is imported at its own highest available version, no common pin.
     #>
-    param([string[]]$Names, [version]$MinimumVersion, [string]$InstallHint)
+    param([string[]]$Names, [version]$MinimumVersion, [string]$InstallHint, [switch]$Independent)
     try {
         foreach ($name in $Names) {
             $versions = @(Get-NeologikAvailableModuleVersion -Name $name | Where-Object { $_ -ge $MinimumVersion })
@@ -987,6 +990,10 @@ function Import-NeologikModuleSet {
                 Write-Log "Installing module $name (first run only)..." -Level Info
                 Install-NeologikModule -Name $name -MinimumVersion $MinimumVersion
             }
+        }
+        if ($Independent) {
+            foreach ($name in $Names) { Import-NeologikModule -Name $name }
+            return $true
         }
         # A version already loaded in this session pins the choice; otherwise
         # the highest version every module has in common.
@@ -2368,7 +2375,7 @@ function Invoke-NeologikPermissionReduction {
     foreach ($roleName in $script:RequiredRgRoles) { $azureItems += "RG role: $roleName" }
     foreach ($roleName in $script:RequiredSubRoles) { $azureItems += "Sub role: $roleName" }
     foreach ($roleName in $script:LegacySubRoles) { $azureItems += "Legacy Sub role: $roleName" }
-    if (-not (Import-NeologikModuleSet -Names @('Az.Accounts', 'Az.Resources', 'Az.Sql') -MinimumVersion ([version]'2.0.0') `
+    if (-not (Import-NeologikModuleSet -Names @('Az.Accounts', 'Az.Resources', 'Az.Sql') -MinimumVersion ([version]'2.0.0') -Independent `
                 -InstallHint 'Install-Module Az.Accounts, Az.Resources, Az.Sql -Scope CurrentUser -Force')) {
         foreach ($item in $azureItems) { Add-Summary $item 'SKIPPED - Az modules not available' }
         Add-Summary 'Application Administrator role' 'SKIPPED - narrow Azure roles not confirmed'
