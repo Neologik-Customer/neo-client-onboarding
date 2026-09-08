@@ -26,6 +26,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   role-list cmdlets throw if called; a case proves both steps find and
   remove the roles without them (Pester 131).
 
+## Unreleased - Declared set or nothing: the pre-window run removes every undeclared role and membership (project#2297)
 **Date**: 2026-09-08
 
 - Owner decision 2026-09-08 (https://github.com/Neologik-AI/project/issues/2297):
