@@ -664,16 +664,18 @@ BeforeAll {
         if (-not $sp) { throw (New-NotFoundException) }
         @($sp.grants | ForEach-Object { [pscustomobject]@{ Id = $_.id; ConsentType = $_.consentType; Scope = $_.scope; ResourceId = $_.resourceId } })
     }
-    Mock Get-MgDirectoryRole { @($script:Tenant.DirectoryRoles | ForEach-Object { [pscustomobject]@{ Id = $_.Id; RoleTemplateId = $_.RoleTemplateId; DisplayName = [string](Get-NeologikProperty $_ 'DisplayName' '') } }) }
+    # Graph's directoryRoles/{id}/members omits service principals (verified on
+    # the dev tenant 2026-09-08, project#2297): the script never reads a role's
+    # member list, and these two throw so any return to that read fails a test.
+    Mock Get-MgDirectoryRole { throw 'Get-MgDirectoryRole is not used: read the identity''s memberOf list (project#2297)' }
+    Mock Get-MgDirectoryRoleMember { throw 'Get-MgDirectoryRoleMember omits service principals: read the identity''s memberOf list (project#2297)' }
     Mock Get-MgServicePrincipalMemberOf {
         param($ServicePrincipalId)
-        @($script:Tenant.Groups | Where-Object { @($_.members | Where-Object { $_.id -eq $ServicePrincipalId }).Count -gt 0 } |
+        $groups = @($script:Tenant.Groups | Where-Object { @($_.members | Where-Object { $_.id -eq $ServicePrincipalId }).Count -gt 0 } |
             ForEach-Object { [pscustomobject]@{ Id = $_.id; AdditionalProperties = @{ '@odata.type' = '#microsoft.graph.group'; displayName = $_.displayName } } })
-    }
-    Mock Get-MgDirectoryRoleMember {
-        param($DirectoryRoleId)
-        $role = @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $DirectoryRoleId }) | Select-Object -First 1
-        @($role.members | ForEach-Object { [pscustomobject]@{ Id = $_ } })
+        $roles = @($script:Tenant.DirectoryRoles | Where-Object { @($_.members | Where-Object { $_ -eq $ServicePrincipalId }).Count -gt 0 } |
+            ForEach-Object { [pscustomobject]@{ Id = $_.Id; AdditionalProperties = @{ '@odata.type' = '#microsoft.graph.directoryRole'; displayName = [string](Get-NeologikProperty $_ 'DisplayName' ''); roleTemplateId = $_.RoleTemplateId } } })
+        @($groups + $roles)
     }
     Mock Remove-MgDirectoryRoleMemberDirectoryObjectByRef {
         param($DirectoryRoleId, $DirectoryObjectId)
@@ -2036,13 +2038,30 @@ Context 'Pre-window run: permission reduction (step 4)' {
         Get-SummaryResult 'Legacy subscription role: Contributor' | Should -Be 'Removed'
     }
 
-    It 'reads the directory role without a filter so a read error is never mistaken for not held' {
+    It 'reports the Application Administrator check as failed when the memberOf read fails, never as not held' {
         Add-CompliantDirectoryState
         Add-LegacyAzureState
-        Mock Get-MgDirectoryRole { throw (New-ForbiddenException) }
+        Mock Get-MgServicePrincipalMemberOf { throw (New-ForbiddenException) }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         (Get-SummaryResult 'Application Administrator role') | Should -Match '^FAILED'
+        @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
+    }
+
+    It 'finds the directory roles through the identity''s memberOf list, never through a role''s member list' {
+        # directoryRoles/{id}/members omits service principals: on dev03 the
+        # Agent ID Administrator role read as "none" through it (2026-09-08).
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
+        Add-UndeclaredState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Application Administrator role' | Should -Be 'Removed'
+        Get-SummaryResult 'Undeclared directory role: Agent ID Administrator' | Should -Be 'Removed'
+        Should -Invoke Get-MgDirectoryRole -Times 0
+        Should -Invoke Get-MgDirectoryRoleMember -Times 0
+        @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $script:Ids.AppAdminRole })[0].members | Should -HaveCount 0
+        @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $script:Ids.AgentIdAdminRole })[0].members | Should -HaveCount 0
     }
 
     It 'accepts explicit parameters instead of a configuration file' {

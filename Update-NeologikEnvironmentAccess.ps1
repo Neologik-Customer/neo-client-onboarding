@@ -2276,16 +2276,28 @@ function Remove-NeologikAzureRoleAssignment {
     }
 }
 
+function Get-NeologikDirectoryRoleHeld {
+    # The directory roles the deployment identity holds, read from its own
+    # memberOf list. A role's member list (directoryRoles/{id}/members) omits
+    # service principals, so a check through it reports "not held" for a
+    # role the identity does hold (the Agent ID Administrator role on dev03,
+    # 2026-09-08, project#2297). Returns Id, RoleTemplateId and DisplayName
+    # per role; a read failure throws so it is never taken as "not held".
+    $deploySp = $script:State.DeploySp
+    return @(Get-MgServicePrincipalMemberOf -ServicePrincipalId $deploySp.Id -All -ErrorAction Stop | ForEach-Object {
+            $extra = Get-NeologikProperty $_ 'AdditionalProperties' @{}
+            if (([string]$extra['@odata.type']) -eq '#microsoft.graph.directoryRole') {
+                [pscustomobject]@{ Id = $_.Id; RoleTemplateId = [string]$extra['roleTemplateId']; DisplayName = [string]$extra['displayName'] }
+            }
+        })
+}
+
 function Remove-NeologikAppAdminRole {
     # 4c. The Application Administrator directory role membership.
     $deploySp = $script:State.DeploySp
     try {
-        $appAdminRole = @(Get-MgDirectoryRole -All -ErrorAction Stop | Where-Object { $_.RoleTemplateId -eq $script:AppAdminRoleTemplateId }) | Select-Object -First 1
-        $isMember = $false
-        if ($appAdminRole) {
-            $isMember = @(Get-MgDirectoryRoleMember -DirectoryRoleId $appAdminRole.Id -All -ErrorAction Stop |
-                Where-Object { $_.Id -eq $deploySp.Id }).Count -gt 0
-        }
+        $appAdminRole = @(Get-NeologikDirectoryRoleHeld | Where-Object { $_.RoleTemplateId -eq $script:AppAdminRoleTemplateId }) | Select-Object -First 1
+        $isMember = $null -ne $appAdminRole
         if ($isMember -and (Test-NeologikVerifyOnly)) {
             Add-NeologikPendingChange 'Application Administrator role' 'REMOVE'
         }
@@ -2445,16 +2457,10 @@ function Remove-NeologikUndeclaredDirectoryRole {
     # 4f. Declared set or nothing (project#2297): the deployment identity
     # holds no directory role at all. Application Administrator keeps its own
     # step (4c); this removes every other one held (Agent ID Administrator on
-    # dev03 was one).
+    # dev03 was one), read from the identity's own memberOf list.
     $deploySp = $script:State.DeploySp
     try {
-        $roles = @(Get-MgDirectoryRole -All -ErrorAction Stop | Where-Object { $_.RoleTemplateId -ne $script:AppAdminRoleTemplateId })
-        $held = @()
-        foreach ($role in $roles) {
-            if (@(Get-MgDirectoryRoleMember -DirectoryRoleId $role.Id -All -ErrorAction Stop | Where-Object { $_.Id -eq $deploySp.Id }).Count -gt 0) {
-                $held += $role
-            }
-        }
+        $held = @(Get-NeologikDirectoryRoleHeld | Where-Object { $_.RoleTemplateId -ne $script:AppAdminRoleTemplateId })
         if ($held.Count -eq 0) {
             Write-Log '  undeclared directory roles - none' -Level Success
             Add-Summary 'Undeclared directory roles' 'None'

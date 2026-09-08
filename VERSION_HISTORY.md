@@ -9,6 +9,23 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - The directory-role checks read the identity's memberOf list (project#2297 dev03 finding)
+**Date**: 2026-09-08
+
+- Microsoft Graph's `directoryRoles/{id}/members` list omits service
+  principals (verified on the development tenant: the Agent ID Administrator
+  role listed no members while its typed service-principal list named the
+  dev03 deployment identity). Steps 4c (Application Administrator) and 4f
+  (every other directory role) of `Update-NeologikEnvironmentAccess.ps1`
+  read that list and so reported "not held" and "none" for roles the
+  identity holds. Both now read the identity's own `memberOf` list
+  (`Get-MgServicePrincipalMemberOf`, the read step 4g already uses) through
+  `Get-NeologikDirectoryRoleHeld`; a read failure is reported as FAILED,
+  never as not held.
+- Tests: the fake tenant's `memberOf` returns directory roles; the two
+  role-list cmdlets throw if called; a case proves both steps find and
+  remove the roles without them (Pester 131).
+
 ## Unreleased - Declared set or nothing: the pre-window run removes every undeclared role and membership (project#2297)
 **Date**: 2026-09-08
 
