@@ -495,7 +495,10 @@ function Restore-Checkpoint {
     $script:ResourceGroupName      = $data.ResourceGroupName
     $script:EnvironmentIndex       = $data.EnvironmentIndex
     $script:CheckpointRegionAbbrev = $data.RegionAbbrev
-    $script:OutputFile             = $data.OutputFile
+    # Keep only the file name and rebase it onto this script's folder: the checkpoint may
+    # have been written on another host (e.g. WSL) whose absolute path is meaningless here.
+    $script:OutputFile             = if ($data.OutputFile) { Join-Path $PSScriptRoot (Split-Path -Leaf $data.OutputFile) }
+                                     else { $script:OutputFile }
 
     # Prefer the Key Vault name saved in the checkpoint, unless the operator explicitly
     # supplied -KeyVaultName on this resume invocation (in which case the CLI value wins).
@@ -3688,10 +3691,16 @@ function New-NeologikManagedIdentities {
                 $entraRole = Get-MgDirectoryRole -Filter "displayName eq '$($miDef.EntraRole)'" -ErrorAction SilentlyContinue
                 
                 if (-not $entraRole) {
-                    $roleTemplate = Get-MgDirectoryRoleTemplate -Filter "displayName eq '$($miDef.EntraRole)'"
-                    if ($roleTemplate) {
-                        $entraRole = New-MgDirectoryRole -RoleTemplateId $roleTemplate.Id
+                    # directoryRoleTemplates rejects $filter (Graph Request_UnsupportedQuery), so
+                    # enumerate and match client-side. This branch only runs in a tenant where the
+                    # role has never been activated - a virgin tenant.
+                    $roleTemplate = Get-MgDirectoryRoleTemplate -All -ErrorAction Stop |
+                        Where-Object { $_.DisplayName -eq $miDef.EntraRole } | Select-Object -First 1
+                    if (-not $roleTemplate) {
+                        throw "Directory role template '$($miDef.EntraRole)' not found in tenant $($script:ConfigData['TenantId'])."
                     }
+                    Write-Log "Activating directory role '$($miDef.EntraRole)' from its template (first use in this tenant)..." -Level Info
+                    $entraRole = New-MgDirectoryRole -RoleTemplateId $roleTemplate.Id -ErrorAction Stop
                 }
 
                 if ($entraRole) {

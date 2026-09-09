@@ -9,6 +9,26 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Onboarding activates Directory Readers in a tenant that has never used it (dev10 virgin-tenant test)
+**Date**: 2026-09-09
+
+- `Install-NeologikEnvironment.ps1` assigns Directory Readers to the SQL
+  managed identity. In a tenant where that role had never been activated,
+  the script looked the role template up with a `$filter` on
+  `directoryRoleTemplates`, which Microsoft Graph rejects
+  (`Request_UnsupportedQuery`), and the run stopped at the managed
+  identities step. The template is now found by enumerating the templates
+  and matching the name, the role is activated from it, and a missing
+  template stops the step with a clear message. Every earlier onboarding
+  tenant already had the role active, so the branch had never run. Found
+  on the first virgin-tenant onboarding (dev10, Neologik io tenant).
+- A checkpoint resumes on any host that has the script folder. The
+  checkpoint stored the configuration file's absolute path from the host
+  that started the run; resuming from another host (a WSL run resumed from
+  Windows over `\\wsl.localhost`) joined that path onto the current folder
+  and the export failed with "Could not find a part of the path". The
+  resume now keeps the file name only and places it next to the script.
+
 ## Unreleased - The sign-in works every time and the short name is never guessed (project#2306, project#2329)
 **Date**: 2026-09-09
 
