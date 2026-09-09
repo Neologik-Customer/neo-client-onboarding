@@ -98,8 +98,10 @@ BeforeAll {
         MailboxObjectId  = 'dddddddd-2222-dddd-dddd-dddddddddddd'
         LegacyAppId      = 'eeeeeeee-1111-eeee-eeee-eeeeeeeeeeee'
         LegacyObjectId   = 'eeeeeeee-2222-eeee-eeee-eeeeeeeeeeee'
+        SignInAppObj     = 'aaaaaaaa-5555-aaaa-aaaa-aaaaaaaaaaaa'
     }
     $script:ShortName = 'abcprd01'
+    $script:SolutionName = 'neo-abcprd-uks-01'
     $script:RgName = 'rg-neo-abcprd-uks-01'
     $script:RgScope = "/subscriptions/$($script:Ids.Subscription)/resourceGroups/$script:RgName"
     $script:SubScope = "/subscriptions/$($script:Ids.Subscription)"
@@ -119,7 +121,7 @@ BeforeAll {
 
     function New-FakeApp {
         param([string]$Id, [string]$AppId, [string]$DisplayName)
-        return @{ id = $Id; appId = $AppId; displayName = $DisplayName; owners = @(); credentials = @() }
+        return @{ id = $Id; appId = $AppId; displayName = $DisplayName; owners = @(); credentials = @(); uniqueName = ''; passwordCredentials = @() }
     }
 
     function Add-FakeAppRole {
@@ -168,6 +170,15 @@ BeforeAll {
         $t.ServicePrincipals += New-FakeSp -Id $script:Ids.GraphSpId -AppId '00000003-0000-0000-c000-000000000000' -DisplayName 'Microsoft Graph'
         $t.ServicePrincipals += New-FakeSp -Id $script:Ids.DeploySpId -AppId $script:Ids.DeployAppId -DisplayName "Neologik GitHub Service Connection - $script:ShortName"
         $t.ServicePrincipals += New-FakeSp -Id $script:Ids.SignInSpId -AppId $script:Ids.SignInAppId -DisplayName "Neologik Platform Sign-in - $script:ShortName"
+        # project#1012: the sign-in app registration as the onboarding
+        # created it - owned by the administrator and the deployment
+        # identity, carrying the uniqueName the deployment finds it by.
+        $signInApp = New-FakeApp -Id $script:Ids.SignInAppObj -AppId $script:Ids.SignInAppId -DisplayName "Neologik Platform Sign-in - $script:ShortName"
+        $signInApp.owners = @($script:Ids.Me, $script:Ids.DeploySpId)
+        $signInApp.uniqueName = "sp-admin-$script:SolutionName"
+        $t.Apps += $signInApp
+        $signInSp = @($t.ServicePrincipals | Where-Object { $_.id -eq $script:Ids.SignInSpId })[0]
+        $signInSp.owners = @($script:Ids.Me, $script:Ids.DeploySpId)
         $t.Groups += @{ id = $script:Ids.Group; displayName = "Neologik NCE User Group - $script:ShortName"; members = @(@{ id = $script:Ids.Me }); appRoleAssignments = @() }
         # project#2269: the Admin User Group (human administrators) and the
         # environment's SQL server, whose Entra administrator is the group
@@ -377,7 +388,11 @@ BeforeAll {
                 $items = @()
                 if ($filter -match "displayName eq '(.+)'$") {
                     $name = $Matches[1] -replace "''", "'"
-                    $items = @($t.Apps | Where-Object { $_.displayName -eq $name } | ForEach-Object { @{ id = $_.id; appId = $_.appId } })
+                    $items = @($t.Apps | Where-Object { $_.displayName -eq $name } | ForEach-Object { @{ id = $_.id; appId = $_.appId; displayName = $_.displayName; uniqueName = $_.uniqueName; passwordCredentials = @($_.passwordCredentials) } })
+                }
+                elseif ($filter -match "^appId eq '(.+)'$") {
+                    $appId = $Matches[1]
+                    $items = @($t.Apps | Where-Object { $_.appId -eq $appId } | ForEach-Object { @{ id = $_.id; appId = $_.appId; displayName = $_.displayName; uniqueName = $_.uniqueName; passwordCredentials = @($_.passwordCredentials) } })
                 }
                 elseif ($filter -match "^startswith\(displayName,'(.+)'\)$") {
                     $prefix = $Matches[1] -replace "''", "'"
@@ -392,6 +407,16 @@ BeforeAll {
                 foreach ($bind in @($json['owners@odata.bind'])) { $app.owners += ($bind -split '/')[-1] }
                 $t.Apps += $app
                 return @{ StatusCode = 201; Headers = @{}; Body = @{ id = $app.id; appId = $app.appId; displayName = $app.displayName } }
+            }
+            '^/applications/([^/]+)$' {
+                $app = Get-FakeApp -Id $Matches[1]
+                if (-not $app) { return @{ StatusCode = 404; Headers = @{}; Body = @{ error = @{ code = 'Request_ResourceNotFound'; message = 'not found' } } } }
+                if ($Method -eq 'PATCH') {
+                    Add-Write "PATCH application $($app.displayName) uniqueName=$($json.uniqueName)"
+                    $app.uniqueName = [string]$json.uniqueName
+                    return @{ StatusCode = 204; Headers = @{}; Body = $null }
+                }
+                return @{ StatusCode = 200; Headers = @{}; Body = @{ id = $app.id; appId = $app.appId; displayName = $app.displayName; uniqueName = $app.uniqueName; passwordCredentials = @($app.passwordCredentials) } }
             }
             '^/applications/([^/]+)/owners$' {
                 $app = Get-FakeApp -Id $Matches[1]
@@ -535,6 +560,7 @@ BeforeAll {
             SubscriptionId    = $script:Ids.Subscription
             ResourceGroupName = $script:RgName
             SolutionShortName = $script:ShortName
+            SolutionName      = $script:SolutionName
             AppRegistration   = @{ Name = 'Neologik GitHub Service Connection'; ClientId = $script:Ids.DeployAppId }
             NceAuthApp        = @{ ClientId = $script:Ids.SignInAppId }
             SecurityGroups    = @(
@@ -1556,7 +1582,7 @@ Context 'Pre-window run on an environment with missing state' {
         Get-SummaryResult 'Blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'Added'
         @($script:Writes | Where-Object { $_ -like 'POST credential*' }) | Should -HaveCount 3
         @($script:Sleeps | Where-Object { $_ -eq 15 }) | Should -HaveCount 2 -Because 'the principal create is retried while the blueprint replicates'
-        $blueprintApp = @($script:Tenant.Apps)[0]
+        $blueprintApp = @($script:Tenant.Apps | Where-Object { $_.displayName -like 'Neologik Agent Blueprint*' })[0]
         $blueprintApp.displayName | Should -Be "Neologik Agent Blueprint - default - $script:ShortName"
         $blueprintApp.owners | Should -Contain $script:Ids.DeploySpId
         $blueprintApp.owners | Should -Contain $script:Ids.Me
@@ -1702,6 +1728,107 @@ Context 'Pre-window run on an environment with missing state' {
     }
 }
 
+Context 'Platform app ownership (project#1012)' {
+    It 'verifies the sign-in app and reports the SharePoint app absent on a compliant environment' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' owner" | Should -Be 'Already in place'
+        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' principal owner" | Should -Be 'Already in place'
+        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' uniqueName" | Should -Be 'Already in place'
+        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' credentials" | Should -Be 'None foreign'
+        Get-SummaryResult 'Platform app: SharePoint registration' | Should -Be 'Not present - the deployment creates it'
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'adopts hand-made registrations: owners on application and principal, uniqueName stamped, foreign credentials reported' {
+        Add-CompliantPreWindowState
+        $t = $script:Tenant
+        # The sign-in app as an administrator made it by hand: no deployment owner, no uniqueName.
+        $signIn = Get-FakeApp -Id $script:Ids.SignInAppObj
+        $signIn.owners = @($script:Ids.Me)
+        $signIn.uniqueName = ''
+        (Get-FakeSp -Id $script:Ids.SignInSpId).owners = @($script:Ids.Me)
+        # A hand-made SharePoint app with a customer's own credential beside the deployment's.
+        $sp = New-FakeApp -Id 'spapp-obj' -AppId 'spapp-id' -DisplayName "Neologik SharePoint Access - $script:ShortName"
+        $sp.owners = @($script:Ids.Me)
+        $sp.passwordCredentials = @(@{ displayName = 'sharepoint-access' }, @{ displayName = 'power-automate' })
+        $t.Apps += $sp
+        $spPrincipal = New-FakeSp -Id 'spsp-obj' -AppId 'spapp-id' -DisplayName $sp.displayName
+        $spPrincipal.owners = @($script:Ids.Me)
+        $t.ServicePrincipals += $spPrincipal
+        # A v4 bot app registration: adopted by discovery; a foreign secret the deployment will remove.
+        $bot = New-FakeApp -Id 'bot-obj' -AppId 'bot-id' -DisplayName "Neologik - ide - $script:ShortName"
+        $bot.owners = @($script:Ids.Me)
+        $bot.passwordCredentials = @(@{ displayName = 'legacy-manual' })
+        $t.Apps += $bot
+        $t.ServicePrincipals += (New-FakeSp -Id 'bot-sp' -AppId 'bot-id' -DisplayName $bot.displayName)
+        # Another customer's registration with a Neologik prefix but not this environment: untouched.
+        $t.Apps += (New-FakeApp -Id 'other-obj' -AppId 'other-id' -DisplayName 'Neologik - ide - otherenv')
+
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1 -Because 'the bot app carries a credential the deployment will remove'
+        $signIn.owners | Should -Contain $script:Ids.DeploySpId
+        (Get-FakeSp -Id $script:Ids.SignInSpId).owners | Should -Contain $script:Ids.DeploySpId
+        $signIn.uniqueName | Should -Be "sp-admin-$script:SolutionName"
+        $sp.owners | Should -Contain $script:Ids.DeploySpId
+        $spPrincipal.owners | Should -Contain $script:Ids.DeploySpId
+        $sp.uniqueName | Should -Be "sp-neologik-sharepoint-$script:ShortName"
+        $bot.owners | Should -Contain $script:Ids.DeploySpId
+        (Get-FakeSp -Id 'bot-sp').owners | Should -Contain $script:Ids.DeploySpId
+        (Get-FakeApp -Id 'other-obj').owners | Should -HaveCount 0
+        Get-SummaryResult "App 'Neologik SharePoint Access - $script:ShortName' credentials" | Should -Match '^Review - 1 credential\(s\) not minted by the deployment \(power-automate\)'
+        Get-SummaryResult "App 'Neologik - ide - $script:ShortName' credentials" | Should -Match '^PENDING - 1 credential\(s\) not minted by the deployment \(legacy-manual\)'
+        Get-SummaryResult "App 'Neologik - ide - $script:ShortName' uniqueName" | Should -Match '^Review - no uniqueName'
+        ($script:Console -join "`n") | Should -Match 'removes every credential on this app'
+
+        # Second run: everything already in place; the bot credential still needs attention.
+        $script:Writes = @()
+        $script:Summary = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        $script:Writes | Should -HaveCount 0
+        Get-SummaryResult "App 'Neologik SharePoint Access - $script:ShortName' owner" | Should -Be 'Already in place'
+        Get-SummaryResult "App 'Neologik SharePoint Access - $script:ShortName' uniqueName" | Should -Be 'Already in place'
+    }
+
+    It 'records the adoption as pending in verify-only and writes nothing' {
+        Add-CompliantPreWindowState
+        $signIn = Get-FakeApp -Id $script:Ids.SignInAppObj
+        $signIn.owners = @($script:Ids.Me)
+        $signIn.uniqueName = ''
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 1
+        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' owner" | Should -Be 'WOULD ADD'
+        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' uniqueName" | Should -Be "WOULD SET sp-admin-$script:SolutionName"
+        $script:Writes | Should -HaveCount 0
+        $signIn.owners | Should -Not -Contain $script:Ids.DeploySpId
+    }
+
+    It 'fails the uniqueName when it differs from the deployment name, and asks for the solution name when it cannot be derived' {
+        Add-CompliantPreWindowState
+        $signIn = Get-FakeApp -Id $script:Ids.SignInAppObj
+        $signIn.uniqueName = 'sp-admin-something-else'
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' uniqueName" | Should -Match "^FAILED - 'sp-admin-something-else' differs from the deployment's 'sp-admin-$script:SolutionName'"
+
+        $signIn.uniqueName = ''
+        $script:Summary = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Remove @('SolutionName')) }
+        $code | Should -Be 1
+        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' uniqueName" | Should -Match '^UNKNOWN - pass -SolutionName'
+    }
+
+    It 'reports a sign-in registration that is not in this tenant' {
+        Add-CompliantPreWindowState
+        $script:Tenant.Apps = @($script:Tenant.Apps | Where-Object { $_.id -ne $script:Ids.SignInAppObj })
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        Get-SummaryResult 'Platform app: sign-in registration' | Should -Match '^NOT FOUND - not registered in this tenant'
+    }
+}
+
 Context 'Post-window run: agent grants file (step 5)' {
     It 'touches nothing else: no blueprint, no roles, no group assignment, no reduction' {
         # A tenant where every pre-window item is missing or legacy.
@@ -1720,7 +1847,7 @@ Context 'Post-window run: agent grants file (step 5)' {
         }
         Should -Invoke Connect-AzAccount -Times 0
         Should -Invoke Connect-ExchangeOnline -Times 0
-        @($script:Tenant.Apps) | Should -HaveCount 0
+        @($script:Tenant.Apps | Where-Object { $_.displayName -like 'Neologik Agent Blueprint*' }) | Should -HaveCount 0
         (Get-FakeSp -Id $script:Ids.DeploySpId).appRoleAssignments | Should -HaveCount 1
         @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
         ($script:Console -join "`n") | Should -Match 'post-window run'
@@ -2093,7 +2220,7 @@ Context 'Graph resilience' {
     }
 
     It 'retries a not-found right after a create (replication delay)' {
-        $script:Tenant.Apps = @()
+        $script:Tenant.Apps = @($script:Tenant.Apps | Where-Object { $_.displayName -notlike 'Neologik Agent Blueprint*' })
         $script:Tenant.ServicePrincipals = @($script:Tenant.ServicePrincipals | Where-Object { $_.id -ne $script:Ids.BlueprintSpId })
         $script:Faults += @{ Match = 'GET /applications/[^/]+/owners$'; Status = 404; Code = 'Request_ResourceNotFound'; Message = 'not replicated'; Remaining = 1 }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
@@ -2308,7 +2435,7 @@ Context 'Verify-only run (-Verify)' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
         $code | Should -Be 1
         $script:Writes | Should -HaveCount 0
-        @($script:Tenant.Apps) | Should -HaveCount 0
+        @($script:Tenant.Apps | Where-Object { $_.displayName -like 'Neologik Agent Blueprint*' }) | Should -HaveCount 0
         (Get-SummaryResult 'Agent blueprint') | Should -BeLike 'WOULD CREATE*'
         Get-SummaryResult 'Blueprint principal' | Should -Be 'WOULD CREATE'
         Get-SummaryResult 'Blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'WOULD ADD'

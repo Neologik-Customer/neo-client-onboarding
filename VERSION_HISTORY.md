@@ -9,6 +9,30 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - The pre-window run adopts every platform app registration for the deployment identity (project#1012)
+**Date**: 2026-09-09
+
+- `Update-NeologikEnvironmentAccess.ps1` step 3b: the deployment identity
+  holds only `Application.ReadWrite.OwnedBy`, and from the v5 line the
+  deployment makes the sign-in app secretless (federated credential, password
+  credentials removed), manages the environment's SharePoint app and adopts
+  the bot and App registrations by `uniqueName`. A registration made by hand
+  in the portal is owned by nobody the deployment can act as and carries no
+  `uniqueName`. The step takes the sign-in app (client id from the
+  configuration), the environment's SharePoint app and every other
+  `Neologik ... - <short name>` registration, adds the deployment identity
+  as owner of the application and of the service principal where missing,
+  stamps the deployment's `uniqueName` on the sign-in app
+  (`sp-admin-<solution name>`, new `SolutionName` configuration key or
+  `-SolutionName`) and the SharePoint app
+  (`sp-neologik-sharepoint-<short name>`), and lists password credentials
+  the deployment did not mint (pending attention where the deployment
+  removes every credential; review only on the SharePoint app, where it
+  removes its own). `-Verify` reports; a registration homed in another
+  tenant is reported as not adoptable. Tests: five new cases in the Pester
+  suite.
+- https://github.com/Neologik-AI/project/issues/1012
+
 ## Unreleased - Onboarding activates Directory Readers in a tenant that has never used it (dev10 virgin-tenant test)
 **Date**: 2026-09-09
 
