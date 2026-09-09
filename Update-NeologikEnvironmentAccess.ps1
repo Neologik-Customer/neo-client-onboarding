@@ -2584,7 +2584,8 @@ function Test-NeologikSubscriptionAdministrator {
         Write-Log "The signed-in account's subscription roles could not be read ($(Get-NeologikErrorText $_)) - continuing; role writes will report any refusal" -Level Warning
         return $true
     }
-    $administrator = @($held | Where-Object { $script:SubscriptionAdministratorRoles -contains $_ })
+    # One name per role: an inherited assignment at several scopes counts once.
+    $administrator = @($held | Where-Object { $script:SubscriptionAdministratorRoles -contains $_ } | Select-Object -Unique)
     if ($administrator.Count -gt 0) {
         Write-Log "  the signed-in account holds $($administrator -join ', ') on the subscription" -Level Success
         return $true
