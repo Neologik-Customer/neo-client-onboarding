@@ -2022,7 +2022,7 @@ function New-NeologikAppRegistration {
             SecretExpiry = $secretEndDate.ToString('yyyy-MM-dd')
             SubscriptionRoles = @('Reader')
             RGRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
-            GraphAppRoles = @('Application.Read.All', 'Application.ReadWrite.OwnedBy')
+            GraphAppRoles = @('Application.ReadWrite.OwnedBy', 'AgentIdentityBlueprint.AddRemoveCreds.All')
         }
 
         return @{
@@ -2089,7 +2089,7 @@ function Get-NeologikExistingAppRegistration {
             Source = 'client-provided'
             SubscriptionRoles = @('Reader')
             RGRoles = $requiredRgRoles
-            GraphAppRoles = @('Application.Read.All', 'Application.ReadWrite.OwnedBy')
+            GraphAppRoles = @('Application.ReadWrite.OwnedBy', 'AgentIdentityBlueprint.AddRemoveCreds.All')
         }
 
         Write-Host "`n  Existing service principal resolved - roles and Graph consent will be assigned to it." -ForegroundColor Yellow
@@ -2193,9 +2193,12 @@ function Grant-GraphAppRolePermissions {
         Grants lower-scoped Microsoft Graph application permissions to a service principal
         or managed identity, replacing the tenant-wide 'Application Administrator' directory role.
     .DESCRIPTION
-        Assigns Microsoft Graph app roles (default: Application.Read.All and
-        Application.ReadWrite.OwnedBy) via appRoleAssignments. Idempotent and retries while the
-        principal replicates to Entra ID.
+        Assigns Microsoft Graph app roles (default: the deployment service principal's
+        least-privilege set, Application.ReadWrite.OwnedBy and
+        AgentIdentityBlueprint.AddRemoveCreds.All - project#2144) via appRoleAssignments.
+        Idempotent and retries while the principal replicates to Entra ID. Reads of
+        applications and service principals come with Application.ReadWrite.OwnedBy, so
+        Application.Read.All is never granted.
 
         NOTE: Application.ReadWrite.OwnedBy only permits managing app registrations the principal
         OWNS. Any flow that mutates an app registration with this identity (e.g. secret rotation)
@@ -2210,7 +2213,7 @@ function Grant-GraphAppRolePermissions {
         [string]$PrincipalDescription = 'service principal',
 
         [Parameter(Mandatory = $false)]
-        [string[]]$AppRoles = @('Application.Read.All', 'Application.ReadWrite.OwnedBy')
+        [string[]]$AppRoles = @('Application.ReadWrite.OwnedBy', 'AgentIdentityBlueprint.AddRemoveCreds.All')
     )
 
     # Microsoft Graph well-known IDs (appId of Microsoft Graph + application-permission app role IDs)
