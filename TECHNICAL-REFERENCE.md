@@ -323,7 +323,7 @@ Creates the `Neologik Platform Sign-in - <short-name>` app registration (NCE and
 
 ### 8. Resource Provider Registration
 
-Registers every Azure resource provider and preview feature the platform requires. The list is `resource-providers.txt` next to the script (one entry per line; `Namespace/FeatureName` marks a preview feature); it is the only place a provider is ever added, and the script stops before sign-in if the file is missing or malformed.
+Registers every Azure resource provider and preview feature the platform requires. The list is `resource-providers.txt` next to the script (one entry per line, `#` starts a comment; `Namespace/FeatureName` marks a preview feature); it is the only place a provider is ever added, and the script stops before sign-in if the file is missing or malformed.
 
 Registration is asynchronous in Azure, so the script submits every request straight after the permission check (the five providers it creates resources with first, then the rest) and carries on. Each of the five is confirmed just before its resource is created; the full list is confirmed in one pass before the configuration is exported. The deployment identity never registers providers.
 

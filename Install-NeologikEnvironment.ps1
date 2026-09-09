@@ -2904,8 +2904,9 @@ function Get-PlatformResourceProviderList {
     $lineNumber = 0
     foreach ($raw in @(Get-Content -Path $path)) {
         $lineNumber++
-        $line = "$raw".Trim()
-        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) { continue }
+        # Anything from '#' onwards is a comment, whether the line starts with it or not.
+        $line = ("$raw" -split '#', 2)[0].Trim()
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
         if ($line -match '^(?<ns>[A-Za-z0-9]+\.[A-Za-z0-9.]+)/(?<feature>[A-Za-z0-9]+)$') {
             if (-not $featureKeys.Contains($line)) {
                 $featureKeys.Add($line)
@@ -2945,8 +2946,8 @@ function Start-ResourceProviderRegistration {
         completes it in the background. The onboarding providers are submitted first, then the
         rest, so the script carries on with the remaining steps and confirms later with
         Wait-ResourceProviderRegistration. Entries already Registered (in Azure or in the
-        checkpoint) are skipped. A provider request that cannot be submitted is an error; a
-        feature request that cannot be submitted is a warning and is re-checked at the end.
+        checkpoint) are skipped. A request that cannot be submitted (unknown namespace or
+        feature, missing permission) stops the run: the list file is the only input.
     #>
     [CmdletBinding()]
     param(
@@ -2998,8 +2999,8 @@ function Start-ResourceProviderRegistration {
             Write-Log "Feature registration requested: $key (was $state)" -Level Info
         }
         catch {
-            Write-Log "Failed to request registration of preview feature '$key': $_" -Level Warning
-            $script:ProviderRegistrations[$key] = 'Requested'
+            Write-Log "Failed to request registration of preview feature '$key': $_" -Level Error
+            throw
         }
     }
 

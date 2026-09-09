@@ -68,8 +68,9 @@ function Get-PlatformResourceProviderList {
     $lineNumber = 0
     foreach ($raw in @(Get-Content -Path $path)) {
         $lineNumber++
-        $line = "$raw".Trim()
-        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) { continue }
+        # Anything from '#' onwards is a comment, whether the line starts with it or not.
+        $line = ("$raw" -split '#', 2)[0].Trim()
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
         if ($line -match '^(?<ns>[A-Za-z0-9]+\.[A-Za-z0-9.]+)/(?<feature>[A-Za-z0-9]+)$') {
             if (-not $featureKeys.Contains($line)) {
                 $featureKeys.Add($line)
@@ -177,7 +178,8 @@ $intervalSeconds = 15
 
 while ($true) {
     foreach ($ns in @($pendingProviders)) {
-        $state = (Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction Stop | Select-Object -First 1).RegistrationState
+        try { $state = (Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction Stop | Select-Object -First 1).RegistrationState }
+        catch { Write-Warning "  Could not read the state of $ns ($($_.Exception.Message)); retrying on the next pass"; continue }
         if ($state -eq 'Registered') {
             Write-Host "  + $ns registered" -ForegroundColor Green
             $pendingProviders.Remove($ns) | Out-Null
@@ -190,7 +192,8 @@ while ($true) {
     }
     foreach ($f in @($pendingFeatures)) {
         $key = "$($f.Provider)/$($f.Feature)"
-        $state = (Get-AzProviderFeature -ProviderNamespace $f.Provider -FeatureName $f.Feature -ErrorAction Stop).RegistrationState
+        try { $state = (Get-AzProviderFeature -ProviderNamespace $f.Provider -FeatureName $f.Feature -ErrorAction Stop).RegistrationState }
+        catch { Write-Warning "  Could not read the state of $key ($($_.Exception.Message)); retrying on the next pass"; continue }
         if ($state -eq 'Registered') {
             # Re-register the provider so the newly enabled feature propagates to it.
             Register-AzResourceProvider -ProviderNamespace $f.Provider -ErrorAction Stop | Out-Null
