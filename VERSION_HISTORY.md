@@ -42,6 +42,19 @@ This document tracks the version history of the Neologik customer onboarding scr
   the harness gains the identity-platform seam (`Invoke-NeologikTokenRequest`),
   the endpoint seam (`Test-NeologikEndpoint`) and the signed-in account's
   roles.
+## Unreleased - The configuration summary records the two-role Graph set (project#2342)
+**Date**: 2026-09-09
+
+- `Install-NeologikEnvironment.ps1` still wrote `Application.Read.All` into
+  the deployment identity's `GraphAppRoles` in the configuration summary
+  (script-created and client-supplied service principals alike) and carried
+  it as the `Grant-GraphAppRolePermissions` default, a remnant of the
+  pre-project#2144 model. The grant call itself was already correct. The
+  summary and the default now record the least-privilege set the script
+  grants: `Application.ReadWrite.OwnedBy` and
+  `AgentIdentityBlueprint.AddRemoveCreds.All`. No behaviour change in what
+  is granted.
+- https://github.com/Neologik-AI/project/issues/2342
 
 ## Unreleased - The directory-role checks read the identity's memberOf list (project#2297 dev03 finding)
 **Date**: 2026-09-08
