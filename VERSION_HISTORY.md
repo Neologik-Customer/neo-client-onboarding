@@ -9,6 +9,40 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - The sign-in works every time and the short name is never guessed (project#2306, project#2329)
+**Date**: 2026-09-09
+
+- `Update-NeologikEnvironmentAccess.ps1` runs the device-code sign-in itself
+  for Microsoft Graph and for Azure: the script prints the address and the
+  code, waits no longer than the code is valid (at most 15 minutes) and
+  says every 30 seconds that it is still waiting. The Microsoft Graph SDK's
+  own prompt wrote its code on the Information stream, which a nested
+  `pwsh -File` never rendered, and its 120-second wait then ended the run
+  (project#2306). When the sign-in does not complete the script tries the
+  next method by itself - the Azure CLI session on the machine, then the
+  Microsoft Graph PowerShell or Az PowerShell device-code prompt - and
+  stops only when every method has failed, saying what to do. The Azure
+  device code asks for the `p1` authentication-context claim the role
+  writes need.
+- Preflight before any change: the four Microsoft endpoints must answer
+  (sign-in, Graph, Resource Manager, PowerShell Gallery), the modules must
+  load, the signed-in account must hold Global Administrator (active) and
+  Owner or User Access Administrator on the subscription. A real run stops
+  on the first failure with one instruction; a verify-only run warns.
+- `-SolutionShortName` (project#2329): the agent identity blueprint is
+  named by the solution short name from the configuration file or this
+  parameter, required for the pre-window run when no configuration file is
+  given, and never derived from the deployment identity's display name
+  (neoprd's principal is named `- neo-prd` while its short name is
+  `neoneoprdsdc01`; the guess would have created a second blueprint). A
+  blueprint the deployment identity already owns under another short name
+  is adopted and named; several such blueprints stop the step naming them;
+  the verify output names the blueprint and where the short name came from.
+- Tests: Pester +12 (sign-in, preflight, short name and adoption);
+  the harness gains the identity-platform seam (`Invoke-NeologikTokenRequest`),
+  the endpoint seam (`Test-NeologikEndpoint`) and the signed-in account's
+  roles.
+
 ## Unreleased - The directory-role checks read the identity's memberOf list (project#2297 dev03 finding)
 **Date**: 2026-09-08
 

@@ -21,7 +21,7 @@ Welcome! This repository contains everything you need to set up your Neologik en
 - **CREATE-SP-GUIDE.md** - Optional: how to create the deployment service principal yourself instead of letting the script create it
 - **FINISHING-STEPS-GUIDE.md** - Final steps after Neologik completes the deployment
 - **Upgrade-TeamsAppInstallations.ps1** + **TEAMS-APP-UPGRADE-GUIDE.md** - Bulk-upgrade every user's installed Neologik Teams bot to the latest version (run periodically, after onboarding)
-- **Update-NeologikEnvironmentAccess.ps1** - The Global Administrator's script for a Neologik v5 migration: a pre-window run (checks, grants and the guarded permission reduction; once per customer) and, only where agents or Apps work unattended in Microsoft 365, a post-window run that applies the grants files Neologik supplies. `-Verify` reports without writing. See FINISHING-STEPS-GUIDE.md, "Later changes and migration windows"
+- **Update-NeologikEnvironmentAccess.ps1** - The Global Administrator's script for a Neologik v5 migration: a pre-window run (checks, grants and the guarded permission reduction; once per customer) and, only where agents or Apps work unattended in Microsoft 365, a post-window run that applies the grants files Neologik supplies. `-Verify` reports without writing. The script prints its own sign-in address and code and waits at most 15 minutes; it needs only a browser on any device and a Global Administrator account. Without the configuration file, pass `-SolutionShortName` (the environment's solution short name). See FINISHING-STEPS-GUIDE.md, "Later changes and migration windows"
 
 **How to Use This Repository:**
 
