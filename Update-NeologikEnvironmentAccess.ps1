@@ -62,6 +62,23 @@
          ("SharePointIngestion": true). When the configuration file does
          not say, the summary notes that the check runs with the agent
          grants file (post-window run) and the item needs no attention.
+      3b. Platform app registrations owned by the deployment identity
+         (project#1012): the deployment identity holds only
+         Application.ReadWrite.OwnedBy, so every app registration the
+         platform manages must list it as an owner of the application and
+         of the service principal, and the deployment finds an existing
+         registration by its uniqueName. The step takes the sign-in app
+         (client id from the configuration), the environment's SharePoint
+         app ('Neologik SharePoint Access - <short name>') and every other
+         'Neologik ... - <short name>' registration (the bots, the Apps),
+         adds the deployment identity as owner where it is missing, stamps
+         the deployment's uniqueName on the sign-in app
+         (sp-admin-<solution name>, needs SolutionName) and the SharePoint
+         app (sp-neologik-sharepoint-<short name>), and lists password
+         credentials the deployment did not mint (the deployment removes
+         every credential on the sign-in and bot apps, only its own on the
+         SharePoint app). A hand-made registration is adopted in place;
+         one homed in another tenant cannot be and is reported.
       4. Permission reduction: first ensures the deployment identity holds
          the narrow resource-group-scoped role set and the two retained
          subscription-scoped roles (read-only Reader for SKU/quota
@@ -150,6 +167,13 @@
 .PARAMETER DeploySpClientId
     Application (client) id of the 'Neologik GitHub Service Connection'
     app registration. Required only when no ConfigurationFile is given.
+
+.PARAMETER SolutionName
+    The environment's full solution name (e.g. neo-abcprd-uks-01, the value
+    the deployment pipeline names resources by): step 3b stamps the sign-in
+    app's uniqueName as sp-admin-<solution name>. Read from the configuration
+    file (SolutionName) when present; when neither is given the sign-in
+    app's uniqueName is verified only when already set.
 
 .PARAMETER SolutionShortName
     The environment's solution short name (the value the onboarding
@@ -290,6 +314,7 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$SolutionShortName,
+    [string]$SolutionName,
 
     [Parameter(Mandatory = $false)]
     [string]$SignInAppClientId,
@@ -984,7 +1009,7 @@ function Resolve-NeologikInput {
     #>
     param([hashtable]$Parameters)
     $state = $script:State
-    foreach ($name in @('ConfigurationFile', 'TenantId', 'DeploySpClientId', 'SolutionShortName', 'SignInAppClientId', 'NceUserGroupId',
+    foreach ($name in @('ConfigurationFile', 'TenantId', 'DeploySpClientId', 'SolutionShortName', 'SolutionName', 'SignInAppClientId', 'NceUserGroupId',
             'AdminGroupId', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'AgentGrantsFile', 'MailboxGrantsFile')) {
         $state[$name] = [string](Get-NeologikProperty $Parameters $name '')
     }
@@ -1035,6 +1060,7 @@ function Resolve-NeologikInput {
             $state.ShortName = ([string](Get-NeologikProperty $config 'SolutionShortName' '')).Trim()
             if ($state.ShortName) { $state.ShortNameSource = 'the configuration file' }
         }
+        if (-not $state.SolutionName) { $state.SolutionName = ([string](Get-NeologikProperty $config 'SolutionName' '')).Trim() }
         Write-Log "Configuration loaded: $(Get-NeologikProperty $config 'OrganizationName' '') ($($state.ShortName))" -Level Info
     }
 
@@ -2319,6 +2345,183 @@ function Test-NeologikPreWindowSharePointConsent {
     }
 }
 
+function Set-NeologikPlatformAppOwnership {
+    <#
+    Step 3b of the pre-window run (project#1012): every app registration the
+    platform manages in this tenant is owned by the deployment identity
+    (application and service principal) and carries the uniqueName the
+    deployment finds it by. Adoption in place - the same three Graph calls
+    the blueprint adoption makes; nothing else on the app changes.
+    #>
+    $state = $script:State
+    $deploySp = $state.DeploySp
+    $graph = $script:GraphV1
+    Write-Log 'Step 3b/4: platform app registrations owned by the deployment identity (project#1012)' -Level Info
+    $shortName = $state.ShortName
+    if (-not $shortName) {
+        Write-Log '  no solution short name - the platform app registrations cannot be identified' -Level Warning
+        Add-Summary 'Platform apps' 'SKIPPED - no solution short name'
+        return
+    }
+    $select = 'id,appId,displayName,uniqueName,passwordCredentials'
+    $targets = @()
+    $seen = @{}
+
+    # The sign-in app, by the client id the configuration records.
+    if ($state.SignInAppClientId) {
+        try {
+            $app = @(Get-NeologikGraphCollection -Uri "$graph/applications?`$filter=appId eq '$($state.SignInAppClientId)'&`$select=$select") | Select-Object -First 1
+            if ($app) {
+                $expected = if ($state.SolutionName) { "sp-admin-$($state.SolutionName)" } else { '' }
+                $targets += @{ App = $app; Kind = 'sign-in'; ExpectedUniqueName = $expected; OwnSecret = 'auth'; RemovesAll = $true }
+                $seen[[string](Get-NeologikProperty $app 'appId' '')] = $true
+            }
+            else {
+                Write-Log "  sign-in app registration $($state.SignInAppClientId) is not in this tenant - a registration homed elsewhere cannot be adopted" -Level Error
+                Add-Summary 'Platform app: sign-in registration' 'NOT FOUND - not registered in this tenant (a multi-tenant app homed elsewhere cannot be adopted; let the deployment create the environment app and update the configuration)'
+            }
+        }
+        catch {
+            Add-Summary 'Platform app: sign-in registration' "FAILED - $(Get-NeologikErrorText $_)"
+        }
+    }
+    # The environment's SharePoint app, by the deployment's display name.
+    $sharePointName = "Neologik SharePoint Access - $shortName"
+    try {
+        $escaped = $sharePointName -replace "'", "''"
+        $app = @(Get-NeologikGraphCollection -Uri "$graph/applications?`$filter=displayName eq '$escaped'&`$select=$select") | Select-Object -First 1
+        if ($app) {
+            $targets += @{ App = $app; Kind = 'SharePoint'; ExpectedUniqueName = "sp-neologik-sharepoint-$shortName"; OwnSecret = 'sharepoint-access'; RemovesAll = $false }
+            $seen[[string](Get-NeologikProperty $app 'appId' '')] = $true
+        }
+        else {
+            Write-Log "  '$sharePointName' not present - the deployment creates it" -Level Info
+            Add-Summary 'Platform app: SharePoint registration' 'Not present - the deployment creates it'
+        }
+    }
+    catch {
+        Add-Summary 'Platform app: SharePoint registration' "FAILED - $(Get-NeologikErrorText $_)"
+    }
+    # Every other registration named for this environment (bots, Apps); the
+    # blueprint has its own step.
+    try {
+        $suffix = " - $shortName"
+        foreach ($found in @(Get-NeologikGraphCollection -Uri "$graph/applications?`$filter=startswith(displayName,'Neologik')&`$select=id,appId,displayName")) {
+            $name = [string](Get-NeologikProperty $found 'displayName' '')
+            $appId = [string](Get-NeologikProperty $found 'appId' '')
+            if (-not $name.EndsWith($suffix) -or $name.StartsWith('Neologik Agent Blueprint') -or $seen.ContainsKey($appId)) { continue }
+            $app = Invoke-NeologikGraph -Method GET -Uri "$graph/applications/$([string](Get-NeologikProperty $found 'id' ''))?`$select=$select"
+            $targets += @{ App = $app; Kind = 'platform'; ExpectedUniqueName = ''; OwnSecret = 'auth'; RemovesAll = $true }
+            $seen[$appId] = $true
+        }
+    }
+    catch {
+        Add-Summary 'Platform apps: discovery' "FAILED - $(Get-NeologikErrorText $_)"
+    }
+    Write-Log "  $($targets.Count) platform app registration(s) to verify" -Level Info
+
+    foreach ($target in $targets) {
+        $app = $target.App
+        $objectId = [string](Get-NeologikProperty $app 'id' '')
+        $appId = [string](Get-NeologikProperty $app 'appId' '')
+        $displayName = [string](Get-NeologikProperty $app 'displayName' '')
+        $prefix = "App '$displayName'"
+        Write-Log "  $displayName ($($target.Kind), $appId)" -Level Info
+
+        # Application owner.
+        Set-NeologikDirectoryObjectOwner -Item "$prefix owner" -Uri "$graph/applications/$objectId" -OwnerId $deploySp.Id
+
+        # Service principal owner (the deployment creates a missing principal itself).
+        try {
+            $principal = @(Get-NeologikGraphCollection -Uri "$graph/servicePrincipals?`$filter=appId eq '$appId'&`$select=id") | Select-Object -First 1
+            if ($principal) {
+                Set-NeologikDirectoryObjectOwner -Item "$prefix principal owner" -Uri "$graph/servicePrincipals/$([string](Get-NeologikProperty $principal 'id' ''))" -OwnerId $deploySp.Id
+            }
+            else {
+                Add-Summary "$prefix principal owner" 'Not present - the deployment creates the principal'
+            }
+        }
+        catch {
+            Add-Summary "$prefix principal owner" "FAILED - $(Get-NeologikErrorText $_)"
+        }
+
+        # uniqueName: what the deployment finds the registration by.
+        $current = [string](Get-NeologikProperty $app 'uniqueName' '')
+        $expected = [string]$target.ExpectedUniqueName
+        $item = "$prefix uniqueName"
+        try {
+            if ($expected) {
+                if ($current -eq $expected) { Add-Summary $item 'Already in place' }
+                elseif (-not $current) {
+                    if (Test-NeologikVerifyOnly) { Add-NeologikPendingChange $item "SET $expected" }
+                    else {
+                        $null = Invoke-NeologikGraph -Method PATCH -Uri "$graph/applications/$objectId" -Body (@{ uniqueName = $expected } | ConvertTo-Json -Compress)
+                        Write-Log "  uniqueName '$expected' set on '$displayName'" -Level Success
+                        Add-Summary $item "Set ($expected)"
+                    }
+                }
+                else {
+                    Write-Log "  '$displayName' carries uniqueName '$current' but the deployment expects '$expected'" -Level Error
+                    Add-Summary $item "FAILED - '$current' differs from the deployment's '$expected' - reconcile with Neologik before the window"
+                }
+            }
+            elseif ($current) { Add-Summary $item "Already in place ($current)" }
+            elseif ($target.Kind -eq 'sign-in') { Add-Summary $item 'UNKNOWN - pass -SolutionName (or SolutionName in the configuration) so sp-admin-<solution name> can be stamped' }
+            else { Add-Summary $item 'Review - no uniqueName; the deployment adopts this registration only if its recipe stamps one' }
+        }
+        catch {
+            Add-Summary $item "FAILED - $(Get-NeologikErrorText $_)"
+        }
+
+        # Password credentials the deployment did not mint.
+        $foreign = @(@(Get-NeologikProperty $app 'passwordCredentials' @()) | Where-Object {
+                [string](Get-NeologikProperty $_ 'displayName' '') -ne $target.OwnSecret })
+        $item = "$prefix credentials"
+        if ($foreign.Count -eq 0) { Add-Summary $item 'None foreign' }
+        else {
+            $names = @($foreign | ForEach-Object { $n = [string](Get-NeologikProperty $_ 'displayName' ''); if ($n) { $n } else { '(unnamed)' } }) -join ', '
+            if ($target.RemovesAll) {
+                Write-Log "  '$displayName' carries $($foreign.Count) password credential(s) the deployment did not mint ($names) - the deployment removes every credential on this app" -Level Warning
+                Add-Summary $item "PENDING - $($foreign.Count) credential(s) not minted by the deployment ($names); the deployment removes every credential on this app - confirm nothing else uses them"
+            }
+            else {
+                Write-Log "  '$displayName' carries $($foreign.Count) password credential(s) the deployment did not mint ($names) - left in place" -Level Info
+                Add-Summary $item "Review - $($foreign.Count) credential(s) not minted by the deployment ($names) - left in place"
+            }
+        }
+    }
+}
+
+function Set-NeologikDirectoryObjectOwner {
+    # Ensures one owner on an application or service principal (verify-only
+    # records the change); the summary row is the caller's item name.
+    param([Parameter(Mandatory)][string]$Item, [Parameter(Mandatory)][string]$Uri, [Parameter(Mandatory)][string]$OwnerId)
+    $graph = $script:GraphV1
+    try {
+        $owners = @(Get-NeologikGraphCollection -Uri "$Uri/owners?`$select=id")
+        if (@($owners | ForEach-Object { [string](Get-NeologikProperty $_ 'id' '') }) -contains $OwnerId) {
+            Add-Summary $Item 'Already in place'
+            return
+        }
+        if (Test-NeologikVerifyOnly) { Add-NeologikPendingChange $Item 'ADD'; return }
+        $ref = @{ '@odata.id' = "$graph/directoryObjects/$OwnerId" } | ConvertTo-Json -Compress
+        try {
+            $null = Invoke-NeologikGraph -Method POST -Uri "$Uri/owners/`$ref" -Body $ref
+            Write-Log "  $Item - ADDED" -Level Success
+            Add-Summary $Item 'Added'
+        }
+        catch {
+            if ((Get-NeologikErrorText $_) -match '(?i)already exist') { Add-Summary $Item 'Already in place' }
+            else { throw }
+        }
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        Write-Log "  $Item - FAILED ($reason)" -Level Error
+        Add-Summary $Item "FAILED - $reason"
+    }
+}
+
 function Set-NeologikAgentUserGrant {
     # Step 5 (post-window run): the exported agent-user grants, component
     # roles and the SharePoint consent check.
@@ -3004,6 +3207,7 @@ function Invoke-NeologikPreWindowRun {
     Set-NeologikDeploymentGraphRole
     Set-NeologikSignInGroupAssignment
     Test-NeologikPreWindowSharePointConsent
+    Set-NeologikPlatformAppOwnership
     Invoke-NeologikPermissionReduction
 }
 
@@ -3113,6 +3317,7 @@ function Invoke-NeologikEnvironmentAccess {
         [string]$TenantId,
         [string]$DeploySpClientId,
         [string]$SolutionShortName,
+        [string]$SolutionName,
         [string]$SignInAppClientId,
         [string]$NceUserGroupId,
         [string]$AdminGroupId,
@@ -3138,6 +3343,7 @@ function Invoke-NeologikEnvironmentAccess {
             TenantId                = $TenantId
             DeploySpClientId        = $DeploySpClientId
             SolutionShortName       = $SolutionShortName
+            SolutionName            = $SolutionName
             SignInAppClientId       = $SignInAppClientId
             NceUserGroupId          = $NceUserGroupId
             AdminGroupId            = $AdminGroupId
