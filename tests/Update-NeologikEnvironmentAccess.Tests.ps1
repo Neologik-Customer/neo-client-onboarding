@@ -159,7 +159,12 @@ BeforeAll {
             PrincipalCreateDelays = 0
             GrantRefusals         = @()
             SqlServers            = @()
+            # The signed-in administrator (project#2306 rights preflight): a
+            # Global Administrator who owns the subscription.
+            MeDirectoryRoles      = @(@{ id = 'role-ga'; displayName = 'Global Administrator'; roleTemplateId = '62e90394-69f5-4237-9190-012177145e10' })
         }
+        # Held at the root scope, which every subscription-scoped read inherits.
+        $t.AzRoleAssignments += @{ ObjectId = $script:Ids.Me; RoleDefinitionName = 'Owner'; Scope = '/' }
         $t.ServicePrincipals += New-FakeSp -Id $script:Ids.GraphSpId -AppId '00000003-0000-0000-c000-000000000000' -DisplayName 'Microsoft Graph'
         $t.ServicePrincipals += New-FakeSp -Id $script:Ids.DeploySpId -AppId $script:Ids.DeployAppId -DisplayName "Neologik GitHub Service Connection - $script:ShortName"
         $t.ServicePrincipals += New-FakeSp -Id $script:Ids.SignInSpId -AppId $script:Ids.SignInAppId -DisplayName "Neologik Platform Sign-in - $script:ShortName"
@@ -363,13 +368,20 @@ BeforeAll {
         $json = $null
         if ($Body) { $json = $Body | ConvertFrom-Json -AsHashtable }
         switch -Regex ($path) {
-            '^/me$' { return @{ StatusCode = 200; Headers = @{}; Body = @{ id = $t.Me } } }
+            '^/me$' { return @{ StatusCode = 200; Headers = @{}; Body = @{ id = $t.Me; userPrincipalName = 'admin@contoso.com' } } }
+            '^/me/memberOf/microsoft\.graph\.directoryRole$' {
+                return @{ StatusCode = 200; Headers = @{}; Body = (ConvertTo-FakePage -Items @($t.MeDirectoryRoles) -Uri $Uri -Query $query) }
+            }
             '^/applications$' {
                 $filter = Get-QueryValue -Query $query -Name '$filter'
                 $items = @()
                 if ($filter -match "displayName eq '(.+)'$") {
                     $name = $Matches[1] -replace "''", "'"
                     $items = @($t.Apps | Where-Object { $_.displayName -eq $name } | ForEach-Object { @{ id = $_.id; appId = $_.appId } })
+                }
+                elseif ($filter -match "^startswith\(displayName,'(.+)'\)$") {
+                    $prefix = $Matches[1] -replace "''", "'"
+                    $items = @($t.Apps | Where-Object { $_.displayName.StartsWith($prefix) } | ForEach-Object { @{ id = $_.id; appId = $_.appId; displayName = $_.displayName } })
                 }
                 return @{ StatusCode = 200; Headers = @{}; Body = (ConvertTo-FakePage -Items $items -Uri $Uri -Query $query) }
             }
@@ -604,6 +616,17 @@ BeforeAll {
     Mock Import-NeologikModule { param($Name, $RequiredVersion) $script:Imports += "$Name $RequiredVersion" }
     Mock Test-NeologikCommand { $true }
     Mock Invoke-NeologikAzureCli { @{ ExitCode = 0; Output = @('eyJ0b2tlbg') } }
+    # project#2306: every endpoint answers, and the script's own device code
+    # completes on the first poll (the identity platform is never contacted).
+    Mock Test-NeologikEndpoint { $true }
+    Mock Invoke-NeologikTokenRequest {
+        param($Uri, $Body)
+        $script:TokenRequests += @{ Uri = $Uri; Body = $Body }
+        if ($Uri -match '/devicecode$') {
+            return @{ StatusCode = 200; Body = @{ device_code = 'dc-1'; user_code = 'ABCD-EFGH'; verification_uri = 'https://microsoft.com/devicelogin'; expires_in = 900; interval = 5 } }
+        }
+        return @{ StatusCode = 200; Body = @{ access_token = 'eyJ0b2tlbg'; refresh_token = 'rt-1' } }
+    }
     Mock Get-NeologikSummaryDirectory { @($script:SummaryDirs) }
     Mock Invoke-NeologikGraphRaw { param($Method, $Uri, $Body) Invoke-FakeGraph -Method $Method -Uri $Uri -Body $Body }
     Mock Connect-MgGraph { $script:Connected = $true }
@@ -796,6 +819,7 @@ BeforeEach {
     $script:Sleeps = @()
     $script:Installs = @()
     $script:Imports = @()
+    $script:TokenRequests = @()
     $script:Connected = $false
     $script:AzConnected = $false
     $script:ExchangeConnected = $false
@@ -1108,23 +1132,37 @@ Context 'Modules and sign-in' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter {
-            $Scopes -contains 'Directory.Read.All' -and $Scopes -contains 'User.Read' -and $Scopes -contains 'AppRoleAssignment.ReadWrite.All' -and
-            $Scopes -contains 'RoleManagement.ReadWrite.Directory' -and $Scopes -notcontains 'DelegatedPermissionGrant.ReadWrite.All' -and $UseDeviceCode
-        }
+        $graphRequest = @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' }) | Select-Object -First 1
+        $scopes = @($graphRequest.Body.scope -split ' ')
+        $scopes | Should -Contain 'Directory.Read.All'
+        $scopes | Should -Contain 'User.Read'
+        $scopes | Should -Contain 'AppRoleAssignment.ReadWrite.All'
+        $scopes | Should -Contain 'RoleManagement.ReadWrite.Directory'
+        $scopes | Should -Not -Contain 'DelegatedPermissionGrant.ReadWrite.All'
+        $scopes | Should -Contain 'offline_access'
+        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $AccessToken -is [securestring] -and -not $UseDeviceCode }
     }
 
     It 'adds the grant write scope only with a grants file and the directory role scope only in the pre-window run' {
         Add-AgentIdentities
         $grants = New-GrantsFile -Grants @((New-AgentGrantEntry))
+        $graphScopes = {
+            $request = @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' -and $_.Body.client_id -eq '14d82eec-204b-4c2f-b7e8-296a70dab67e' }) | Select-Object -Last 1
+            @($request.Body.scope -split ' ')
+        }
         $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
-        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $Scopes -contains 'DelegatedPermissionGrant.ReadWrite.All' -and $Scopes -notcontains 'RoleManagement.ReadWrite.Directory' }
+        (& $graphScopes) | Should -Contain 'DelegatedPermissionGrant.ReadWrite.All'
+        (& $graphScopes) | Should -Not -Contain 'RoleManagement.ReadWrite.Directory'
         Add-CompliantExchangeState
+        $script:TokenRequests = @()
         $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
-        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $Scopes -notcontains 'DelegatedPermissionGrant.ReadWrite.All' -and $Scopes -notcontains 'RoleManagement.ReadWrite.Directory' }
+        (& $graphScopes) | Should -Not -Contain 'DelegatedPermissionGrant.ReadWrite.All'
+        (& $graphScopes) | Should -Not -Contain 'RoleManagement.ReadWrite.Directory'
         Add-CompliantPreWindowState
+        $script:TokenRequests = @()
         $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
-        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $Scopes -contains 'RoleManagement.ReadWrite.Directory' -and $Scopes -notcontains 'DelegatedPermissionGrant.ReadWrite.All' }
+        (& $graphScopes) | Should -Contain 'RoleManagement.ReadWrite.Directory'
+        (& $graphScopes) | Should -Not -Contain 'DelegatedPermissionGrant.ReadWrite.All'
     }
 
     It 'warns when the session lacks a requested permission' {
@@ -1191,6 +1229,187 @@ Context 'Modules and sign-in' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         (Get-SummaryResult 'Deployment identity') | Should -Match '^FAILED - '
+    }
+}
+
+Context 'Sign-in and preflight (project#2306)' {
+    It 'prints the sign-in address and code itself, waits, and signs in to Graph and Azure with the tokens' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'https://microsoft.com/devicelogin'
+        $console | Should -Match 'Enter the code: ABCD-EFGH'
+        $console | Should -Match 'valid for 15 minutes'
+        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $AccessToken -is [securestring] }
+        Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $AccessToken -eq 'eyJ0b2tlbg' -and -not $UseDeviceAuthentication }
+        $azureRequest = @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' -and $_.Body.client_id -eq '1950a258-227b-4e31-a9cf-717495945fc2' }) | Select-Object -First 1
+        $azureRequest.Body.scope | Should -Match 'https://management.azure.com/.default'
+        $azureRequest.Body.claims | Should -Match '"p1"'
+        $console | Should -Not -Match 'eyJ0b2tlbg'
+    }
+
+    It 'keeps waiting while the sign-in is pending, reports every 30 seconds and gives up when the code expires' {
+        Add-CompliantPreWindowState
+        Mock Invoke-NeologikTokenRequest {
+            param($Uri, $Body)
+            $script:TokenRequests += @{ Uri = $Uri; Body = $Body }
+            if ($Uri -match '/devicecode$') {
+                return @{ StatusCode = 200; Body = @{ device_code = 'dc-1'; user_code = 'WXYZ-1234'; verification_uri = 'https://microsoft.com/devicelogin'; expires_in = 120; interval = 10 } }
+            }
+            return @{ StatusCode = 400; Body = @{ error = 'authorization_pending'; error_description = 'AADSTS70016: Pending end-user authorization.' } }
+        }
+        Mock Test-NeologikCommand { $false }
+        Mock Connect-MgGraph { throw 'Device code authentication timed out' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'still waiting for the Microsoft Graph sign-in \(code WXYZ-1234'
+        $console | Should -Match 'code expired after 2 minutes'
+        # Bounded: polled at once and after each of the twelve 10-second waits, never more.
+        @($script:TokenRequests | Where-Object { $_.Uri -match '/token$' }).Count | Should -Be 13
+        ($script:Sleeps | Measure-Object -Sum).Sum | Should -Be 120
+        $console | Should -Match 'Sign in to Microsoft Graph did not complete - every sign-in method was tried'
+        Should -Invoke Get-MgServicePrincipal -Times 0
+    }
+
+    It 'falls back to the Azure CLI session when the device code is declined, then to the Graph PowerShell prompt' {
+        Add-CompliantPreWindowState
+        Mock Invoke-NeologikTokenRequest {
+            param($Uri, $Body)
+            if ($Uri -match '/devicecode$') {
+                return @{ StatusCode = 200; Body = @{ device_code = 'dc-1'; user_code = 'ABCD-EFGH'; verification_uri = 'https://microsoft.com/devicelogin'; expires_in = 900; interval = 5 } }
+            }
+            return @{ StatusCode = 400; Body = @{ error = 'authorization_declined'; error_description = 'AADSTS70020: The end user declined.' } }
+        }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'sign-in did not complete: AADSTS70020'
+        $console | Should -Match 'Trying the Azure CLI session on this machine instead'
+        Should -Invoke Invoke-NeologikAzureCli -Times 1 -ParameterFilter { ($Arguments -join ' ') -match 'ms-graph' }
+        Should -Invoke Invoke-NeologikAzureCli -Times 1 -ParameterFilter { ($Arguments -join ' ') -match 'management\.azure\.com' }
+        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $AccessToken -is [securestring] }
+
+        # No CLI either: the Graph PowerShell device-code prompt is the last method.
+        Mock Test-NeologikCommand { $false }
+        $script:Console = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $UseDeviceCode }
+        Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $UseDeviceAuthentication }
+        ($script:Console -join "`n") | Should -Match 'Trying the Microsoft Graph PowerShell device-code prompt'
+    }
+
+    It 'stops before the sign-in with ACTION REQUIRED when an endpoint is not reachable' {
+        Add-CompliantPreWindowState
+        Mock Test-NeologikEndpoint { param($Uri) $Uri -notmatch 'graph\.microsoft\.com' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'ACTION REQUIRED'
+        $console | Should -Match 'cannot reach:'
+        $console | Should -Match 'Microsoft Graph: https://graph.microsoft.com/'
+        Should -Invoke Invoke-NeologikTokenRequest -Times 0
+        Should -Invoke Connect-MgGraph -Times 0
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'stops a real run when the signed-in account is not an active Global Administrator, and only warns in verify-only' {
+        Add-CompliantPreWindowState
+        $script:Tenant.MeDirectoryRoles = @(@{ id = 'role-ua'; displayName = 'User Administrator'; roleTemplateId = 'fe930be7-5e62-47db-91af-98c3a49a38b1' })
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'admin@contoso.com does not hold the Global Administrator role \(active\)'
+        $console | Should -Match 'Privileged Identity Management'
+        Should -Invoke Get-MgServicePrincipal -Times 0
+        $script:Writes | Should -HaveCount 0
+
+        $script:Console = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 0
+        ($script:Console -join "`n") | Should -Match 'verify-only continues'
+    }
+
+    It 'stops the permission reduction when the signed-in account holds neither Owner nor User Access Administrator' {
+        Add-CompliantPreWindowState
+        $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -ne $script:Ids.Me })
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $script:Ids.Me; RoleDefinitionName = 'Reader'; Scope = "/subscriptions/$($script:Ids.Subscription)" }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'holds neither Owner nor User Access Administrator'
+        $console | Should -Match 'Access control \(IAM\)'
+        Get-SummaryResult 'RG role: Contributor' | Should -Be 'SKIPPED - Azure sign-in failed'
+        Should -Invoke New-AzRoleAssignment -Times 0
+        Should -Invoke Remove-AzRoleAssignment -Times 0
+
+        $script:Console = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 0
+        ($script:Console -join "`n") | Should -Match 'verify-only continues; the role writes would be refused'
+    }
+
+    It 'accepts User Access Administrator inherited from above the subscription' {
+        Add-CompliantPreWindowState
+        $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -ne $script:Ids.Me })
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $script:Ids.Me; RoleDefinitionName = 'User Access Administrator'; Scope = '/' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        ($script:Console -join "`n") | Should -Match 'holds User Access Administrator on the subscription'
+    }
+}
+
+Context 'Blueprint short name (project#2329)' {
+    It 'adopts the one blueprint the deployment identity owns under another short name instead of creating a second one' {
+        # The neoprd shape: the principal is named '... - neo-prd', the pipeline
+        # blueprint is '... - neoneoprdsdc01'; the operator passes the pipeline's name.
+        Add-CompliantPreWindowState
+        $deploySp = Get-FakeSp -Id $script:Ids.DeploySpId
+        $deploySp.displayName = 'Neologik GitHub Service Connection - x-prd'
+        $app = Get-FakeApp -Id $script:Ids.BlueprintAppObj
+        $app.displayName = 'Neologik Agent Blueprint - default - xprd01'
+        $principal = Get-FakeSp -Id $script:Ids.BlueprintSpId
+        $principal.displayName = $app.displayName
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = 'xprd01'; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code | Should -Be 0
+        Get-SummaryResult 'Agent blueprint' | Should -Be 'Present'
+        ($script:Console -join "`n") | Should -Match "blueprint name 'Neologik Agent Blueprint - default - xprd01'"
+        @($script:Writes | Where-Object { $_ -match 'POST blueprint' }) | Should -HaveCount 0
+
+        # A wrong short name given: the owned blueprint is adopted and named, never duplicated.
+        $script:Console = @()
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = 'x-prd'; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code | Should -Be 0
+        Get-SummaryResult 'Agent blueprint' | Should -Be "Present (adopted 'Neologik Agent Blueprint - default - xprd01')"
+        ($script:Console -join "`n") | Should -Match 'ADOPTED \(owned by the deployment identity'
+        @($script:Writes | Where-Object { $_ -match 'POST blueprint' }) | Should -HaveCount 0
+        @($script:Tenant.Apps | Where-Object { $_.displayName -like 'Neologik Agent Blueprint - default - *' }) | Should -HaveCount 1
+    }
+
+    It 'stops the blueprint step when the deployment identity owns several blueprints under other short names' {
+        Add-CompliantPreWindowState
+        $app = Get-FakeApp -Id $script:Ids.BlueprintAppObj
+        $app.displayName = 'Neologik Agent Blueprint - default - xprd01'
+        $second = New-FakeApp -Id ([guid]::NewGuid().ToString()) -AppId ([guid]::NewGuid().ToString()) -DisplayName 'Neologik Agent Blueprint - default - xprd02'
+        $second.owners = @($script:Ids.DeploySpId)
+        $script:Tenant.Apps += $second
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Overrides @{ SolutionShortName = 'x-prd' }) }
+        $code | Should -Be 1
+        (Get-SummaryResult 'Agent blueprint') | Should -Match '^FAILED - several blueprints owned by the deployment identity: .*xprd01.*xprd02'
+        Get-SummaryResult 'Blueprint principal' | Should -Be 'SKIPPED - blueprint not available'
+        @($script:Writes | Where-Object { $_ -match 'POST blueprint' }) | Should -HaveCount 0
+    }
+
+    It 'creates the blueprint under the given short name when the identity owns none, and reports WOULD CREATE in verify-only' {
+        Add-CompliantPreWindowState
+        $script:Tenant.Apps = @($script:Tenant.Apps | Where-Object { $_.id -ne $script:Ids.BlueprintAppObj })
+        $script:Tenant.ServicePrincipals = @($script:Tenant.ServicePrincipals | Where-Object { $_.id -ne $script:Ids.BlueprintSpId })
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 1
+        Get-SummaryResult 'Agent blueprint' | Should -Be "WOULD CREATE (Neologik Agent Blueprint - default - $($script:ShortName))"
+        @($script:Writes) | Should -HaveCount 0
     }
 }
 
@@ -1265,17 +1484,27 @@ Context 'Pre-window run on a compliant environment' {
         ($script:Console -join "`n") | Should -Match 'trying the next location'
     }
 
-    It 'derives the short name from the deployment identity when no configuration file is given' {
+    It 'takes the short name from -SolutionShortName when no configuration file is given (project#2329)' {
         Add-CompliantPreWindowState
-        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 0
         Get-SummaryResult 'Agent blueprint' | Should -Be 'Present'
+        ($script:Console -join "`n") | Should -Match "short name '$($script:ShortName)' from -SolutionShortName"
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'refuses the pre-window run without a short name rather than guessing it from a display name (project#2329)' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'needs SolutionShortName'
+        Should -Invoke Connect-MgGraph -Times 0
         $script:Writes | Should -HaveCount 0
     }
 
     It 'skips the group assignment and consent check when the ids are not supplied' {
         Add-CompliantPreWindowState
-        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 1
         Get-SummaryResult 'NCE group assignment' | Should -Be 'SKIPPED - ids not supplied'
         Get-SummaryResult 'Admin consent' | Should -BeNullOrEmpty
@@ -1288,7 +1517,7 @@ Context 'Pre-window run on an environment with missing state' {
         $deploy = Get-FakeSp -Id $script:Ids.DeploySpId
         $deploy.appRoleAssignments = @()
         Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.Read.All'
-        $script:Tenant.AzRoleAssignments = @()
+        $script:Tenant.AzRoleAssignments = @(@{ ObjectId = $script:Ids.Me; RoleDefinitionName = 'Owner'; Scope = '/' })
         $script:Tenant.DirectoryRoles = @()
         Add-LegacyAzureState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
@@ -1936,7 +2165,7 @@ Context 'Pre-window run: permission reduction (step 4)' {
         Get-SummaryResult 'subscription role: Cost Management Contributor' | Should -Be 'Created'
         Get-SummaryResult 'Legacy subscription role: Contributor' | Should -Be 'Not present'
         Get-SummaryResult 'Application Administrator role' | Should -Be 'Not held'
-        Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $Tenant -eq $script:Ids.Tenant -and $Subscription -eq $script:Ids.Subscription -and $UseDeviceAuthentication -and $ClaimsChallenge }
+        Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $Tenant -eq $script:Ids.Tenant -and $Subscription -eq $script:Ids.Subscription -and $AccessToken -eq 'eyJ0b2tlbg' }
         # Second run: pure verification.
         $script:Writes = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
@@ -2066,7 +2295,7 @@ Context 'Pre-window run: permission reduction (step 4)' {
 
     It 'accepts explicit parameters instead of a configuration file' {
         Add-CompliantPreWindowState
-        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 0
         $script:Writes | Should -HaveCount 0
     }
@@ -2279,7 +2508,9 @@ Context 'Pre-window run: Admin User Group membership (step 4d, project#2269)' {
     It 'requests the group-member write scope for the pre-window run' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { @($Scopes) -contains 'GroupMember.ReadWrite.All' -and @($Scopes) -contains 'RoleManagement.ReadWrite.Directory' }
+        $request = @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' }) | Select-Object -First 1
+        @($request.Body.scope -split ' ') | Should -Contain 'GroupMember.ReadWrite.All'
+        @($request.Body.scope -split ' ') | Should -Contain 'RoleManagement.ReadWrite.Directory'
     }
 
     It 'reports a refused removal without touching anything else' {

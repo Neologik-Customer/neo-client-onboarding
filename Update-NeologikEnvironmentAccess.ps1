@@ -151,6 +151,15 @@
     Application (client) id of the 'Neologik GitHub Service Connection'
     app registration. Required only when no ConfigurationFile is given.
 
+.PARAMETER SolutionShortName
+    The environment's solution short name (the value the onboarding
+    configuration records as SolutionShortName, e.g. abcprd01): the
+    deployment pipeline names the agent identity blueprint by it. Read from
+    the configuration file; required when no ConfigurationFile is given.
+    Never guessed from a display name (project#2329): an environment whose
+    deployment identity is named '... - abc-prd' while its short name is
+    abcprd01 would otherwise get a second blueprint the pipeline never uses.
+
 .PARAMETER SignInAppClientId
     Application (client) id of the 'Neologik Platform Sign-in' app
     registration (older environments may still show it as 'Neologik NCE
@@ -195,14 +204,28 @@
 
 .PARAMETER UseAzureCliToken
     Sign in to Microsoft Graph AND Azure with the Azure CLI session's tokens
-    for the tenant (az account get-access-token) instead of the device-code
+    for the tenant (az account get-access-token) instead of the sign-in
     prompts. For Neologik engineers running the script from a workstation
     whose az session in the tenant already satisfies multi-factor
-    authentication - the device-code prompt allows only 120 seconds to
-    complete. The CLI's Azure token carries no MFA claims challenge, so it
-    suits -Verify runs and verification passes; a role write the tenant
-    refuses with a claims challenge means run again without the switch.
-    Customers keep the default device-code sign-ins.
+    authentication. The CLI's Azure token carries no MFA claims challenge,
+    so it suits -Verify runs and verification passes; a role write the
+    tenant refuses with a claims challenge means run again without the
+    switch. Customers keep the default sign-in.
+
+.NOTES
+    Sign-in (project#2306). The script runs the device-code sign-in itself:
+    it prints the address and the code, waits no longer than the code is
+    valid (at most 15 minutes) and says every 30 seconds that it is still
+    waiting. Nothing else on the machine is needed - a browser on any device
+    and a Global Administrator account of the tenant. When that sign-in
+    does not complete the script tries the next method by itself: the Azure
+    CLI session on the machine, if there is one, then the Microsoft Graph
+    PowerShell device-code prompt. Only when every method has failed does
+    it stop, saying what to do. Before anything is changed it also checks
+    that the four Microsoft endpoints it needs are reachable, that the
+    PowerShell modules load, and that the signed-in account holds Global
+    Administrator (active) and Owner or User Access Administrator on the
+    subscription - each failure names the one thing to fix.
 
 .PARAMETER SubscriptionId
     Azure subscription id. Required for the pre-window run (the permission
@@ -264,6 +287,9 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$DeploySpClientId,
+
+    [Parameter(Mandatory = $false)]
+    [string]$SolutionShortName,
 
     [Parameter(Mandatory = $false)]
     [string]$SignInAppClientId,
@@ -392,6 +418,35 @@ $script:GuidPattern = '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
 # make the exit code 1 - including every 'WOULD ...' change a verify-only
 # run reports instead of performing.
 $script:AttentionPattern = 'MISSING|SKIPPED|NOT FOUND|PENDING|FAILED|UNKNOWN|WOULD'
+
+# Sign-in (project#2306): the script runs the device-code flow itself so the
+# address and the code are printed by this script, the wait is bounded by the
+# code's own lifetime and a failed method falls back to the next one. The
+# flows reuse the public client ids of two Microsoft first-party tools, so no
+# Neologik application and no consent beyond the scopes asked for are needed:
+# Microsoft Graph Command Line Tools (the Graph scopes) and Microsoft Azure
+# PowerShell (Azure Resource Manager).
+$script:GraphPublicClientId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
+$script:AzurePublicClientId = '1950a258-227b-4e31-a9cf-717495945fc2'
+$script:LoginEndpoint = 'https://login.microsoftonline.com'
+# Azure mandatory MFA (ARM layer): the 'p1' authentication-context claim the
+# role-assignment writes need, asked for with the Azure device code.
+$script:AzureMfaClaims = '{"access_token":{"acrs":{"essential":true,"values":["p1"]}}}'
+# The longest the script waits on one device code, whatever lifetime the
+# identity platform grants it.
+$script:DeviceCodeMaximumWaitSeconds = 900
+$script:DeviceCodeReportEverySeconds = 30
+# Directory role template of Global Administrator - the rights preflight.
+$script:GlobalAdministratorTemplateId = '62e90394-69f5-4237-9190-012177145e10'
+# The subscription roles that let the signed-in account write role assignments.
+$script:SubscriptionAdministratorRoles = @('Owner', 'User Access Administrator')
+# Everything the script talks to; each must answer before anything runs.
+$script:PreflightEndpoints = @(
+    @{ Name = 'Microsoft Entra sign-in'; Uri = 'https://login.microsoftonline.com/' },
+    @{ Name = 'Microsoft Graph'; Uri = 'https://graph.microsoft.com/' },
+    @{ Name = 'Azure Resource Manager'; Uri = 'https://management.azure.com/' },
+    @{ Name = 'PowerShell Gallery (module installs)'; Uri = 'https://www.powershellgallery.com/' }
+)
 # Microsoft Graph PowerShell SDK 2.x is required (SecureString access tokens,
 # -SkipHttpErrorCheck); ExchangeOnlineManagement 3.x for device-code sign-in.
 $script:GraphModuleMinimumVersion = [version]'2.0.0'
@@ -617,6 +672,162 @@ function Invoke-NeologikAzureCli {
     return @{ ExitCode = $exitCode; Output = $lines }
 }
 
+function Invoke-NeologikTokenRequest {
+    <#
+    One POST to the Microsoft identity platform (the device-code or the
+    token endpoint). Status code and parsed body are returned, never
+    thrown, so the device-code loop reads authorization_pending as data.
+    #>
+    param([string]$Uri, [hashtable]$Body)
+    $statusCode = 0
+    $response = Invoke-RestMethod -Method POST -Uri $Uri -Body $Body -ContentType 'application/x-www-form-urlencoded' `
+        -SkipHttpErrorCheck -StatusCodeVariable 'statusCode' -TimeoutSec 30 -ErrorAction Stop
+    return @{ StatusCode = [int]$statusCode; Body = $response }
+}
+
+function Test-NeologikEndpoint {
+    # True when this machine gets any HTTP answer from the address (a 4xx
+    # from a bare root is an answer); false on a DNS, proxy or firewall
+    # failure or no answer within 15 seconds.
+    param([string]$Uri)
+    try {
+        $null = Invoke-WebRequest -Method Head -Uri $Uri -TimeoutSec 15 -SkipHttpErrorCheck -ErrorAction Stop
+        return $true
+    }
+    catch { return $false }
+}
+
+function Get-NeologikTokenError {
+    # The identity platform's reason, one line, for the log.
+    param($Body)
+    $description = [string](Get-NeologikProperty $Body 'error_description' '')
+    $code = [string](Get-NeologikProperty $Body 'error' '')
+    if ($description) { return (($description -split "`r?`n")[0]).Trim() }
+    if ($code) { return $code }
+    return 'no answer from the identity platform'
+}
+
+function Get-NeologikDeviceCodeToken {
+    <#
+    The device-code sign-in, run by this script (project#2306): the address
+    and the code are printed here, the wait is bounded by the code's
+    lifetime (at most DeviceCodeMaximumWaitSeconds) and the script says
+    every 30 seconds that it is still waiting. Returns the token set, or
+    $null after logging why the sign-in did not complete - the caller then
+    tries the next method.
+    #>
+    param([string]$ClientId, [string[]]$Scopes, [string]$Label, [string]$Claims)
+    $state = $script:State
+    $base = "$($script:LoginEndpoint)/$($state.TenantId)/oauth2/v2.0"
+    $request = @{ client_id = $ClientId; scope = ($Scopes -join ' ') }
+    if ($Claims) { $request['claims'] = $Claims }
+    try {
+        $start = Invoke-NeologikTokenRequest -Uri "$base/devicecode" -Body $request
+        if ($start.StatusCode -ne 200 -and $Claims) {
+            # A tenant that refuses the claims parameter on the device-code
+            # request: ask again without it (the writes then surface any
+            # claims challenge themselves).
+            $request.Remove('claims')
+            $start = Invoke-NeologikTokenRequest -Uri "$base/devicecode" -Body $request
+        }
+    }
+    catch {
+        Write-Log "$Label sign-in could not start: $(Get-NeologikErrorText $_)" -Level Warning
+        return $null
+    }
+    if ($start.StatusCode -ne 200) {
+        Write-Log "$Label sign-in could not start: $(Get-NeologikTokenError $start.Body)" -Level Warning
+        return $null
+    }
+    $deviceCode = [string](Get-NeologikProperty $start.Body 'device_code' '')
+    $userCode = [string](Get-NeologikProperty $start.Body 'user_code' '')
+    $verificationUri = [string](Get-NeologikProperty $start.Body 'verification_uri' 'https://microsoft.com/devicelogin')
+    $lifetime = [int](Get-NeologikProperty $start.Body 'expires_in' 900)
+    $interval = [int](Get-NeologikProperty $start.Body 'interval' 5)
+    if (-not $deviceCode -or -not $userCode) {
+        Write-Log "$Label sign-in could not start: the identity platform returned no device code" -Level Warning
+        return $null
+    }
+    if ($lifetime -le 0) { $lifetime = 900 }
+    if ($interval -le 0) { $interval = 5 }
+    $lifetime = [Math]::Min($lifetime, $script:DeviceCodeMaximumWaitSeconds)
+    $minutes = [int][Math]::Ceiling($lifetime / 60)
+    Write-Host ''
+    Write-Host "  $Label sign-in" -ForegroundColor Cyan
+    Write-Host "  1. Open $verificationUri in a browser (this machine or your phone)."
+    Write-Host "  2. Enter the code: $userCode" -ForegroundColor Yellow
+    Write-Host '  3. Sign in with your Global Administrator account and approve the permissions.'
+    Write-Host "  The code is valid for $minutes minutes. The script waits here and reports every $($script:DeviceCodeReportEverySeconds) seconds."
+    Write-Host ''
+    # Polled at once and then every interval until the code's lifetime is
+    # spent: the loop is bounded by the count of intervals, never by a clock.
+    $elapsed = 0
+    $sinceReport = 0
+    while ($true) {
+        try {
+            $poll = Invoke-NeologikTokenRequest -Uri "$base/token" -Body @{
+                grant_type  = 'urn:ietf:params:oauth:grant-type:device_code'
+                client_id   = $ClientId
+                device_code = $deviceCode
+            }
+        }
+        catch {
+            Write-Log "$Label sign-in did not complete: $(Get-NeologikErrorText $_)" -Level Warning
+            return $null
+        }
+        if ($poll.StatusCode -eq 200) {
+            $accessToken = [string](Get-NeologikProperty $poll.Body 'access_token' '')
+            if ($accessToken) {
+                $account = Get-NeologikTokenAccountId -Token $accessToken
+                Write-Log "$Label sign-in completed$(if ($account) { " ($account)" })" -Level Success
+                return @{
+                    AccessToken  = $accessToken
+                    RefreshToken = [string](Get-NeologikProperty $poll.Body 'refresh_token' '')
+                    Account      = $account
+                }
+            }
+        }
+        $reason = [string](Get-NeologikProperty $poll.Body 'error' '')
+        if ($reason -eq 'authorization_pending') { }
+        elseif ($reason -eq 'slow_down') { $interval += 5 }
+        else {
+            Write-Log "$Label sign-in did not complete: $(Get-NeologikTokenError $poll.Body)" -Level Warning
+            return $null
+        }
+        if ($elapsed -ge $lifetime) { break }
+        Start-Sleep -Seconds $interval
+        $elapsed += $interval
+        $sinceReport += $interval
+        if ($sinceReport -ge $script:DeviceCodeReportEverySeconds) {
+            $left = [int][Math]::Ceiling(($lifetime - $elapsed) / 60)
+            Write-Host "  ... still waiting for the $Label sign-in (code $userCode, about $left minute(s) left)"
+            $sinceReport = 0
+        }
+    }
+    Write-Log "$Label sign-in did not complete: the code expired after $minutes minutes" -Level Warning
+    return $null
+}
+
+function Test-NeologikPreflightEndpoint {
+    # Every endpoint the run talks to must answer before anything is changed
+    # (project#2306). Returns $true, or $false after naming the one to fix.
+    $unreachable = @()
+    foreach ($endpoint in $script:PreflightEndpoints) {
+        if (Test-NeologikEndpoint -Uri $endpoint.Uri) {
+            Write-Log "  $($endpoint.Name) - reachable" -Level Success
+        }
+        else {
+            Write-Log "  $($endpoint.Name) ($($endpoint.Uri)) - NOT reachable" -Level Error
+            $unreachable += "$($endpoint.Name): $($endpoint.Uri)"
+        }
+    }
+    if ($unreachable.Count -gt 0) {
+        Write-ActionRequired "This machine cannot reach:`n  $($unreachable -join "`n  ")`nAllow these addresses through the proxy or firewall (or run the script from a machine that reaches them), then run it again. Nothing was changed."
+        return $false
+    }
+    return $true
+}
+
 function Invoke-NeologikGraphRaw {
     <#
     One Microsoft Graph request through the SDK with HTTP errors returned,
@@ -773,7 +984,7 @@ function Resolve-NeologikInput {
     #>
     param([hashtable]$Parameters)
     $state = $script:State
-    foreach ($name in @('ConfigurationFile', 'TenantId', 'DeploySpClientId', 'SignInAppClientId', 'NceUserGroupId',
+    foreach ($name in @('ConfigurationFile', 'TenantId', 'DeploySpClientId', 'SolutionShortName', 'SignInAppClientId', 'NceUserGroupId',
             'AdminGroupId', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'AgentGrantsFile', 'MailboxGrantsFile')) {
         $state[$name] = [string](Get-NeologikProperty $Parameters $name '')
     }
@@ -785,7 +996,10 @@ function Resolve-NeologikInput {
     # kind is the post-window run; none is the pre-window run.
     $state.Run = if ($state.AgentGrantsFile -or $state.MailboxGrantsFile) { 'PostWindow' } else { 'PreWindow' }
     $state.Config = $null
-    $state.ShortName = ''
+    # The short name names the agent identity blueprint (project#2329): the
+    # parameter wins, else the configuration file; never a display name.
+    $state.ShortName = $state.SolutionShortName.Trim()
+    $state.ShortNameSource = if ($state.ShortName) { '-SolutionShortName' } else { '' }
     $state.AgentGrants = $null
     $state.MailboxGrants = @()
     $state.AdoptedIdentityAppIds = @()
@@ -817,7 +1031,10 @@ function Resolve-NeologikInput {
                 }) | Select-Object -First 1
             if ($adminGroup) { $state.AdminGroupId = [string](Get-NeologikProperty $adminGroup 'Id' '') }
         }
-        $state.ShortName = [string](Get-NeologikProperty $config 'SolutionShortName' '')
+        if (-not $state.ShortName) {
+            $state.ShortName = ([string](Get-NeologikProperty $config 'SolutionShortName' '')).Trim()
+            if ($state.ShortName) { $state.ShortNameSource = 'the configuration file' }
+        }
         Write-Log "Configuration loaded: $(Get-NeologikProperty $config 'OrganizationName' '') ($($state.ShortName))" -Level Info
     }
 
@@ -841,6 +1058,11 @@ function Resolve-NeologikInput {
     }
     if ($state.Run -eq 'PreWindow' -and (-not $state.SubscriptionId -or -not $state.ResourceGroupName)) {
         throw [System.ArgumentException]::new('The pre-window run needs SubscriptionId and ResourceGroupName for the permission reduction - pass them explicitly or supply -ConfigurationFile.')
+    }
+    if ($state.Run -eq 'PreWindow' -and -not $state.ShortName) {
+        # The blueprint is named by the short name (project#2329) - never
+        # guessed from a display name.
+        throw [System.ArgumentException]::new("The pre-window run needs SolutionShortName (the solution short name the deployment pipeline names its blueprint by, e.g. abcprd01) - pass -SolutionShortName or supply -ConfigurationFile. It is never guessed from a display name.")
     }
     foreach ($legacyAppId in $state.RemoveLegacyGrantAppIds) {
         if (-not (Test-NeologikGuid $legacyAppId)) {
@@ -1078,13 +1300,44 @@ function Connect-NeologikGraph {
             Connect-MgGraph -AccessToken (ConvertTo-SecureString -String $cliToken.Trim() -AsPlainText -Force) -NoWelcome -ErrorAction Stop
         }
         else {
-            Write-Log 'Signing in to Microsoft Graph (device code - use your Global Administrator account)...' -Level Info
-            Connect-MgGraph -TenantId $state.TenantId -Scopes $scopes -UseDeviceCode -NoWelcome -ErrorAction Stop
+            # project#2306: the script's own device code first (visible,
+            # bounded), then the Azure CLI session on this machine if there
+            # is one, then the Microsoft Graph PowerShell device-code prompt.
+            $connected = $false
+            Write-Log 'Signing in to Microsoft Graph - use your Global Administrator account' -Level Info
+            $token = Get-NeologikDeviceCodeToken -ClientId $script:GraphPublicClientId -Label 'Microsoft Graph' `
+                -Scopes @(@($scopes) + @('openid', 'profile', 'offline_access'))
+            if ($token) {
+                try {
+                    Connect-MgGraph -AccessToken (ConvertTo-SecureString -String $token.AccessToken -AsPlainText -Force) -NoWelcome -ErrorAction Stop
+                    $connected = $true
+                }
+                catch { Write-Log "The Microsoft Graph session could not be opened with the sign-in token: $(Get-NeologikErrorText $_)" -Level Warning }
+            }
+            if (-not $connected -and (Test-NeologikCommand -Name 'az')) {
+                Write-Log 'Trying the Azure CLI session on this machine instead (az account get-access-token)...' -Level Info
+                $cli = Invoke-NeologikAzureCli -Arguments @('account', 'get-access-token', '--resource-type', 'ms-graph', '--tenant', $state.TenantId, '--query', 'accessToken', '-o', 'tsv')
+                $cliToken = [string](@($cli.Output) | Where-Object { $_ -and $_.Trim() } | Select-Object -Last 1)
+                if ($cli.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($cliToken)) {
+                    try {
+                        Connect-MgGraph -AccessToken (ConvertTo-SecureString -String $cliToken.Trim() -AsPlainText -Force) -NoWelcome -ErrorAction Stop
+                        $connected = $true
+                    }
+                    catch { Write-Log "The Microsoft Graph session could not be opened with the Azure CLI token: $(Get-NeologikErrorText $_)" -Level Warning }
+                }
+                else { Write-Log '  the Azure CLI has no session for this tenant' -Level Info }
+            }
+            if (-not $connected) {
+                Write-Log 'Trying the Microsoft Graph PowerShell device-code prompt (120 seconds)...' -Level Info
+                # The SDK writes its device-code text on the Information stream.
+                $InformationPreference = 'Continue'
+                Connect-MgGraph -TenantId $state.TenantId -Scopes $scopes -UseDeviceCode -NoWelcome -ErrorAction Stop
+            }
         }
     }
     catch {
         Write-Log "Microsoft Graph sign-in failed: $(Get-NeologikErrorText $_)" -Level Error
-        Write-ActionRequired "Sign in to Microsoft Graph did not complete.`nRun the script again and finish the device-code sign-in within 120 seconds with a Global Administrator account of tenant $($state.TenantId), approving the requested permissions."
+        Write-ActionRequired "Sign in to Microsoft Graph did not complete - every sign-in method was tried (the script's device code, the Azure CLI session, the Microsoft Graph PowerShell device code).`nRun the script again on a machine with a browser (any device can open the sign-in address) and finish the sign-in with a Global Administrator account of tenant $($state.TenantId), approving the requested permissions."
         return $false
     }
     $context = $null
@@ -1107,7 +1360,42 @@ function Connect-NeologikGraph {
             Write-Log "  the session lacks the permission(s) $($missing -join ', ') - items that need them will be reported as failed" -Level Warning
         }
     }
-    return $true
+    return (Test-NeologikGlobalAdministrator)
+}
+
+function Test-NeologikGlobalAdministrator {
+    <#
+    Rights preflight (project#2306): the signed-in account must hold Global
+    Administrator, active, before anything is changed. A real run stops
+    with the one instruction; a verify-only run warns and carries on (its
+    reads still work, the items needing the role report as failed). The
+    account's object id is kept for the Azure rights check.
+    #>
+    $state = $script:State
+    $graph = $script:GraphV1
+    try {
+        $me = Invoke-NeologikGraph -Method GET -Uri "$graph/me?`$select=id,userPrincipalName"
+        $state.SignedInObjectId = [string](Get-NeologikProperty $me 'id' '')
+        $state.SignedInUpn = [string](Get-NeologikProperty $me 'userPrincipalName' '')
+        $roles = @(Get-NeologikGraphCollection -Uri "$graph/me/memberOf/microsoft.graph.directoryRole?`$select=id,displayName,roleTemplateId")
+    }
+    catch {
+        Write-Log "The signed-in account's directory roles could not be read ($(Get-NeologikErrorText $_)) - continuing; items that need Global Administrator will report as failed" -Level Warning
+        return $true
+    }
+    $isGlobalAdministrator = @($roles | Where-Object { [string](Get-NeologikProperty $_ 'roleTemplateId' '') -eq $script:GlobalAdministratorTemplateId }).Count -gt 0
+    if ($isGlobalAdministrator) {
+        Write-Log '  the signed-in account holds Global Administrator (active)' -Level Success
+        return $true
+    }
+    $who = if ($state.SignedInUpn) { $state.SignedInUpn } else { 'The signed-in account' }
+    if (Test-NeologikVerifyOnly) {
+        Write-Log "  $who does not hold Global Administrator (active) - verify-only continues; items that need the role will report as failed" -Level Warning
+        return $true
+    }
+    Write-Log "$who does not hold Global Administrator (active)" -Level Error
+    Write-ActionRequired "$who does not hold the Global Administrator role (active) in tenant $($state.TenantId).`nActivate Global Administrator in Privileged Identity Management (Entra admin centre > Identity governance > Privileged Identity Management > My roles), or sign in with an account that holds it, then run the script again. Nothing was changed."
+    return $false
 }
 
 function Resolve-NeologikPrincipal {
@@ -1524,21 +1812,53 @@ function Set-NeologikAgentBlueprint {
     $graphBeta = $script:GraphBeta
 
     Write-Log 'Step 1a/4: agent identity blueprint' -Level Info
+    # The short name comes from the configuration file or -SolutionShortName,
+    # never from a display name (project#2329): the pipeline resolves the
+    # blueprint by 'Neologik Agent Blueprint - <key> - <short name>'.
     $shortName = $state.ShortName
-    if (-not $shortName) {
-        # Derive from the deployment identity's name ('Neologik GitHub Service Connection - <short>').
-        $shortName = ([string]$deploySp.DisplayName -split ' - ')[-1].Trim()
-    }
     $blueprintName = "Neologik Agent Blueprint - $($state.BlueprintKey) - $shortName"
+    Write-Log "  blueprint name '$blueprintName' (short name '$shortName' from $($state.ShortNameSource))" -Level Info
     $escaped = $blueprintName -replace "'", "''"
     $blueprint = $null
     $created = $false
     try {
         $blueprint = @(Get-NeologikGraphCollection -Uri "$graph/applications?`$filter=displayName eq '$escaped'&`$select=id,appId") | Select-Object -First 1
-        if ($blueprint) {
+        if (-not $blueprint) {
+            # Adoption (project#2329): a blueprint the deployment identity
+            # already owns under another short name is the pipeline's
+            # blueprint - adopt it rather than create a second one. Several
+            # such blueprints cannot be told apart: stop and name them.
+            $prefix = "Neologik Agent Blueprint - $($state.BlueprintKey) - "
+            $prefixEscaped = $prefix -replace "'", "''"
+            $owned = @()
+            foreach ($candidate in @(Get-NeologikGraphCollection -Uri "$graph/applications?`$filter=startswith(displayName,'$prefixEscaped')&`$select=id,appId,displayName")) {
+                $candidateId = [string](Get-NeologikProperty $candidate 'id' '')
+                $candidateOwners = @(Get-NeologikGraphCollection -Uri "$graph/applications/$candidateId/owners?`$select=id" |
+                    ForEach-Object { [string](Get-NeologikProperty $_ 'id' '') })
+                if ($candidateOwners -contains $deploySp.Id) { $owned += $candidate }
+            }
+            if ($owned.Count -eq 1) {
+                $blueprint = $owned[0]
+                $adoptedName = [string](Get-NeologikProperty $blueprint 'displayName' '')
+                Write-Log "  blueprint '$adoptedName' - present, ADOPTED (owned by the deployment identity; its short name differs from '$shortName' - check the short name you gave)" -Level Warning
+                Add-Summary 'Agent blueprint' "Present (adopted '$adoptedName')"
+                $blueprintName = $adoptedName
+            }
+            elseif ($owned.Count -gt 1) {
+                $names = @($owned | ForEach-Object { [string](Get-NeologikProperty $_ 'displayName' '') })
+                Write-Log "  blueprint '$blueprintName' - FAILED (the deployment identity owns $($owned.Count) blueprints under other short names: $($names -join ', ') - pass -SolutionShortName naming the one the pipeline uses)" -Level Error
+                Add-Summary 'Agent blueprint' "FAILED - several blueprints owned by the deployment identity: $($names -join ', ')"
+                foreach ($item in @('Blueprint owner', 'Blueprint principal', 'Blueprint principal owner', 'Blueprint principal role', 'Blueprint credentials')) {
+                    Add-Summary $item 'SKIPPED - blueprint not available'
+                }
+                return
+            }
+        }
+        elseif ($blueprint) {
             Write-Log "  blueprint '$blueprintName' - present (Client ID $(Get-NeologikProperty $blueprint 'appId'))" -Level Success
             Add-Summary 'Agent blueprint' 'Present'
         }
+        if ($blueprint) { }
         elseif (Test-NeologikVerifyOnly) {
             # Everything below hangs off the blueprint: reported as one set.
             Add-NeologikPendingChange 'Agent blueprint' "CREATE ($blueprintName)"
@@ -2174,21 +2494,56 @@ function Connect-NeologikAzure {
         Write-Log '  the CLI token carries no MFA claims challenge - a role write refused with a claims error means run again without -UseAzureCliToken' -Level Info
     }
     else {
-        Write-Log 'Signing in to Azure (device code - same administrator account)...' -Level Info
-        try {
-            $connectParams = @{ Tenant = $state.TenantId; Subscription = $state.SubscriptionId; UseDeviceAuthentication = $true }
-            # Azure mandatory MFA (ARM-layer): request the 'p1' authentication-context claim so the
-            # role-assignment writes below are not rejected with a claims-challenge error.
-            # Decodes to {"access_token":{"acrs":{"essential":true,"values":["p1"]}}}; needs Az.Accounts >= 5.2.0.
-            if ((Get-Command Connect-AzAccount -ErrorAction Stop).Parameters.ContainsKey('ClaimsChallenge')) {
-                $connectParams['ClaimsChallenge'] = 'eyJhY2Nlc3NfdG9rZW4iOnsiYWNycyI6eyJlc3NlbnRpYWwiOnRydWUsInZhbHVlcyI6WyJwMSJdfX19'
+        # project#2306: the script's own device code first (with the MFA
+        # claims the role writes need), then the Azure CLI session on this
+        # machine if there is one, then the Az PowerShell device-code prompt.
+        $connected = $false
+        Write-Log 'Signing in to Azure - the same administrator account' -Level Info
+        $token = Get-NeologikDeviceCodeToken -ClientId $script:AzurePublicClientId -Label 'Azure' -Claims $script:AzureMfaClaims `
+            -Scopes @('https://management.azure.com/.default', 'openid', 'profile', 'offline_access')
+        if ($token) {
+            $accountId = if ($token.Account) { $token.Account } else { 'device-code' }
+            try {
+                Connect-AzAccount -AccessToken $token.AccessToken -AccountId $accountId -Tenant $state.TenantId -Subscription $state.SubscriptionId -ErrorAction Stop | Out-Null
+                $connected = $true
             }
-            Connect-AzAccount @connectParams -ErrorAction Stop | Out-Null
+            catch { Write-Log "The Azure session could not be opened with the sign-in token: $(Get-NeologikErrorText $_)" -Level Warning }
         }
-        catch {
-            Write-Log "Azure sign-in failed: $(Get-NeologikErrorText $_)" -Level Error
-            Write-ActionRequired "Sign in to Azure did not complete.`nRun the script again and finish the device-code sign-in with an account that holds Owner (or User Access Administrator) on subscription $($state.SubscriptionId) in tenant $($state.TenantId)."
-            return $false
+        if (-not $connected -and (Test-NeologikCommand -Name 'az')) {
+            Write-Log 'Trying the Azure CLI session on this machine instead (az account get-access-token)...' -Level Info
+            $cli = Invoke-NeologikAzureCli -Arguments @('account', 'get-access-token', '--resource', 'https://management.azure.com/',
+                '--subscription', $state.SubscriptionId, '--query', 'accessToken', '-o', 'tsv')
+            $cliToken = if ($cli.ExitCode -eq 0) { [string]($cli.Output | Select-Object -Last 1) } else { '' }
+            if ($cliToken.Trim()) {
+                $accountId = Get-NeologikTokenAccountId -Token $cliToken.Trim()
+                if (-not $accountId) { $accountId = 'azure-cli' }
+                try {
+                    Connect-AzAccount -AccessToken $cliToken.Trim() -AccountId $accountId -Tenant $state.TenantId -Subscription $state.SubscriptionId -ErrorAction Stop | Out-Null
+                    $connected = $true
+                    Write-Log '  the CLI token carries no MFA claims challenge - a role write refused with a claims error means run again and finish the device-code sign-in' -Level Info
+                }
+                catch { Write-Log "The Azure session could not be opened with the Azure CLI token: $(Get-NeologikErrorText $_)" -Level Warning }
+            }
+            else { Write-Log '  the Azure CLI has no session for this subscription' -Level Info }
+        }
+        if (-not $connected) {
+            Write-Log 'Trying the Az PowerShell device-code prompt...' -Level Info
+            try {
+                $connectParams = @{ Tenant = $state.TenantId; Subscription = $state.SubscriptionId; UseDeviceAuthentication = $true }
+                # Azure mandatory MFA (ARM-layer): request the 'p1' authentication-context claim so the
+                # role-assignment writes below are not rejected with a claims-challenge error.
+                # Decodes to {"access_token":{"acrs":{"essential":true,"values":["p1"]}}}; needs Az.Accounts >= 5.2.0.
+                if ((Get-Command Connect-AzAccount -ErrorAction Stop).Parameters.ContainsKey('ClaimsChallenge')) {
+                    $connectParams['ClaimsChallenge'] = 'eyJhY2Nlc3NfdG9rZW4iOnsiYWNycyI6eyJlc3NlbnRpYWwiOnRydWUsInZhbHVlcyI6WyJwMSJdfX19'
+                }
+                $InformationPreference = 'Continue'
+                Connect-AzAccount @connectParams -ErrorAction Stop | Out-Null
+            }
+            catch {
+                Write-Log "Azure sign-in failed: $(Get-NeologikErrorText $_)" -Level Error
+                Write-ActionRequired "Sign in to Azure did not complete - every sign-in method was tried (the script's device code, the Azure CLI session, the Az PowerShell device code).`nRun the script again on a machine with a browser and finish the sign-in with an account that holds Owner (or User Access Administrator) on subscription $($state.SubscriptionId) in tenant $($state.TenantId)."
+                return $false
+            }
         }
     }
     try {
@@ -2202,7 +2557,47 @@ function Connect-NeologikAzure {
     catch {
         Write-Log "Azure context could not be read ($(Get-NeologikErrorText $_)) - continuing" -Level Warning
     }
-    return $true
+    return (Test-NeologikSubscriptionAdministrator)
+}
+
+function Test-NeologikSubscriptionAdministrator {
+    <#
+    Rights preflight (project#2306): the signed-in account must hold Owner
+    or User Access Administrator on the subscription (directly or inherited)
+    before the role assignments are written. A real run stops with the one
+    instruction; a verify-only run warns and carries on. Skipped with a
+    warning when the account's object id is not known (an Azure CLI token
+    for another account) or the read fails.
+    #>
+    $state = $script:State
+    $objectId = [string](Get-NeologikProperty $state 'SignedInObjectId' '')
+    $subScope = "/subscriptions/$($state.SubscriptionId)"
+    if (-not $objectId) {
+        Write-Log '  the signed-in account is not known to this run - its subscription rights are not checked' -Level Warning
+        return $true
+    }
+    try {
+        $held = @(Get-AzRoleAssignment -ObjectId $objectId -Scope $subScope -ErrorAction Stop |
+            ForEach-Object { [string](Get-NeologikProperty $_ 'RoleDefinitionName' '') })
+    }
+    catch {
+        Write-Log "The signed-in account's subscription roles could not be read ($(Get-NeologikErrorText $_)) - continuing; role writes will report any refusal" -Level Warning
+        return $true
+    }
+    # One name per role: an inherited assignment at several scopes counts once.
+    $administrator = @($held | Where-Object { $script:SubscriptionAdministratorRoles -contains $_ } | Select-Object -Unique)
+    if ($administrator.Count -gt 0) {
+        Write-Log "  the signed-in account holds $($administrator -join ', ') on the subscription" -Level Success
+        return $true
+    }
+    $who = if ($state.SignedInUpn) { $state.SignedInUpn } else { 'The signed-in account' }
+    if (Test-NeologikVerifyOnly) {
+        Write-Log "  $who holds neither Owner nor User Access Administrator on subscription $($state.SubscriptionId) - verify-only continues; the role writes would be refused" -Level Warning
+        return $true
+    }
+    Write-Log "$who holds neither Owner nor User Access Administrator on subscription $($state.SubscriptionId)" -Level Error
+    Write-ActionRequired "$who holds neither Owner nor User Access Administrator on subscription $($state.SubscriptionId).`nAssign one of those roles to the account on the subscription (Azure portal > Subscriptions > Access control (IAM)), or activate it in Privileged Identity Management, then run the script again. Nothing was changed on Azure."
+    return $false
 }
 
 function Set-NeologikAzureRoleAssignment {
@@ -2717,6 +3112,7 @@ function Invoke-NeologikEnvironmentAccess {
         [switch]$Verify,
         [string]$TenantId,
         [string]$DeploySpClientId,
+        [string]$SolutionShortName,
         [string]$SignInAppClientId,
         [string]$NceUserGroupId,
         [string]$AdminGroupId,
@@ -2741,6 +3137,7 @@ function Invoke-NeologikEnvironmentAccess {
             Verify                  = [bool]$Verify
             TenantId                = $TenantId
             DeploySpClientId        = $DeploySpClientId
+            SolutionShortName       = $SolutionShortName
             SignInAppClientId       = $SignInAppClientId
             NceUserGroupId          = $NceUserGroupId
             AdminGroupId            = $AdminGroupId
@@ -2765,6 +3162,10 @@ function Invoke-NeologikEnvironmentAccess {
     }
 
     Write-NeologikHeader
+
+    # Preflight (project#2306): every endpoint answers before anything runs.
+    Write-Log 'Checking this machine can reach Microsoft...' -Level Info
+    if (-not (Test-NeologikPreflightEndpoint)) { return 1 }
 
     if (-not (Import-NeologikModuleSet -Names $script:GraphModules -MinimumVersion $script:GraphModuleMinimumVersion `
                 -InstallHint 'Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Applications, Microsoft.Graph.Groups, Microsoft.Graph.Identity.DirectoryManagement -Scope CurrentUser -Force')) {
