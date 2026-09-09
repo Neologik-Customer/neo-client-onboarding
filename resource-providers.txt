@@ -1,0 +1,59 @@
+# Azure resource providers and preview features the Neologik platform requires.
+#
+# This file is the single list. Install-NeologikEnvironment.ps1 registers every entry during
+# onboarding and Register-NeologikResourceProviders.ps1 re-checks and repairs the same list.
+# To add a provider, add one line here; nothing else changes.
+#
+# One entry per line. Blank lines and lines starting with # are ignored.
+#   Provider:         Microsoft.Storage
+#   Preview feature:  Microsoft.Compute/EncryptionAtHost   (the provider must also be listed)
+#
+# The five providers the onboarding script itself creates resources with (Resources, KeyVault,
+# Storage, ManagedIdentity, Compute) are registered first and confirmed before the first resource
+# is created. Every other entry is confirmed before the configuration is exported.
+
+# Onboarding script's own resources
+Microsoft.Resources
+Microsoft.KeyVault
+Microsoft.Storage
+Microsoft.ManagedIdentity
+Microsoft.Compute
+
+# AKS cluster and container platform
+Microsoft.ContainerService
+Microsoft.ContainerRegistry
+Microsoft.ContainerInstance
+Microsoft.KubernetesConfiguration
+Microsoft.Network
+
+# Data, search and AI
+Microsoft.Sql
+Microsoft.DocumentDB
+Microsoft.Search
+Microsoft.CognitiveServices
+Microsoft.MachineLearningServices
+Microsoft.VideoIndexer
+Microsoft.Fabric
+
+# Monitoring, alerting and support
+Microsoft.OperationalInsights
+Microsoft.Insights
+Microsoft.Monitor
+Microsoft.AlertsManagement
+Microsoft.Diagnostics
+Microsoft.ResourceHealth
+Microsoft.Help
+Microsoft.ChangeSafety
+
+# Application platform and integration
+Microsoft.App
+Microsoft.Web
+Microsoft.BotService
+Microsoft.Automation
+Microsoft.ServiceLinker
+Microsoft.SaaS
+Microsoft.Quota
+
+# Preview features
+Microsoft.Compute/EncryptionAtHost
+Microsoft.ContainerService/AzureLinuxCVMPreview
