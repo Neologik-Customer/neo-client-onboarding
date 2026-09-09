@@ -10,7 +10,7 @@ This repository contains a robust PowerShell script that automates the complete 
 
 - PowerShell version validation and automatic updates
 - Azure module dependency management
-- Resource provider registration with retry logic
+- Resource provider registration from a single list (`resource-providers.txt`), submitted after sign-in and confirmed before use
 - Azure authentication with re-authentication option
 - Permission validation (Subscription Owner and Global Administrator)
 - Input validation for all configuration parameters
@@ -127,7 +127,7 @@ Or specify several parameters:
 
 ## Answer File (`inputs.json`)
 
-Every interactive prompt can be pre-filled from a JSON answer file - copy `inputs-example.json` to `inputs.json` next to the script (auto-detected) or pass a path with `-AnswerFile`. Values pre-fill the matching prompt: press Enter to accept, or type to override. The file also carries the provisioning decisions (`skipGuestInvitation`, `useExistingServicePrincipal` with its object ID and optional secret, `registerResourceProviders`) and the resource-name overrides described under Resource Naming Convention.
+Every interactive prompt can be pre-filled from a JSON answer file - copy `inputs-example.json` to `inputs.json` next to the script (auto-detected) or pass a path with `-AnswerFile`. Values pre-fill the matching prompt: press Enter to accept, or type to override. The file also carries the provisioning decisions (`skipGuestInvitation`, `useExistingServicePrincipal` with its object ID and optional secret) and the resource-name overrides described under Resource Naming Convention.
 
 ## Non-Interactive (CI) Mode
 
@@ -213,7 +213,7 @@ The chosen name is saved to the checkpoint, so if a run fails and you resume it,
 
 ## Interactive Configuration Flow
 
-The script asks for, in order: Organization Name, Bot Hostname (FQDN), Organization Code, Environment Type, Azure Region, Environment Index, resource tagging (with optional custom tags), then the five resource names (Resource Group, Key Vault, Deployment Storage Account, Script Runner Managed Identity, SQL Managed Identity - each pre-filled with the computed standard name or your answer-file override), the budget cost-report email recipients, the resource-provider decision (register the full platform provider set now, or only the minimal set the script itself needs), the guest-invitation decision (accepting it lists the file's addresses and offers to add more, typed line-by-line; declining it offers a follow-up: add existing pre-created accounts to the security groups, from the guest file or typed addresses), and the service-principal decision (create one, or use one you already created). A configuration summary is shown for confirmation before anything is created.
+The script asks for, in order: Organization Name, Bot Hostname (FQDN), Organization Code, Environment Type, Azure Region, Environment Index, resource tagging (with optional custom tags), then the five resource names (Resource Group, Key Vault, Deployment Storage Account, Script Runner Managed Identity, SQL Managed Identity - each pre-filled with the computed standard name or your answer-file override), the budget cost-report email recipients, the guest-invitation decision (accepting it lists the file's addresses and offers to add more, typed line-by-line; declining it offers a follow-up: add existing pre-created accounts to the security groups, from the guest file or typed addresses), and the service-principal decision (create one, or use one you already created). A configuration summary is shown for confirmation before anything is created.
 
 ## Input Validation
 
@@ -323,7 +323,11 @@ Creates the `Neologik Platform Sign-in - <short-name>` app registration (NCE and
 
 ### 8. Resource Provider Registration
 
-Registers the minimal Azure resource providers the script itself needs (Microsoft.Compute, Microsoft.KeyVault, Microsoft.ManagedIdentity, Microsoft.Resources, Microsoft.Storage), waiting for registration to complete with retry logic. A prompt (default No; pre-fillable with the `registerResourceProviders` answer-file key) offers to register the full platform provider set (around 30 providers) now instead. If you decline, run `Register-NeologikResourceProviders.ps1` from this repository before the platform deployment.
+Registers every Azure resource provider and preview feature the platform requires. The list is `resource-providers.txt` next to the script (one entry per line, `#` starts a comment; `Namespace/FeatureName` marks a preview feature); it is the only place a provider is ever added, and the script stops before sign-in if the file is missing or malformed.
+
+Registration is asynchronous in Azure, so the script submits every request straight after the permission check (the five providers it creates resources with first, then the rest) and carries on. Each of the five is confirmed just before its resource is created; the full list is confirmed in one pass before the configuration is exported. The deployment identity never registers providers.
+
+Anything still registering at the end is listed on screen and exported as `ResourceProvidersPending` in the configuration file. Confirm those entries before the platform deployment by running `Register-NeologikResourceProviders.ps1` from this repository on the subscription; it reads the same list, submits every outstanding registration, waits for the whole list together and exits 1 if any entry is still not registered. `-ListOnly` prints the parsed list without touching Azure.
 
 ### 9. Storage Account
 
@@ -512,16 +516,18 @@ This is normal and allows for re-running the script safely.
 
 **Solution**: Run it again. Progress is checkpointed to `NeologikCheckpoint.json` after each step; the script offers to resume and skips completed steps. The checkpoint is deleted automatically on success.
 
-### Resource Provider Registration Timeout
+### Resource Provider Still Registering
 
-**Problem**: "Resource provider registration failed" or timeout message
+**Problem**: "Resource providers still registering" stops the run before the resource group, Key Vault, storage account or managed identities, or the final summary lists registrations that have not completed.
 
 **Solution**:
-1. Wait 5 minutes as instructed in the error message
-2. Run the script again - it will resume and check registration status
-3. The script automatically retries registration
+1. Azure continues the registration in the background; wait a few minutes.
+2. Mid-run stop: run the script again and choose Y to resume - confirmed providers are skipped.
+3. Pending at the end: run `Register-NeologikResourceProviders.ps1` on the subscription before the platform deployment.
 
-Resource provider registration can sometimes take time in Azure.
+**Problem**: "Resource provider list not found" or a line of `resource-providers.txt` is rejected
+
+**Solution**: the file ships with the onboarding kit next to the scripts; restore it. Each line is a provider namespace (`Microsoft.Storage`) or a preview feature (`Microsoft.Compute/EncryptionAtHost`); `#` starts a comment.
 
 ## What to Share with Neologik
 

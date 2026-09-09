@@ -9,7 +9,6 @@
   "azureRegion": "uksouth",
   "environmentIndex": "01",
   "budgetCostReportEmailRecipients": ["support_budget_alerts@neologik.ai"],
-  "registerResourceProviders": false,
 
   "_resourceTags_note": "applyResourceTags true (the default) tags every script-created Azure resource (resource group, Key Vault, deployment storage account, both managed identities) at creation with Vendor, ApplicationName, ManagedBy, Environment, Solution and DeploymentDate - required by tenants whose Azure Policies deny creation of untagged resources. resourceTagsCustom holds optional extra tags as an object (or a 'Key=Value,Key2=Value2' string); keys use letters/digits/._- only, values must not contain ',' or '='; custom tags override the defaults on key collision. Ignored when applyResourceTags is false.",
   "applyResourceTags": true,

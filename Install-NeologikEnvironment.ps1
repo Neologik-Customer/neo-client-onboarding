@@ -1196,75 +1196,6 @@ function Find-NeologikUserByEmail {
     }
 }
 
-function Register-RequiredResourceProvider {
-    <#
-    .SYNOPSIS
-        Ensures a resource provider is registered in the subscription.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$ProviderNamespace
-    )
-
-    Write-Log "Checking resource provider registration: $ProviderNamespace..." -Level Info
-
-    try {
-        $provider = Get-AzResourceProvider -ProviderNamespace $ProviderNamespace -ErrorAction Stop
-
-        if ($provider.RegistrationState -eq 'Registered') {
-            Write-Log "Resource provider '$ProviderNamespace' is already registered" -Level Info
-            return
-        }
-
-        if ($provider.RegistrationState -eq 'Registering') {
-            Write-Log "Resource provider '$ProviderNamespace' is currently registering..." -Level Info
-        }
-        else {
-            Write-Log "Registering resource provider: $ProviderNamespace..." -Level Info
-            Register-AzResourceProvider -ProviderNamespace $ProviderNamespace -ErrorAction Stop | Out-Null
-        }
-
-        # Wait for registration to complete with retry logic
-        $maxRetries = 20
-        $retryCount = 0
-        $waitSeconds = 10
-
-        while ($retryCount -lt $maxRetries) {
-            Start-Sleep -Seconds $waitSeconds
-            $provider = Get-AzResourceProvider -ProviderNamespace $ProviderNamespace -ErrorAction Stop
-            
-            Write-Log "Resource provider '$ProviderNamespace' status: $($provider.RegistrationState)" -Level Info
-
-            if ($provider.RegistrationState -eq 'Registered') {
-                Write-Log "Resource provider '$ProviderNamespace' registered successfully" -Level Success
-                return
-            }
-
-            if ($provider.RegistrationState -ne 'Registering') {
-                throw "Resource provider registration failed. Current state: $($provider.RegistrationState)"
-            }
-
-            $retryCount++
-            Write-Log "Waiting for registration to complete... (Attempt $retryCount of $maxRetries)" -Level Info
-        }
-
-        # Registration timed out
-        Write-Log "Resource provider '$ProviderNamespace' registration timed out after $($maxRetries * $waitSeconds) seconds" -Level Error
-        Write-Log "Current registration status: $($provider.RegistrationState)" -Level Error
-        Write-Host "`n❌ Resource Provider Registration Failed" -ForegroundColor Red
-        Write-Host "   Provider: $ProviderNamespace" -ForegroundColor Yellow
-        Write-Host "   Status: $($provider.RegistrationState)" -ForegroundColor Yellow
-        Write-Host "   Please wait 5 minutes and try running the script again." -ForegroundColor Yellow
-        Write-Host ""
-        throw "Resource provider registration failed. Please try again in 5 minutes."
-    }
-    catch {
-        Write-Log "Failed to register resource provider '$ProviderNamespace': $_" -Level Error
-        throw
-    }
-}
-
 #endregion
 
 #region Subscription and Resource Group Management
@@ -1357,8 +1288,8 @@ function New-NeologikResourceGroup {
     Write-Log "Checking for resource group: $ResourceGroupName..." -Level Info
 
     try {
-        # Ensure Microsoft.Resources provider is registered
-        Register-RequiredResourceProvider -ProviderNamespace 'Microsoft.Resources'
+        # Confirm the Microsoft.Resources provider (registration submitted at step 5c) before creating
+        Confirm-ResourceProviderReady -Namespaces @('Microsoft.Resources')
 
         $rg = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue
 
@@ -2764,8 +2695,8 @@ function New-NeologikKeyVault {
     try {
         Import-Module Az.KeyVault -ErrorAction Stop
 
-        # Ensure Microsoft.KeyVault provider is registered
-        Register-RequiredResourceProvider -ProviderNamespace 'Microsoft.KeyVault'
+        # Confirm the Microsoft.KeyVault provider (registration submitted at step 5c) before creating
+        Confirm-ResourceProviderReady -Namespaces @('Microsoft.KeyVault')
 
         # Check if Key Vault exists
         $existingKv = Get-AzKeyVault -ResourceGroupName $ResourceGroupName -VaultName $KeyVaultName -ErrorAction SilentlyContinue
@@ -2936,387 +2867,299 @@ function New-NeologikKeyVault {
 
 #region Resource Provider Registration
 
-function New-NeologikNceAuthApp {
+# Providers the onboarding script itself creates resources with (resource group, Key Vault,
+# deployment storage account, managed identities). They are submitted first and confirmed before
+# the first of those resources is created. Every entry must also appear in resource-providers.txt.
+$script:OnboardingProviders = @(
+    'Microsoft.Resources',
+    'Microsoft.KeyVault',
+    'Microsoft.Storage',
+    'Microsoft.ManagedIdentity',
+    'Microsoft.Compute'
+)
+
+function Get-PlatformResourceProviderList {
     <#
     .SYNOPSIS
-        Creates the 'Neologik Platform Sign-in' app registration and assigns the
-        Harness user group to it (project#1084).
-
+        Reads resource-providers.txt, the single list of Azure resource providers and preview
+        features the platform requires.
     .DESCRIPTION
-        From v5 the Harness admin tool (NCE) authorizes from the token's
-        groups claim only, and Entra emits that claim solely for groups
-        ASSIGNED to this app's enterprise application. The deployment
-        pipeline creates the app but its hardened service principal lacks
-        AppRoleAssignment.ReadWrite.All BY DESIGN, so the assignment used to
-        be a hard-blocking manual step (migration runsheet 7b) - skipping it
-        locked every user out of NCE. This script runs as a Global
-        Administrator, so the whole chain completes here instead:
-        app + claims config + deployment-SP ownership + secret in Key Vault
-        + group assignment. The pipeline (ensure-app-regs.sh) later finds
-        the app by its Graph uniqueName, reuses it, reconciles properties,
-        and rotates the secret when needed - its own best-effort group
-        assignment becomes a no-op.
-
-        Owner decision 2026-07-17: ONLY the Harness user group is assigned.
-        The Admin User Group is Azure RBAC only and never grants NCE access.
+        One entry per line; blank lines and lines starting with '#' are ignored. A provider is a
+        namespace (Microsoft.Storage); a preview feature is Namespace/FeatureName
+        (Microsoft.Compute/EncryptionAtHost). The file is the only place a provider is ever added.
+        Fails when the file is missing, empty, malformed, or lacks a provider the script itself
+        needs. Returns Providers (onboarding providers first, then file order) and Features.
     #>
     [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [array]$SecurityGroups,
+    param()
 
-        [Parameter(Mandatory = $true)]
-        [string]$DeploySpObjectId,
-
-        [Parameter(Mandatory = $true)]
-        [string]$KeyVaultName
-    )
-
-    Write-Log "Creating the Neologik Platform Sign-in app registration (NCE + App portal login)..." -Level Info
-
-    try {
-        Import-Module Microsoft.Graph.Applications -ErrorAction Stop
-        Import-Module Microsoft.Graph.Groups -ErrorAction Stop
-
-        $solutionName = [string]$script:ConfigData['SolutionName']
-        $shortName = [string]$script:ConfigData['SolutionShortName']
-        $hostName = [string]$script:ConfigData['HostName']
-        # MUST match the deployment pipeline exactly: ensure-app-regs.sh
-        # resolves the app by uniqueName ('sp-admin-<solutionName>') and the
-        # Key Vault secret name derives from it.
-        $uniqueName = "sp-admin-$solutionName"
-        $displayName = "Neologik Platform Sign-in - $shortName"
-        $redirectUri = "https://$hostName/nce"
-
-        # Resolve by the immutable Graph uniqueName - the same key the
-        # deployment pipeline (ensure-app-regs.sh) uses. A display-name
-        # lookup would miss an app the pipeline has since renamed and
-        # attempt a duplicate create.
-        $existingApp = $null
-        try {
-            $found = Invoke-MgGraphRequest -Method GET -Uri "v1.0/applications(uniqueName='$uniqueName')" -ErrorAction Stop
-            $existingApp = Get-MgApplication -ApplicationId $found.id -ErrorAction Stop
-        }
-        catch {
-            $existingApp = $null   # 404 = not found = create below
-        }
-        $secretText = $null
-
-        if ($existingApp) {
-            Write-Log "App Registration '$($existingApp.DisplayName)' already exists (Client ID: $($existingApp.AppId))" -Level Info
-            $app = $existingApp
-            if ($app.DisplayName -ne $displayName) {
-                Update-MgApplication -ApplicationId $app.Id -DisplayName $displayName -ErrorAction Stop
-                Write-Log "App Registration renamed to '$displayName'" -Level Info
-            }
-        }
-        else {
-            Write-Log "Creating App Registration: $displayName..." -Level Info
-            $app = New-MgApplication -DisplayName $displayName `
-                -UniqueName $uniqueName `
-                -SignInAudience "AzureADMultipleOrgs" `
-                -GroupMembershipClaims "ApplicationGroup" `
-                -Web @{ RedirectUris = @($redirectUri) } `
-                -Api @{ RequestedAccessTokenVersion = 2 } `
-                -ErrorAction Stop
-            Write-Log "App Registration created successfully (Client ID: $($app.AppId))" -Level Success
-        }
-
-        $sp = Get-MgServicePrincipal -Filter "appId eq '$($app.AppId)'" -ErrorAction SilentlyContinue
-        if (-not $sp) {
-            $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
-            Write-Log "Service Principal created successfully" -Level Success
-        }
-
-        # Deployment SP as owner: the pipeline manages this app through
-        # Application.ReadWrite.OwnedBy, which only covers apps it owns.
-        $owners = Get-MgApplicationOwner -ApplicationId $app.Id -ErrorAction SilentlyContinue
-        if ($owners -and ($owners.Id -contains $DeploySpObjectId)) {
-            Write-Log "Deployment SP is already an owner of the auth app" -Level Info
-        }
-        else {
-            New-MgApplicationOwnerByRef -ApplicationId $app.Id `
-                -BodyParameter @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$DeploySpObjectId" } `
-                -ErrorAction Stop
-            Write-Log "Deployment SP added as owner of the auth app" -Level Success
-        }
-
-        # Deployment SP as owner of the SERVICE PRINCIPAL object too - application
-        # ownership does not extend to the service principal, so without this the
-        # pipeline's servicePrincipal updates (display-name sync) are denied with
-        # Authorization_RequestDenied on every deploy (project#1579). Idempotent:
-        # re-running onboarding adds the missing owner on existing environments.
-        $spOwners = Get-MgServicePrincipalOwner -ServicePrincipalId $sp.Id -ErrorAction SilentlyContinue
-        if ($spOwners -and ($spOwners.Id -contains $DeploySpObjectId)) {
-            Write-Log "Deployment SP is already an owner of the auth service principal" -Level Info
-        }
-        else {
-            New-MgServicePrincipalOwnerByRef -ServicePrincipalId $sp.Id `
-                -BodyParameter @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$DeploySpObjectId" } `
-                -ErrorAction Stop
-            Write-Log "Deployment SP added as owner of the auth service principal" -Level Success
-        }
-
-        # Client secret -> Key Vault under the name the pipeline expects.
-        # Only mint one when the app is new or the vault has no value yet -
-        # the pipeline rotates near-expiry credentials itself.
-        $kvSecretName = "$uniqueName-auth-secret"
-        $existingKvSecret = Get-AzKeyVaultSecret -VaultName $KeyVaultName -Name $kvSecretName -ErrorAction SilentlyContinue
-        if ($existingKvSecret) {
-            Write-Log "Key Vault already holds '$kvSecretName' - keeping the existing credential" -Level Info
-        }
-        else {
-            $passwordCred = Add-MgApplicationPassword -ApplicationId $app.Id `
-                -PasswordCredential @{ DisplayName = 'auth'; EndDateTime = (Get-Date).AddDays(365) } `
-                -ErrorAction Stop
-            $secretText = $passwordCred.SecretText
-            $secureSecret = ConvertTo-SecureString -String $secretText -AsPlainText -Force
-            $null = Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name $kvSecretName -SecretValue $secureSecret -ErrorAction Stop
-            Write-Log "Client secret stored in Key Vault as '$kvSecretName'" -Level Success
-        }
-
-        # Assign the NCE role groups so their members' tokens carry the
-        # groups claim NCE authorizes from (project#1341: contributors AND
-        # admins). Default app role, direct groups only (nested membership
-        # does not expand into the claim).
-        $defaultAppRole = '00000000-0000-0000-0000-000000000000'
-        $assignedGroups = @()
-        foreach ($rolePattern in @('Neologik NCE Contributors*', 'Neologik NCE Admins*')) {
-            $roleGroup = $SecurityGroups | Where-Object { $_.Name -like $rolePattern } | Select-Object -First 1
-            if (-not $roleGroup) {
-                Write-Log "Warning: no security group matches '$rolePattern' - NCE group assignment skipped. A Global Admin must assign it manually (runsheet steps 7b/7c)." -Level Warning
-                continue
-            }
-            $alreadyAssigned = Get-MgGroupAppRoleAssignment -GroupId $roleGroup.Id -ErrorAction SilentlyContinue |
-                Where-Object { $_.ResourceId -eq $sp.Id }
-            if ($alreadyAssigned) {
-                Write-Log "Group '$($roleGroup.Name)' is already assigned to the auth app" -Level Info
-            }
-            else {
-                $null = New-MgGroupAppRoleAssignment -GroupId $roleGroup.Id `
-                    -PrincipalId $roleGroup.Id `
-                    -ResourceId $sp.Id `
-                    -AppRoleId $defaultAppRole `
-                    -ErrorAction Stop
-                Write-Log "Group '$($roleGroup.Name)' assigned to the auth app - NCE login will carry the groups claim" -Level Success
-            }
-            $assignedGroups += $roleGroup.Name
-        }
-
-        $script:ConfigData['NceAuthApp'] = @{
-            Name = $displayName
-            ClientId = $app.AppId
-            ObjectId = $app.Id
-            ServicePrincipalId = $sp.Id
-            UniqueName = $uniqueName
-            KeyVaultSecretName = $kvSecretName
-            AssignedGroups = $assignedGroups
-        }
-
-        return $script:ConfigData['NceAuthApp']
+    $path = Join-Path $PSScriptRoot 'resource-providers.txt'
+    if (-not (Test-Path $path)) {
+        throw "Resource provider list not found: $path. The file ships with the onboarding kit; restore it before running."
     }
-    catch {
-        Write-Log "Failed to create the NCE auth app: $_" -Level Error
-        throw
+
+    $providers = [System.Collections.Generic.List[string]]::new()
+    $featureKeys = [System.Collections.Generic.List[string]]::new()
+    $features = @()
+    $lineNumber = 0
+    foreach ($raw in @(Get-Content -Path $path)) {
+        $lineNumber++
+        # Anything from '#' onwards is a comment, whether the line starts with it or not.
+        $line = ("$raw" -split '#', 2)[0].Trim()
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        if ($line -match '^(?<ns>[A-Za-z0-9]+\.[A-Za-z0-9.]+)/(?<feature>[A-Za-z0-9]+)$') {
+            if (-not $featureKeys.Contains($line)) {
+                $featureKeys.Add($line)
+                $features += @{ Provider = $Matches.ns; Feature = $Matches.feature }
+            }
+        }
+        elseif ($line -match '^[A-Za-z0-9]+\.[A-Za-z0-9.]+$') {
+            if (-not $providers.Contains($line)) { $providers.Add($line) }
+        }
+        else {
+            throw "resource-providers.txt line ${lineNumber}: '$line' is not a provider namespace (Microsoft.Example) or a preview feature (Microsoft.Example/FeatureName)."
+        }
     }
+    if ($providers.Count -eq 0) { throw "resource-providers.txt lists no resource providers." }
+
+    $missing = @($script:OnboardingProviders | Where-Object { -not $providers.Contains($_) })
+    if ($missing.Count -gt 0) {
+        throw "resource-providers.txt is missing providers the onboarding script itself needs: $($missing -join ', ')."
+    }
+    foreach ($f in $features) {
+        if (-not $providers.Contains($f.Provider)) {
+            throw "resource-providers.txt lists feature $($f.Provider)/$($f.Feature) but not its provider $($f.Provider)."
+        }
+    }
+
+    $ordered = @($script:OnboardingProviders) + @($providers | Where-Object { $script:OnboardingProviders -notcontains $_ })
+    Write-Log "Loaded resource provider list: $($ordered.Count) providers, $($features.Count) preview features ($path)" -Level Info
+    return [pscustomobject]@{ Providers = [string[]]$ordered; Features = @($features); Path = $path }
 }
 
-function Register-AllResourceProviders {
+function Start-ResourceProviderRegistration {
     <#
     .SYNOPSIS
-        Registers all Azure resource providers and preview features required by the platform
-        deployment for the subscription.
+        Submits registration for every provider and preview feature in the list without waiting.
     .DESCRIPTION
-        Provider and feature registration is a one-time, subscription-scoped operation. It is
-        performed here during onboarding (run as the subscription Owner) so the deployment
-        service connection no longer needs subscription-scoped permission to register providers
-        or read provider/feature state. The AKS infrastructure workflow previously did this in a
-        'register-providers' job; that job has been removed.
+        Registration is asynchronous in Azure: each request returns in about a second and Azure
+        completes it in the background. The onboarding providers are submitted first, then the
+        rest, so the script carries on with the remaining steps and confirms later with
+        Wait-ResourceProviderRegistration. Entries already Registered (in Azure or in the
+        checkpoint) are skipped. A request that cannot be submitted (unknown namespace or
+        feature, missing permission) stops the run: the list file is the only input.
     #>
     [CmdletBinding()]
     param(
-        # When $true (default) register the full provider set the platform deployment needs.
-        # When $false register only the minimal set this script created previously (Key Vault,
-        # Storage, etc.); the remaining providers must then be registered separately via
-        # Register-NeologikResourceProviders.ps1 before the infrastructure deployment runs.
-        [Parameter(Mandatory = $false)]
-        [bool]$RegisterAll = $true
+        [Parameter(Mandatory = $true)]
+        $ProviderList
     )
 
-    # Minimal provider set (the resources this onboarding script creates directly). Used when the
-    # operator opts out of registering the full platform provider set here.
-    $minimalProviders = @(
-        'Microsoft.Compute',
-        'Microsoft.KeyVault',
-        'Microsoft.ManagedIdentity',
-        'Microsoft.Resources',
-        'Microsoft.Storage'
-    )
+    Write-Log "Submitting resource provider registrations ($($ProviderList.Providers.Count) providers, $($ProviderList.Features.Count) preview features)..." -Level Info
+    $submitted = 0
+    $alreadyRegistered = 0
 
-    # Full provider set required across the platform deployment (mirrors the list previously
-    # registered by neo-infrastructure's register-providers job).
-    $allProviders = @(
-        'Microsoft.Resources',
-        'Microsoft.App',
-        'Microsoft.Automation',
-        'Microsoft.ManagedIdentity',
-        'Microsoft.CognitiveServices',
-        'Microsoft.DocumentDB',
-        'Microsoft.Network',
-        'Microsoft.ContainerRegistry',
-        'Microsoft.OperationalInsights',
-        'Microsoft.KeyVault',
-        'Microsoft.Insights',
-        'Microsoft.Search',
-        'Microsoft.Storage',
-        'Microsoft.ContainerService',
-        'Microsoft.ContainerInstance',
-        'Microsoft.Web',
-        'Microsoft.MachineLearningServices',
-        'Microsoft.AlertsManagement',
-        'Microsoft.BotService',
-        'Microsoft.Compute',
-        'Microsoft.Monitor',
-        'Microsoft.Quota',
-        'Microsoft.Diagnostics',
-        'Microsoft.ChangeSafety',
-        'Microsoft.Fabric',
-        'Microsoft.Help',
-        'Microsoft.ResourceHealth',
-        'Microsoft.SaaS',
-        'Microsoft.ServiceLinker',
-        'Microsoft.Sql'
-    )
-
-    if ($RegisterAll) {
-        $providers = $allProviders
-        Write-Log "Registering ALL required Azure resource providers..." -Level Info
-    }
-    else {
-        $providers = $minimalProviders
-        Write-Log "Registering MINIMAL Azure resource providers only (operator opted out of full set)." -Level Info
-        Write-Host "  ⚠️  Only minimal providers will be registered. Before deploying the platform," -ForegroundColor Yellow
-        Write-Host "      register the full set with Register-NeologikResourceProviders.ps1." -ForegroundColor Yellow
-    }
-
-    foreach ($provider in $providers) {
-        # Skip providers already confirmed registered in a previous run (checkpoint)
-        if ($script:ProviderRegistrations[$provider] -eq 'Registered') {
-            Write-Log "Resource provider '$provider' already registered (from checkpoint)" -Level Info
-            continue
-        }
-
+    foreach ($ns in $ProviderList.Providers) {
+        if ($script:ProviderRegistrations[$ns] -eq 'Registered') { $alreadyRegistered++; continue }
         try {
-            Register-RequiredResourceProvider -ProviderNamespace $provider
-            $script:ProviderRegistrations[$provider] = 'Registered'
-            Save-Checkpoint -Label "Provider_$provider"
+            $state = (Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction Stop | Select-Object -First 1).RegistrationState
+            if ($state -eq 'Registered') {
+                $script:ProviderRegistrations[$ns] = 'Registered'
+                $alreadyRegistered++
+                continue
+            }
+            if ($state -ne 'Registering') {
+                Register-AzResourceProvider -ProviderNamespace $ns -ErrorAction Stop | Out-Null
+            }
+            $script:ProviderRegistrations[$ns] = 'Requested'
+            $submitted++
+            Write-Log "Registration requested: $ns (was $state)" -Level Info
         }
         catch {
-            # Timeouts are normal for slow Azure regions — record and continue rather than aborting.
-            # The provider registration continues in the background; on the next run the real-time
-            # state check inside Register-RequiredResourceProvider will pick it up as Registered.
-            if ($_.Exception.Message -match 'timed out|Please try again') {
-                Write-Log "Resource provider '$provider' registration timed out - it may still be registering in Azure" -Level Warning
-                $script:ProviderRegistrations[$provider] = 'TimedOut'
-                Save-Checkpoint -Label "Provider_${provider}_TimedOut"
-            }
-            else {
-                Write-Log "Failed to register resource provider '$provider': $_" -Level Error
-                throw
-            }
+            Write-Log "Failed to request registration of resource provider '$ns': $_" -Level Error
+            throw
         }
     }
 
-    # Report any providers that timed out so the user is aware
-    $timedOutProviders = @($script:ProviderRegistrations.GetEnumerator() | Where-Object { $_.Value -eq 'TimedOut' } | Select-Object -ExpandProperty Key)
-    if ($timedOutProviders.Count -gt 0) {
-        Write-Host "`n⚠️  The following resource providers timed out and may still be registering in Azure:" -ForegroundColor Yellow
-        $timedOutProviders | ForEach-Object { Write-Host "     - $_" -ForegroundColor Yellow }
-        Write-Host "   This is normal — Azure continues registering them in the background." -ForegroundColor Gray
-        Write-Host "   Re-run the script and choose 'Y' to resume; timed-out providers will be re-checked" -ForegroundColor Gray
-        Write-Host "   and skipped automatically once they reach the 'Registered' state." -ForegroundColor Gray
-        Write-Host ""
-        Write-Log "Resource provider registration timed out for: $($timedOutProviders -join ', ')" -Level Warning
-    }
-    else {
-        Write-Log "All resource providers registered successfully" -Level Success
-    }
-
-    # Register Microsoft.Compute/EncryptionAtHost feature (required for AKS encrypted node pools)
-    Write-Log "Checking Microsoft.Compute/EncryptionAtHost feature registration..." -Level Info
-    try {
-        $feature = Get-AzProviderFeature -ProviderNamespace 'Microsoft.Compute' -FeatureName 'EncryptionAtHost' -ErrorAction Stop
-        if ($feature.RegistrationState -eq 'Registered') {
-            Write-Log "Microsoft.Compute/EncryptionAtHost feature is already registered" -Level Info
-        } else {
-            Write-Log "Registering Microsoft.Compute/EncryptionAtHost feature..." -Level Info
-            Register-AzProviderFeature -ProviderNamespace 'Microsoft.Compute' -FeatureName 'EncryptionAtHost' -ErrorAction Stop | Out-Null
-
-            # Wait up to 10 minutes for feature registration
-            $maxRetries = 20
-            $waitSeconds = 30
-            for ($i = 0; $i -lt $maxRetries; $i++) {
-                Start-Sleep -Seconds $waitSeconds
-                $feature = Get-AzProviderFeature -ProviderNamespace 'Microsoft.Compute' -FeatureName 'EncryptionAtHost' -ErrorAction Stop
-                Write-Host "  ⏳ EncryptionAtHost: $($feature.RegistrationState) ($($i + 1)/$maxRetries)..." -ForegroundColor Gray
-                Write-Log "EncryptionAtHost feature status: $($feature.RegistrationState)" -Level Info
-                if ($feature.RegistrationState -eq 'Registered') {
-                    Register-AzResourceProvider -ProviderNamespace 'Microsoft.Compute' -ErrorAction Stop | Out-Null
-                    Write-Log "Microsoft.Compute/EncryptionAtHost feature registered successfully" -Level Success
-                    break
-                }
+    foreach ($f in $ProviderList.Features) {
+        $key = "$($f.Provider)/$($f.Feature)"
+        if ($script:ProviderRegistrations[$key] -eq 'Registered') { $alreadyRegistered++; continue }
+        try {
+            $state = (Get-AzProviderFeature -ProviderNamespace $f.Provider -FeatureName $f.Feature -ErrorAction Stop).RegistrationState
+            if ($state -eq 'Registered') {
+                $script:ProviderRegistrations[$key] = 'Registered'
+                $alreadyRegistered++
+                continue
             }
-            if ($feature.RegistrationState -ne 'Registered') {
-                Write-Log "Microsoft.Compute/EncryptionAtHost feature registration timed out — check Azure portal for status" -Level Warning
+            if ($state -notin @('Registering', 'Pending')) {
+                Register-AzProviderFeature -ProviderNamespace $f.Provider -FeatureName $f.Feature -ErrorAction Stop | Out-Null
+            }
+            $script:ProviderRegistrations[$key] = 'Requested'
+            $submitted++
+            Write-Log "Feature registration requested: $key (was $state)" -Level Info
+        }
+        catch {
+            Write-Log "Failed to request registration of preview feature '$key': $_" -Level Error
+            throw
+        }
+    }
+
+    Save-Checkpoint -Label 'ProvidersRequested'
+    Write-Host "  Resource providers: $submitted registration request(s) submitted, $alreadyRegistered already registered." -ForegroundColor Gray
+    Write-Host "  Azure completes them in the background while onboarding continues." -ForegroundColor Gray
+    Write-Log "Resource provider registrations submitted: $submitted requested, $alreadyRegistered already registered" -Level Success
+}
+
+function Wait-ResourceProviderRegistration {
+    <#
+    .SYNOPSIS
+        Confirms that the given providers and preview features have reached Registered, polling
+        them together in one loop.
+    .DESCRIPTION
+        Returns the entries still not Registered when the timeout expires (empty when every entry
+        is confirmed) and records TimedOut for them in the checkpoint. A request Azure reports as
+        NotRegistered is re-submitted once. When a feature reaches Registered its provider is
+        re-registered so the feature propagates to it.
+    #>
+    [CmdletBinding()]
+    param(
+        [string[]]$Providers = @(),
+        [hashtable[]]$Features = @(),
+        [int]$TimeoutSeconds = 600,
+        [int]$IntervalSeconds = 15
+    )
+
+    $pendingProviders = [System.Collections.Generic.List[string]]::new()
+    foreach ($ns in $Providers) {
+        if ($script:ProviderRegistrations[$ns] -ne 'Registered') { $pendingProviders.Add($ns) }
+    }
+    $pendingFeatures = [System.Collections.Generic.List[hashtable]]::new()
+    foreach ($f in $Features) {
+        if ($script:ProviderRegistrations["$($f.Provider)/$($f.Feature)"] -ne 'Registered') { $pendingFeatures.Add($f) }
+    }
+    if ($pendingProviders.Count -eq 0 -and $pendingFeatures.Count -eq 0) { return @() }
+
+    Write-Log "Waiting for $($pendingProviders.Count) provider(s) and $($pendingFeatures.Count) preview feature(s) to reach Registered (timeout ${TimeoutSeconds}s)..." -Level Info
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $resubmitted = @{}
+
+    while ($true) {
+        $changed = $false
+
+        foreach ($ns in @($pendingProviders)) {
+            try {
+                $state = (Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction Stop | Select-Object -First 1).RegistrationState
+            }
+            catch {
+                Write-Log "Could not read the state of resource provider '$ns': $_" -Level Warning
+                continue
+            }
+            if ($state -eq 'Registered') {
+                $script:ProviderRegistrations[$ns] = 'Registered'
+                $pendingProviders.Remove($ns) | Out-Null
+                $changed = $true
+                Write-Log "Resource provider registered: $ns" -Level Success
+            }
+            elseif ($state -ne 'Registering' -and -not $resubmitted[$ns]) {
+                Write-Log "Resource provider '$ns' reports $state; re-submitting the registration" -Level Warning
+                $resubmitted[$ns] = $true
+                try { Register-AzResourceProvider -ProviderNamespace $ns -ErrorAction Stop | Out-Null }
+                catch { Write-Log "Re-submission failed for resource provider '$ns': $_" -Level Warning }
             }
         }
-    } catch {
-        Write-Log "Failed to register Microsoft.Compute/EncryptionAtHost feature: $_" -Level Warning
+
+        foreach ($f in @($pendingFeatures)) {
+            $key = "$($f.Provider)/$($f.Feature)"
+            try {
+                $state = (Get-AzProviderFeature -ProviderNamespace $f.Provider -FeatureName $f.Feature -ErrorAction Stop).RegistrationState
+            }
+            catch {
+                Write-Log "Could not read the state of preview feature '$key': $_" -Level Warning
+                continue
+            }
+            if ($state -eq 'Registered') {
+                try { Register-AzResourceProvider -ProviderNamespace $f.Provider -ErrorAction Stop | Out-Null }
+                catch { Write-Log "Provider refresh after preview feature '$key' failed: $_" -Level Warning }
+                $script:ProviderRegistrations[$key] = 'Registered'
+                $pendingFeatures.Remove($f) | Out-Null
+                $changed = $true
+                Write-Log "Preview feature registered: $key" -Level Success
+            }
+            elseif ($state -notin @('Registering', 'Pending') -and -not $resubmitted[$key]) {
+                Write-Log "Preview feature '$key' reports $state; re-submitting the registration" -Level Warning
+                $resubmitted[$key] = $true
+                try { Register-AzProviderFeature -ProviderNamespace $f.Provider -FeatureName $f.Feature -ErrorAction Stop | Out-Null }
+                catch { Write-Log "Re-submission failed for preview feature '$key': $_" -Level Warning }
+            }
+        }
+
+        if ($changed) { Save-Checkpoint -Label 'ProvidersConfirmed' }
+        if ($pendingProviders.Count -eq 0 -and $pendingFeatures.Count -eq 0) { break }
+        if ((Get-Date) -ge $deadline) { break }
+        Write-Host "  Waiting for $($pendingProviders.Count + $pendingFeatures.Count) registration(s) to complete..." -ForegroundColor Gray
+        Start-Sleep -Seconds $IntervalSeconds
     }
 
-    # AzureLinuxCVMPreview lives under Microsoft.ContainerService, which is only registered in the
-    # full provider set; skip it in minimal mode (it will be registered by
-    # Register-NeologikResourceProviders.ps1 alongside the full provider set).
-    if (-not $RegisterAll) {
-        Write-Log "Skipping AzureLinuxCVMPreview feature registration (minimal provider mode)" -Level Info
+    $remaining = @($pendingProviders) + @($pendingFeatures | ForEach-Object { "$($_.Provider)/$($_.Feature)" })
+    if ($remaining.Count -gt 0) {
+        foreach ($key in $remaining) { $script:ProviderRegistrations[$key] = 'TimedOut' }
+        Save-Checkpoint -Label 'ProvidersTimedOut'
+    }
+    return $remaining
+}
+
+function Confirm-ResourceProviderReady {
+    <#
+    .SYNOPSIS
+        Confirms that the named providers (submitted at step 5c) are Registered before a resource
+        of that type is created. Stops the run with a clear message if one is still registering.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Namespaces
+    )
+
+    $remaining = Wait-ResourceProviderRegistration -Providers $Namespaces -TimeoutSeconds 600
+    if ($remaining.Count -eq 0) {
+        Write-Log "Resource provider(s) confirmed: $($Namespaces -join ', ')" -Level Info
         return
     }
+    Write-Host ""
+    Write-Host "  Resource providers this script needs are still registering: $($remaining -join ', ')" -ForegroundColor Yellow
+    Write-Host "  Azure continues the registration in the background. Wait a few minutes, then run the script" -ForegroundColor Yellow
+    Write-Host "  again and choose Y to resume; confirmed providers are skipped." -ForegroundColor Yellow
+    Write-Host ""
+    throw "Resource providers still registering: $($remaining -join ', '). Re-run the script to resume once they are registered."
+}
 
-    # Register Microsoft.ContainerService/AzureLinuxCVMPreview feature. Confidential (DC-series)
-    # node SKUs make AKS resolve osSKU=AzureLinux -> AzureLinuxV3+CVM, which is gated behind this
-    # preview flag. The node SKU is chosen later via the environment variables file (not known at
-    # onboarding time), so the feature is registered unconditionally here — registering an unused
-    # preview flag has no cost or effect, and avoids the deploy failing preflight with InvalidOSSKU.
-    Write-Log "Checking Microsoft.ContainerService/AzureLinuxCVMPreview feature registration..." -Level Info
-    try {
-        $feature = Get-AzProviderFeature -ProviderNamespace 'Microsoft.ContainerService' -FeatureName 'AzureLinuxCVMPreview' -ErrorAction Stop
-        if ($feature.RegistrationState -eq 'Registered') {
-            Write-Log "Microsoft.ContainerService/AzureLinuxCVMPreview feature is already registered" -Level Info
-        } else {
-            Write-Log "Registering Microsoft.ContainerService/AzureLinuxCVMPreview feature..." -Level Info
-            Register-AzProviderFeature -ProviderNamespace 'Microsoft.ContainerService' -FeatureName 'AzureLinuxCVMPreview' -ErrorAction Stop | Out-Null
+function Complete-ResourceProviderRegistration {
+    <#
+    .SYNOPSIS
+        Final confirmation of the full provider and preview-feature list before the configuration
+        is exported. Anything still pending is reported and recorded in the configuration.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        $ProviderList
+    )
 
-            # Wait up to 10 minutes for feature registration
-            $maxRetries = 20
-            $waitSeconds = 30
-            for ($i = 0; $i -lt $maxRetries; $i++) {
-                Start-Sleep -Seconds $waitSeconds
-                $feature = Get-AzProviderFeature -ProviderNamespace 'Microsoft.ContainerService' -FeatureName 'AzureLinuxCVMPreview' -ErrorAction Stop
-                Write-Host "  ⏳ AzureLinuxCVMPreview: $($feature.RegistrationState) ($($i + 1)/$maxRetries)..." -ForegroundColor Gray
-                Write-Log "AzureLinuxCVMPreview feature status: $($feature.RegistrationState)" -Level Info
-                if ($feature.RegistrationState -eq 'Registered') {
-                    Register-AzResourceProvider -ProviderNamespace 'Microsoft.ContainerService' -ErrorAction Stop | Out-Null
-                    Write-Log "Microsoft.ContainerService/AzureLinuxCVMPreview feature registered successfully" -Level Success
-                    break
-                }
-            }
-            if ($feature.RegistrationState -ne 'Registered') {
-                Write-Log "Microsoft.ContainerService/AzureLinuxCVMPreview feature registration timed out — check Azure portal for status" -Level Warning
-            }
-        }
-    } catch {
-        Write-Log "Failed to register Microsoft.ContainerService/AzureLinuxCVMPreview feature: $_" -Level Warning
+    Write-Log "Confirming the full resource provider list..." -Level Info
+    $remaining = Wait-ResourceProviderRegistration -Providers $ProviderList.Providers -Features $ProviderList.Features -TimeoutSeconds 600
+    $script:ConfigData['ResourceProvidersPending'] = @($remaining)
+    if ($remaining.Count -eq 0) {
+        Write-Log "All $($ProviderList.Providers.Count) resource providers and $($ProviderList.Features.Count) preview features are registered" -Level Success
+        Write-Host "  Resource providers: all $($ProviderList.Providers.Count) providers and $($ProviderList.Features.Count) preview features registered." -ForegroundColor Green
+        return
     }
+    Write-Host ""
+    Write-Host "  The following registrations have not completed yet (Azure continues them in the background):" -ForegroundColor Yellow
+    $remaining | ForEach-Object { Write-Host "     - $_" -ForegroundColor Yellow }
+    Write-Host "  Before the platform deployment, confirm them by running Register-NeologikResourceProviders.ps1" -ForegroundColor Gray
+    Write-Host "  on this subscription. They are listed as ResourceProvidersPending in the configuration file." -ForegroundColor Gray
+    Write-Host ""
+    Write-Log "Resource provider registration still pending for: $($remaining -join ', ')" -Level Warning
 }
 
 #endregion
@@ -3348,8 +3191,8 @@ function New-NeologikStorageAccount {
     try {
         Import-Module Az.Storage -ErrorAction Stop
 
-        # Ensure Microsoft.Storage provider is registered
-        Register-RequiredResourceProvider -ProviderNamespace 'Microsoft.Storage'
+        # Confirm the Microsoft.Storage provider (registration submitted at step 5c) before creating
+        Confirm-ResourceProviderReady -Namespaces @('Microsoft.Storage')
 
         # Check if Storage Account exists
         $existingSa = Get-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccountName -ErrorAction SilentlyContinue
@@ -3523,8 +3366,8 @@ function New-NeologikManagedIdentities {
     try {
         Import-Module Az.ManagedServiceIdentity -ErrorAction Stop
 
-        # Ensure Microsoft.ManagedIdentity provider is registered
-        Register-RequiredResourceProvider -ProviderNamespace 'Microsoft.ManagedIdentity'
+        # Confirm the Microsoft.ManagedIdentity provider (registration submitted at step 5c) before creating
+        Confirm-ResourceProviderReady -Namespaces @('Microsoft.ManagedIdentity')
 
         # Name suffix = the platform solution short name (neo{org}{index}, e.g.
         # neodmo01) - naming convention alignment, project#1063. Environment
@@ -3881,7 +3724,7 @@ function Export-ConfigurationData {
             'HostName' = $script:ConfigData['HostName']
             'BudgetEmailAddresses' = $script:ConfigData['BudgetEmailAddresses']
             'BudgetEmailFrequency' = $script:ConfigData['BudgetEmailFrequency']
-            'RegisterAllProviders' = $script:ConfigData['RegisterAllProviders']
+            'ResourceProvidersPending' = @($script:ConfigData['ResourceProvidersPending'])
             'ResourceTagsEnabled' = [bool]$script:ConfigData['ResourceTagsEnabled']
             'ResourceTagsCustom' = $exportCustomTags
             'InvitedGuestUsers' = $script:ConfigData['InvitedGuestUsers']
@@ -4443,16 +4286,6 @@ function Set-ConfigFromAnswerFile {
     }
     $script:ConfigData['BudgetEmailFrequency'] = 'Daily'
 
-    # Register-all-resource-providers choice (optional boolean; defaults to the minimal set).
-    # $true registers the full platform provider set now; $false (default) registers the minimal
-    # set here and leaves the rest to Register-NeologikResourceProviders.ps1.
-    $rrpAns = Get-Answer 'registerResourceProviders'
-    if ($null -eq $rrpAns) { $script:ConfigData['RegisterAllProviders'] = $false }
-    elseif ($rrpAns -is [bool]) { $script:ConfigData['RegisterAllProviders'] = [bool]$rrpAns }
-    elseif ("$rrpAns" -match '^(true|yes|y|1)$') { $script:ConfigData['RegisterAllProviders'] = $true }
-    elseif ("$rrpAns" -match '^(false|no|n|0)$') { $script:ConfigData['RegisterAllProviders'] = $false }
-    else { throw "registerResourceProviders '$rrpAns' must be true or false." }
-
     # Resource tagging (project#1173): optional boolean (default: apply tags) plus optional
     # custom tags as an object or a comma-separated key=value string. Invalid values throw
     # so the caller falls back to interactive entry.
@@ -4583,9 +4416,9 @@ function Start-NeologikOnboarding {
                 Write-Host "`n  ✓ Checkpoint loaded." -ForegroundColor Green
                 Write-Host "    Org: $($script:OrganizationCode)  |  Env: $($script:EnvironmentType)  |  Region: $($script:AzureRegion)" -ForegroundColor Cyan
                 Write-Host "    Resource Group: $($script:ResourceGroupName)" -ForegroundColor Cyan
-                $timedOut = @($script:ProviderRegistrations.GetEnumerator() | Where-Object { $_.Value -eq 'TimedOut' })
-                if ($timedOut.Count -gt 0) {
-                    Write-Host "    Provider registrations to retry: $($timedOut.Count)" -ForegroundColor Yellow
+                $unconfirmed = @($script:ProviderRegistrations.GetEnumerator() | Where-Object { $_.Value -ne 'Registered' })
+                if ($unconfirmed.Count -gt 0) {
+                    Write-Host "    Provider registrations still to confirm: $($unconfirmed.Count)" -ForegroundColor Yellow
                 }
                 Write-Host ""
                 Write-Log "Resuming from checkpoint: $($existingCheckpoint.FullName)" -Level Info
@@ -4691,6 +4524,10 @@ function Start-NeologikOnboarding {
             Write-Host ""
         }
 
+        # Step 3b: Load the resource provider list (resource-providers.txt) before sign-in so a
+        # missing or malformed file fails fast.
+        $script:ProviderList = Get-PlatformResourceProviderList
+
         # Step 4: Connect to Azure FIRST to get tenant and subscription info
         Write-Host "`n╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Magenta
         Write-Host "║                                                               ║" -ForegroundColor Magenta
@@ -4732,6 +4569,11 @@ function Start-NeologikOnboarding {
         # Step 5b: Validate required permissions before prompting for input
         Write-Log "Validating required permissions..." -Level Info
         $null = Test-RequiredPermissions -SubscriptionId $script:ConfigData['SubscriptionId']
+
+        # Step 5c: Submit every resource provider and preview feature registration now (the
+        # script's own five first, then the rest). Azure completes them in the background;
+        # each is confirmed where its resource is created and the full list before export.
+        Start-ResourceProviderRegistration -ProviderList $script:ProviderList
 
         # Step 6: Collect remaining configuration inputs (skipped when resuming from checkpoint)
         if (-not $resuming) {
@@ -5296,40 +5138,6 @@ function Start-NeologikOnboarding {
         $script:ConfigData['BudgetEmailAddresses'] = $budgetEmails
         $script:ConfigData['BudgetEmailFrequency'] = 'Daily'
 
-        # Ask whether to register the full Azure resource provider set now.
-        # Pre-filled from inputs.json 'registerResourceProviders' when present. Default: No —
-        # register only the minimal providers this script needs; the full platform provider set is
-        # registered separately via Register-NeologikResourceProviders.ps1 before the
-        # infrastructure deployment runs.
-        $registerAllDefault = $false
-        $rpAns = Get-Answer 'registerResourceProviders'
-        if ($rpAns -is [bool]) { $registerAllDefault = [bool]$rpAns }
-        elseif ($rpAns -and "$rpAns" -match '^(true|yes|y|1)$') { $registerAllDefault = $true }
-        elseif ($rpAns -and "$rpAns" -match '^(false|no|n|0)$') { $registerAllDefault = $false }
-        elseif ($rpAns) { Write-Host "  ⚠ Ignoring invalid registerResourceProviders '$rpAns' from answer file (must be true/false)." -ForegroundColor Yellow }
-        $registerAllDefaultText = if ($registerAllDefault) { 'Y (register the full set now)' } else { 'N (register the minimal set only)' }
-        Write-Host ""
-        Write-Host "Register ALL Azure resource providers now?" -ForegroundColor Cyan
-        Write-Host "  The full platform deployment needs ~30 resource providers registered on the" -ForegroundColor Gray
-        Write-Host "  subscription. You can register them now, or skip and run" -ForegroundColor Gray
-        Write-Host "  Register-NeologikResourceProviders.ps1 separately before deploying." -ForegroundColor Gray
-        Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-        Write-Host $registerAllDefaultText -ForegroundColor Yellow
-        Write-Host "  Register all now? (y/N): " -NoNewline -ForegroundColor Gray
-        $registerAllInput = Read-Host
-        if ([string]::IsNullOrWhiteSpace($registerAllInput)) {
-            $script:ConfigData['RegisterAllProviders'] = $registerAllDefault
-        }
-        else {
-            $script:ConfigData['RegisterAllProviders'] = ($registerAllInput -match '^[Yy]')
-        }
-        if ($script:ConfigData['RegisterAllProviders']) {
-            Write-Host "  ✓ Will register the full provider set" -ForegroundColor Green
-        }
-        else {
-            Write-Host "  ✓ Will register the minimal set only — run Register-NeologikResourceProviders.ps1 before deploying" -ForegroundColor Green
-        }
-
         # Ask whether to tag created Azure resources (project#1173). Some tenants carry
         # Azure Policies that DENY creation of untagged resources, so tags must be applied
         # on the create call itself. Pre-filled from inputs.json 'applyResourceTags' and
@@ -5624,8 +5432,7 @@ function Start-NeologikOnboarding {
         Write-SummaryRow 'Solution Short Name' $script:ConfigData['SolutionShortName']
         $budgetEmailSummary = if ($script:ConfigData['BudgetEmailAddresses'].Count -gt 0) { $script:ConfigData['BudgetEmailAddresses'] -join ', ' } else { '(disabled)' }
         Write-SummaryRow 'Cost-Report Email' $budgetEmailSummary
-        $providerSummary = if ($script:ConfigData['RegisterAllProviders']) { 'All providers' } else { 'Minimal set (run Register-NeologikResourceProviders.ps1 before deploying)' }
-        Write-SummaryRow 'Provider Registration' $providerSummary
+        Write-SummaryRow 'Provider Registration' "Full platform set: $($script:ProviderList.Providers.Count) providers, $($script:ProviderList.Features.Count) preview features (resource-providers.txt)"
         $tagsSummary = if ($script:ConfigData['ResourceTagsEnabled']) {
             $customCount = @($script:ConfigData['ResourceTagsCustom'].Keys).Count
             if ($customCount -gt 0) { "Yes ($customCount custom)" } else { 'Yes' }
@@ -5688,9 +5495,6 @@ function Start-NeologikOnboarding {
             }
             if (-not $script:ConfigData.ContainsKey('BudgetEmailFrequency')) {
                 $script:ConfigData['BudgetEmailFrequency'] = 'Daily'
-            }
-            if (-not $script:ConfigData.ContainsKey('RegisterAllProviders')) {
-                $script:ConfigData['RegisterAllProviders'] = $false
             }
             # Resource tagging (project#1173) may be absent on older checkpoints - default to
             # disabled so a resumed pre-feature run keeps its original untagged behaviour.
@@ -5808,11 +5612,8 @@ function Start-NeologikOnboarding {
         $null = New-NeologikAgentBlueprint -DeploySpObjectId $appReg.ServicePrincipal.Id `
             -SponsorUserId $script:ConfigData['CurrentUserId']
 
-        # Step 13: Register required Azure resource providers (full set unless the operator
-        # opted out, in which case only the minimal set is registered here and the rest must be
-        # registered separately via Register-NeologikResourceProviders.ps1).
-        Register-AllResourceProviders -RegisterAll:$script:ConfigData['RegisterAllProviders']
-        Complete-OnboardingStep 'ResourceProviders'
+        # (Step 13, resource provider registration, was submitted at step 5c and is confirmed
+        # in full at step 15b, before the configuration is exported.)
 
         # (The subscription-scoped Cost Management scheduled email is created and
         # maintained by the infrastructure deployment - neo-infrastructure
@@ -5848,6 +5649,11 @@ function Start-NeologikOnboarding {
             -EnvironmentIndex $script:EnvironmentIndex `
             -ScriptRunnerIdentityName ([string]$script:ConfigData['ScriptRunnerIdentityName']) `
             -SqlIdentityName ([string]$script:ConfigData['SqlIdentityName'])
+
+        # Step 15b: Confirm the full resource provider and preview-feature list. Anything still
+        # pending is reported and exported as ResourceProvidersPending.
+        Complete-ResourceProviderRegistration -ProviderList $script:ProviderList
+        Complete-OnboardingStep 'ResourceProviders'
 
         # Step 16: Export configuration
         Export-ConfigurationData

@@ -252,7 +252,7 @@ The environment type joins the organisation code in every name (project#1576). E
 
 ### 11. Resource Provider Registration
 
-The script registers a minimal set of Azure resource providers on the subscription (Compute, KeyVault, ManagedIdentity, Resources, Storage), or the full platform set of around 30 if the operator opts in at the prompt. Registration enables resource types on the subscription; it grants no permissions and creates no resources.
+The script registers every Azure resource provider and preview feature the platform requires on the subscription, from the list in `resource-providers.txt` (32 providers and 2 preview features). Registration enables resource types on the subscription; it grants no permissions and creates no resources. It is submitted after sign-in and confirmed before use, so it adds no waiting to the run.
 
 ---
 

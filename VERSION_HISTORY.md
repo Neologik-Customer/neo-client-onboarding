@@ -9,6 +9,36 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - One resource provider list, registered in full on every run (project#2345)
+**Date**: 2026-09-09
+
+- New `resource-providers.txt`: the single list of the 32 Azure resource
+  providers and 2 preview features the platform requires (one entry per
+  line; `Namespace/FeatureName` marks a preview feature). Adds
+  `Microsoft.KubernetesConfiguration` (the AKS Container Insights extension
+  needs it; a fresh subscription failed cluster creation with
+  `MissingSubscriptionRegistration`) and `Microsoft.VideoIndexer`. Both
+  scripts read the file and stop if it is missing or malformed; the
+  hard-coded provider arrays are gone. To add a provider, add one line.
+- `Install-NeologikEnvironment.ps1` registers the full list on every run.
+  The "register all providers now?" prompt and the
+  `registerResourceProviders` answer-file key are removed. Registrations
+  are submitted straight after the permission check (the five providers
+  the script creates resources with first, then the rest) and Azure
+  completes them while onboarding continues; each of the five is confirmed
+  just before its resource is created and the full list before the
+  configuration is exported. Entries still registering at the end are
+  listed and exported as `ResourceProvidersPending` (replaces
+  `RegisterAllProviders` in the configuration file).
+- `Register-NeologikResourceProviders.ps1` reads the same file, submits
+  every outstanding registration, waits for the whole list together, and
+  exits 1 if any entry is still not registered. New `-ListOnly` prints the
+  parsed list; new `-TimeoutSeconds` (default 900).
+- The platform's infrastructure deployment no longer registers providers
+  (its `register-resource-providers` workflow and action are removed): the
+  deployment identity holds no subscription-scoped permission in customer
+  tenants, so onboarding is the only place registration happens.
+
 ## Unreleased - The pre-window run adopts every platform app registration for the deployment identity (project#1012)
 **Date**: 2026-09-09
 
