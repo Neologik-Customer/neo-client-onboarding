@@ -9,6 +9,16 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Ignore per-environment answer and grants files (project#2354)
+**Date**: 2026-09-10
+
+- `.gitignore` now excludes `inputs-<env>.json` answer files (`inputs-example.json`
+  stays tracked) and the `agent-grants-*.json` / `mailbox-grants-*.json` exports
+  fed to `Update-NeologikEnvironmentAccess.ps1`, so per-environment run inputs
+  can never be committed by accident.
+
+---
+
 ## Unreleased - One resource provider list, registered in full on every run (project#2345)
 **Date**: 2026-09-09
 
