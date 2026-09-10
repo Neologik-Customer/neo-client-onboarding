@@ -63,22 +63,25 @@
          not say, the summary notes that the check runs with the agent
          grants file (post-window run) and the item needs no attention.
       3b. Platform app registrations owned by the deployment identity
-         (project#1012): the deployment identity holds only
-         Application.ReadWrite.OwnedBy, so every app registration the
-         platform manages must list it as an owner of the application and
-         of the service principal, and the deployment finds an existing
-         registration by its uniqueName. The step takes the sign-in app
-         (client id from the configuration), the environment's SharePoint
-         app ('Neologik SharePoint Access - <short name>') and every other
-         'Neologik ... - <short name>' registration (the bots, the Apps),
-         adds the deployment identity as owner where it is missing, stamps
-         the deployment's uniqueName on the sign-in app
-         (sp-admin-<solution name>, needs SolutionName) and the SharePoint
-         app (sp-neologik-sharepoint-<short name>), and lists password
+         (project#1012, explicit list project#2355): the deployment
+         identity holds only Application.ReadWrite.OwnedBy, so every app
+         registration the platform manages must list it as an owner of the
+         application and of the service principal, and the deployment
+         finds an existing registration by its uniqueName. The step takes
+         exactly the registrations named by client id on the command line
+         (or in the configuration file): the sign-in app
+         (-SignInAppClientId), the environment's SharePoint app
+         (-SharePointAppClientId, when the environment has one) and the bot
+         app registrations (-BotAppClientIds). Nothing is chosen by
+         display name. For each it adds the deployment identity as owner
+         where it is missing, stamps the deployment's uniqueName on the
+         sign-in app (sp-admin-<solution name>) and the SharePoint app
+         (sp-neologik-sharepoint-<short name>), and lists password
          credentials the deployment did not mint (the deployment removes
          every credential on the sign-in and bot apps, only its own on the
-         SharePoint app). A hand-made registration is adopted in place;
-         one homed in another tenant cannot be and is reported.
+         SharePoint app). A listed registration that is not in this tenant
+         is a failure. Every other registration in the tenant whose name
+         starts with 'Neologik' is reported for review and never touched.
       4. Permission reduction: first ensures the deployment identity holds
          the narrow resource-group-scoped role set and the two retained
          subscription-scoped roles (read-only Reader for SKU/quota
@@ -149,8 +152,11 @@
 
 .PARAMETER ConfigurationFile
     Path to the Neologik_..._Configuration_....json file produced by
-    Install-NeologikEnvironment.ps1 at onboarding. Preferred input - it
-    already carries every value the script needs.
+    Install-NeologikEnvironment.ps1 at onboarding. Optional: it carries the
+    tenant, subscription, resource group, deployment identity, sign-in app,
+    group ids and solution names. A v5 migration never depends on it -
+    Neologik sends the complete command line with every value as an
+    explicit parameter (many environments predate the file).
 
 .PARAMETER Verify
     Verify-only: every step reports what it would change as a 'WOULD ...'
@@ -172,8 +178,7 @@
     The environment's full solution name (e.g. neo-abcprd-uks-01, the value
     the deployment pipeline names resources by): step 3b stamps the sign-in
     app's uniqueName as sp-admin-<solution name>. Read from the configuration
-    file (SolutionName) when present; when neither is given the sign-in
-    app's uniqueName is verified only when already set.
+    file (SolutionName) when present; required for the pre-window run.
 
 .PARAMETER SolutionShortName
     The environment's solution short name (the value the onboarding
@@ -187,8 +192,25 @@
 .PARAMETER SignInAppClientId
     Application (client) id of the 'Neologik Platform Sign-in' app
     registration (older environments may still show it as 'Neologik NCE
-    Auth' or 'Neologik Admin Auth' - it is the same registration).
-    Required only when no ConfigurationFile is given.
+    Auth' or 'Neologik Admin Auth' - it is the same registration). Read
+    from the configuration file (NceAuthApp) when present; required for the
+    pre-window run (project#2355: the sign-in app is adopted by this id and
+    never found by name).
+
+.PARAMETER SharePointAppClientId
+    Application (client) id of the environment's SharePoint app
+    registration ('Neologik SharePoint Access - <short name>'), the value
+    Neologik holds as SHAREPOINT_CLIENT_ID. Give it when the environment
+    ingests from SharePoint; step 3b then adopts that registration for the
+    deployment identity. Without it no SharePoint registration is touched
+    and the deployment creates one when SharePoint ingestion is configured.
+
+.PARAMETER BotAppClientIds
+    Application (client) ids of the bot app registrations the platform
+    manages in this tenant (one per bot; the values Neologik holds as
+    BOT_ID, BOT2_ID, BOT3_ID). Step 3b adopts exactly these for the
+    deployment identity. A registration not listed here is never touched,
+    whatever its name; an environment with no bots passes none.
 
 .PARAMETER NceUserGroupId
     Object id of the Neologik NCE user group. Required only when no
@@ -264,15 +286,15 @@
     Neologik tells you otherwise).
 
 .EXAMPLE
-    ./Update-NeologikEnvironmentAccess.ps1 -ConfigurationFile ./Neologik_abcprd_Configuration_20250101_120000.json
+    ./Update-NeologikEnvironmentAccess.ps1 -TenantId <tenant id> -DeploySpClientId <deployment identity client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <sign-in app client id> -SharePointAppClientId <SharePoint app client id> -BotAppClientIds <bot app client id>,<bot app client id> -NceUserGroupId <group object id> -AdminGroupId <group object id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01
 
-    The pre-window run: checks and grants, then the guarded permission reduction.
+    The pre-window run, as Neologik sends it: checks and grants, then the guarded permission reduction.
     The reduction is "declared set or nothing" (project#2297): every directory
     role, group membership and Azure role assignment the deployment identity
     holds outside the declared set is reported (-Verify) and removed.
 
 .EXAMPLE
-    ./Update-NeologikEnvironmentAccess.ps1 -ConfigurationFile ./Neologik_abcprd_Configuration_20250101_120000.json -Verify
+    ./Update-NeologikEnvironmentAccess.ps1 -TenantId <tenant id> -DeploySpClientId <client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <client id> -BotAppClientIds <client id> -NceUserGroupId <group id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01 -Verify
 
     The pre-window run in verify-only mode: every pending change reported, nothing written.
 
@@ -318,6 +340,12 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$SignInAppClientId,
+
+    [Parameter(Mandatory = $false)]
+    [string]$SharePointAppClientId,
+
+    [Parameter(Mandatory = $false)]
+    [string[]]$BotAppClientIds,
 
     [Parameter(Mandatory = $false)]
     [string]$NceUserGroupId,
@@ -1009,10 +1037,14 @@ function Resolve-NeologikInput {
     #>
     param([hashtable]$Parameters)
     $state = $script:State
-    foreach ($name in @('ConfigurationFile', 'TenantId', 'DeploySpClientId', 'SolutionShortName', 'SolutionName', 'SignInAppClientId', 'NceUserGroupId',
-            'AdminGroupId', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'AgentGrantsFile', 'MailboxGrantsFile')) {
-        $state[$name] = [string](Get-NeologikProperty $Parameters $name '')
+    foreach ($name in @('ConfigurationFile', 'TenantId', 'DeploySpClientId', 'SolutionShortName', 'SolutionName', 'SignInAppClientId', 'SharePointAppClientId',
+            'NceUserGroupId', 'AdminGroupId', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'AgentGrantsFile', 'MailboxGrantsFile')) {
+        $state[$name] = ([string](Get-NeologikProperty $Parameters $name '')).Trim()
     }
+    # Bot app registrations (project#2355): one client id per bot; a comma
+    # list inside one element is accepted for the generated command line.
+    $state.BotAppClientIds = @(@(Get-NeologikProperty $Parameters 'BotAppClientIds' @()) | ForEach-Object { "$_" -split ',' } |
+        ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
     if (-not $state.BlueprintKey) { $state.BlueprintKey = 'default' }
     $state.RemoveLegacyGrantAppIds = @(Get-NeologikProperty $Parameters 'RemoveLegacyGrantAppIds' @() | Where-Object { $_ })
     $state.UseAzureCliToken = [bool](Get-NeologikProperty $Parameters 'UseAzureCliToken' $false)
@@ -1071,13 +1103,16 @@ function Resolve-NeologikInput {
             throw [System.ArgumentException]::new("$($required.Name) could not be resolved - pass it explicitly or supply -ConfigurationFile.")
         }
     }
-    foreach ($idCheck in @(
-            @{ Name = 'TenantId'; Value = $state.TenantId },
-            @{ Name = 'DeploySpClientId'; Value = $state.DeploySpClientId },
-            @{ Name = 'SignInAppClientId'; Value = $state.SignInAppClientId },
-            @{ Name = 'NceUserGroupId'; Value = $state.NceUserGroupId },
-            @{ Name = 'AdminGroupId'; Value = $state.AdminGroupId },
-            @{ Name = 'SubscriptionId'; Value = $state.SubscriptionId })) {
+    $idChecks = @(
+        @{ Name = 'TenantId'; Value = $state.TenantId },
+        @{ Name = 'DeploySpClientId'; Value = $state.DeploySpClientId },
+        @{ Name = 'SignInAppClientId'; Value = $state.SignInAppClientId },
+        @{ Name = 'SharePointAppClientId'; Value = $state.SharePointAppClientId },
+        @{ Name = 'NceUserGroupId'; Value = $state.NceUserGroupId },
+        @{ Name = 'AdminGroupId'; Value = $state.AdminGroupId },
+        @{ Name = 'SubscriptionId'; Value = $state.SubscriptionId })
+    foreach ($botId in $state.BotAppClientIds) { $idChecks += @{ Name = 'BotAppClientIds'; Value = $botId } }
+    foreach ($idCheck in $idChecks) {
         if ($idCheck.Value -and -not (Test-NeologikGuid $idCheck.Value)) {
             throw [System.ArgumentException]::new("$($idCheck.Name) must be a GUID (got '$($idCheck.Value)').")
         }
@@ -1089,6 +1124,14 @@ function Resolve-NeologikInput {
         # The blueprint is named by the short name (project#2329) - never
         # guessed from a display name.
         throw [System.ArgumentException]::new("The pre-window run needs SolutionShortName (the solution short name the deployment pipeline names its blueprint by, e.g. abcprd01) - pass -SolutionShortName or supply -ConfigurationFile. It is never guessed from a display name.")
+    }
+    if ($state.Run -eq 'PreWindow' -and -not $state.SignInAppClientId) {
+        # The sign-in app is adopted by its client id (project#2355) - never
+        # found by display name.
+        throw [System.ArgumentException]::new("The pre-window run needs SignInAppClientId (the client id of the 'Neologik Platform Sign-in' app registration, the value Neologik holds as ADMIN_CLIENT_ID) - pass -SignInAppClientId or supply -ConfigurationFile. The sign-in app is never found by name.")
+    }
+    if ($state.Run -eq 'PreWindow' -and -not $state.SolutionName) {
+        throw [System.ArgumentException]::new("The pre-window run needs SolutionName (the full solution name the deployment pipeline names resources by, e.g. neo-abcprd-uks-01; the sign-in app's uniqueName is sp-admin-<solution name>) - pass -SolutionName or supply -ConfigurationFile.")
     }
     foreach ($legacyAppId in $state.RemoveLegacyGrantAppIds) {
         if (-not (Test-NeologikGuid $legacyAppId)) {
@@ -1217,6 +1260,8 @@ function Write-NeologikHeader {
     Write-Host "  Tenant:              $($state.TenantId)"
     Write-Host "  Deployment identity: $($state.DeploySpClientId)"
     if ($state.SignInAppClientId) { Write-Host "  Sign-in app:         $($state.SignInAppClientId)" }
+    if ($state.SharePointAppClientId) { Write-Host "  SharePoint app:      $($state.SharePointAppClientId)" }
+    if ($state.BotAppClientIds.Count -gt 0) { Write-Host "  Bot apps:            $($state.BotAppClientIds -join ', ')" }
     if ($state.NceUserGroupId) { Write-Host "  NCE user group:      $($state.NceUserGroupId)" }
     if ($state.AdminGroupId) { Write-Host "  Admin User Group:    $($state.AdminGroupId)" }
     if ($state.AgentGrants) { Write-Host "  Agent grants file:   $($state.AgentGrantsFile)" }
@@ -2365,54 +2410,53 @@ function Set-NeologikPlatformAppOwnership {
     }
     $select = 'id,appId,displayName,uniqueName,passwordCredentials'
     $targets = @()
-    $seen = @{}
+    $listed = @{}
 
-    # The sign-in app, by the client id the configuration records.
-    if ($state.SignInAppClientId) {
+    # Every registration is named by its client id (project#2355): the
+    # sign-in app, the SharePoint app when the environment has one, and the
+    # bot app registrations. Nothing is chosen by display name.
+    $entries = @(@{ AppId = $state.SignInAppClientId; Kind = 'sign-in'; Item = 'Platform app: sign-in registration'
+            ExpectedUniqueName = "sp-admin-$($state.SolutionName)"; OwnSecret = 'auth'; RemovesAll = $true })
+    if ($state.SharePointAppClientId) {
+        $entries += @{ AppId = $state.SharePointAppClientId; Kind = 'SharePoint'; Item = 'Platform app: SharePoint registration'
+            ExpectedUniqueName = "sp-neologik-sharepoint-$shortName"; OwnSecret = 'sharepoint-access'; RemovesAll = $false }
+    }
+    else {
+        Write-Log '  no SharePoint app registration listed (-SharePointAppClientId) - the deployment creates one when SharePoint ingestion is configured' -Level Info
+        Add-Summary 'Platform app: SharePoint registration' 'Not listed - the deployment creates it when SharePoint ingestion is configured'
+    }
+    if ($state.BotAppClientIds.Count -eq 0) {
+        Write-Log '  no bot app registrations listed (-BotAppClientIds) - none adopted; the generated command line lists every bot' -Level Warning
+        Add-Summary 'Platform apps: bot registrations' 'None listed - no bot app registration adopted (the command line Neologik sends lists every bot)'
+    }
+    foreach ($botId in $state.BotAppClientIds) {
+        $entries += @{ AppId = $botId; Kind = 'bot'; Item = "Platform app: bot registration $botId"; ExpectedUniqueName = ''; OwnSecret = 'auth'; RemovesAll = $true }
+    }
+    foreach ($entry in $entries) {
+        $listed[$entry.AppId.ToLowerInvariant()] = $true
         try {
-            $app = @(Get-NeologikGraphCollection -Uri "$graph/applications?`$filter=appId eq '$($state.SignInAppClientId)'&`$select=$select") | Select-Object -First 1
+            $app = @(Get-NeologikGraphCollection -Uri "$graph/applications?`$filter=appId eq '$($entry.AppId)'&`$select=$select") | Select-Object -First 1
             if ($app) {
-                $expected = if ($state.SolutionName) { "sp-admin-$($state.SolutionName)" } else { '' }
-                $targets += @{ App = $app; Kind = 'sign-in'; ExpectedUniqueName = $expected; OwnSecret = 'auth'; RemovesAll = $true }
-                $seen[[string](Get-NeologikProperty $app 'appId' '')] = $true
+                $targets += @{ App = $app; Kind = $entry.Kind; ExpectedUniqueName = $entry.ExpectedUniqueName; OwnSecret = $entry.OwnSecret; RemovesAll = $entry.RemovesAll }
             }
             else {
-                Write-Log "  sign-in app registration $($state.SignInAppClientId) is not in this tenant - a registration homed elsewhere cannot be adopted" -Level Error
-                Add-Summary 'Platform app: sign-in registration' 'NOT FOUND - not registered in this tenant (a multi-tenant app homed elsewhere cannot be adopted; let the deployment create the environment app and update the configuration)'
+                Write-Log "  $($entry.Kind) app registration $($entry.AppId) is not in this tenant - a registration homed elsewhere cannot be adopted" -Level Error
+                Add-Summary $entry.Item 'NOT FOUND - not registered in this tenant (check the id with Neologik; a multi-tenant app homed elsewhere cannot be adopted)'
             }
         }
         catch {
-            Add-Summary 'Platform app: sign-in registration' "FAILED - $(Get-NeologikErrorText $_)"
+            Add-Summary $entry.Item "FAILED - $(Get-NeologikErrorText $_)"
         }
     }
-    # The environment's SharePoint app, by the deployment's display name.
-    $sharePointName = "Neologik SharePoint Access - $shortName"
+    # Report only: every other registration in this tenant named for the
+    # platform. The agent identity blueprint has its own step.
     try {
-        $escaped = $sharePointName -replace "'", "''"
-        $app = @(Get-NeologikGraphCollection -Uri "$graph/applications?`$filter=displayName eq '$escaped'&`$select=$select") | Select-Object -First 1
-        if ($app) {
-            $targets += @{ App = $app; Kind = 'SharePoint'; ExpectedUniqueName = "sp-neologik-sharepoint-$shortName"; OwnSecret = 'sharepoint-access'; RemovesAll = $false }
-            $seen[[string](Get-NeologikProperty $app 'appId' '')] = $true
-        }
-        else {
-            Write-Log "  '$sharePointName' not present - the deployment creates it" -Level Info
-            Add-Summary 'Platform app: SharePoint registration' 'Not present - the deployment creates it'
-        }
-    }
-    catch {
-        Add-Summary 'Platform app: SharePoint registration' "FAILED - $(Get-NeologikErrorText $_)"
-    }
-    # Every other registration named for this environment (bots, Apps); the
-    # blueprint has its own step.
-    try {
-        $suffix = " - $shortName"
         foreach ($found in @(Get-NeologikGraphCollection -Uri "$graph/applications?`$filter=startswith(displayName,'Neologik')&`$select=id,appId,displayName")) {
             $name = [string](Get-NeologikProperty $found 'displayName' '')
             $appId = [string](Get-NeologikProperty $found 'appId' '')
-            if (-not $name.EndsWith($suffix) -or $name.StartsWith('Neologik Agent Blueprint') -or $seen.ContainsKey($appId)) { continue }
-            $app = Invoke-NeologikGraph -Method GET -Uri "$graph/applications/$([string](Get-NeologikProperty $found 'id' ''))?`$select=$select"
-            $targets += @{ App = $app; Kind = 'platform'; ExpectedUniqueName = ''; OwnSecret = 'auth'; RemovesAll = $true }
-            $seen[$appId] = $true
+            if ($listed.ContainsKey($appId.ToLowerInvariant()) -or $name -like 'Neologik Agent Blueprint*' -or $name -like 'Neologik Autonomous Agent Blueprint*') { continue }
+            Write-Log "  '$name' ($appId) is not on the list - not touched" -Level Info
+            Add-Summary "Platform apps: unlisted '$name'" "Review - $appId is not on the list and was not touched; tell Neologik if the platform manages this registration"
         }
     }
     catch {
@@ -2466,8 +2510,7 @@ function Set-NeologikPlatformAppOwnership {
                 }
             }
             elseif ($current) { Add-Summary $item "Already in place ($current)" }
-            elseif ($target.Kind -eq 'sign-in') { Add-Summary $item 'UNKNOWN - pass -SolutionName (or SolutionName in the configuration) so sp-admin-<solution name> can be stamped' }
-            else { Add-Summary $item 'Review - no uniqueName; the deployment adopts this registration only if its recipe stamps one' }
+            else { Add-Summary $item 'Not required - the deployment finds a bot app registration by its client id' }
         }
         catch {
             Add-Summary $item "FAILED - $(Get-NeologikErrorText $_)"
@@ -3319,6 +3362,8 @@ function Invoke-NeologikEnvironmentAccess {
         [string]$SolutionShortName,
         [string]$SolutionName,
         [string]$SignInAppClientId,
+        [string]$SharePointAppClientId,
+        [string[]]$BotAppClientIds,
         [string]$NceUserGroupId,
         [string]$AdminGroupId,
         [string]$SubscriptionId,
@@ -3345,6 +3390,8 @@ function Invoke-NeologikEnvironmentAccess {
             SolutionShortName       = $SolutionShortName
             SolutionName            = $SolutionName
             SignInAppClientId       = $SignInAppClientId
+            SharePointAppClientId   = $SharePointAppClientId
+            BotAppClientIds         = @($BotAppClientIds)
             NceUserGroupId          = $NceUserGroupId
             AdminGroupId            = $AdminGroupId
             SubscriptionId          = $SubscriptionId

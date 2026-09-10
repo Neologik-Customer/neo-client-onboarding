@@ -981,7 +981,7 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
     It 'tolerates a configuration file without AppRegistration or SecurityGroups when the ids are explicit' {
         Add-CompliantPreWindowState
         $cfg = New-ConfigFile -Remove @('AppRegistration', 'SecurityGroups', 'NceAuthApp')
-        $code = Invoke-Run @{ ConfigurationFile = $cfg; DeploySpClientId = $script:Ids.DeployAppId }
+        $code = Invoke-Run @{ ConfigurationFile = $cfg; DeploySpClientId = $script:Ids.DeployAppId; SignInAppClientId = $script:Ids.SignInAppId }
         $code | Should -Be 1
         Get-SummaryResult 'NCE group assignment' | Should -Be 'SKIPPED - ids not supplied'
         Get-SummaryResult 'Agent blueprint' | Should -Be 'Present'
@@ -1398,7 +1398,7 @@ Context 'Blueprint short name (project#2329)' {
         $app.displayName = 'Neologik Agent Blueprint - default - xprd01'
         $principal = Get-FakeSp -Id $script:Ids.BlueprintSpId
         $principal.displayName = $app.displayName
-        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = 'xprd01'; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = 'xprd01'; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 0
         Get-SummaryResult 'Agent blueprint' | Should -Be 'Present'
         ($script:Console -join "`n") | Should -Match "blueprint name 'Neologik Agent Blueprint - default - xprd01'"
@@ -1406,7 +1406,7 @@ Context 'Blueprint short name (project#2329)' {
 
         # A wrong short name given: the owned blueprint is adopted and named, never duplicated.
         $script:Console = @()
-        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = 'x-prd'; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = 'x-prd'; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 0
         Get-SummaryResult 'Agent blueprint' | Should -Be "Present (adopted 'Neologik Agent Blueprint - default - xprd01')"
         ($script:Console -join "`n") | Should -Match 'ADOPTED \(owned by the deployment identity'
@@ -1512,7 +1512,7 @@ Context 'Pre-window run on a compliant environment' {
 
     It 'takes the short name from -SolutionShortName when no configuration file is given (project#2329)' {
         Add-CompliantPreWindowState
-        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 0
         Get-SummaryResult 'Agent blueprint' | Should -Be 'Present'
         ($script:Console -join "`n") | Should -Match "short name '$($script:ShortName)' from -SolutionShortName"
@@ -1521,19 +1521,42 @@ Context 'Pre-window run on a compliant environment' {
 
     It 'refuses the pre-window run without a short name rather than guessing it from a display name (project#2329)' {
         Add-CompliantPreWindowState
-        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 1
         ($script:Console -join "`n") | Should -Match 'needs SolutionShortName'
         Should -Invoke Connect-MgGraph -Times 0
         $script:Writes | Should -HaveCount 0
     }
 
-    It 'skips the group assignment and consent check when the ids are not supplied' {
+    It 'skips the group assignment and consent check when the group id is not supplied' {
         Add-CompliantPreWindowState
-        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 1
         Get-SummaryResult 'NCE group assignment' | Should -Be 'SKIPPED - ids not supplied'
         Get-SummaryResult 'Admin consent' | Should -BeNullOrEmpty
+    }
+
+    It 'refuses the pre-window run without the sign-in app client id or the solution name (project#2355)' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SolutionName = $script:SolutionName; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'needs SignInAppClientId'
+        Should -Invoke Connect-MgGraph -Times 0
+
+        $script:Console = @()
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'needs SolutionName'
+        Should -Invoke Connect-MgGraph -Times 0
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'rejects a bot app client id that is not a GUID' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); BotAppClientIds = @('not-a-guid') }
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'BotAppClientIds must be a GUID'
+        Should -Invoke Connect-MgGraph -Times 0
     }
 }
 
@@ -1729,7 +1752,7 @@ Context 'Pre-window run on an environment with missing state' {
 }
 
 Context 'Platform app ownership (project#1012)' {
-    It 'verifies the sign-in app and reports the SharePoint app absent on a compliant environment' {
+    It 'verifies the sign-in app and reports no SharePoint app and no bots listed on a compliant environment' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
@@ -1737,36 +1760,41 @@ Context 'Platform app ownership (project#1012)' {
         Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' principal owner" | Should -Be 'Already in place'
         Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' uniqueName" | Should -Be 'Already in place'
         Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' credentials" | Should -Be 'None foreign'
-        Get-SummaryResult 'Platform app: SharePoint registration' | Should -Be 'Not present - the deployment creates it'
+        Get-SummaryResult 'Platform app: SharePoint registration' | Should -Match '^Not listed'
+        Get-SummaryResult 'Platform apps: bot registrations' | Should -Match '^None listed'
         $script:Writes | Should -HaveCount 0
     }
 
-    It 'adopts hand-made registrations: owners on application and principal, uniqueName stamped, foreign credentials reported' {
+    It 'adopts exactly the listed registrations and only reports the rest (project#2355)' {
         Add-CompliantPreWindowState
         $t = $script:Tenant
+        $spAppId = 'b1b1b1b1-0000-4000-8000-000000000001'
+        $botAppId = 'b2b2b2b2-0000-4000-8000-000000000002'
         # The sign-in app as an administrator made it by hand: no deployment owner, no uniqueName.
         $signIn = Get-FakeApp -Id $script:Ids.SignInAppObj
         $signIn.owners = @($script:Ids.Me)
         $signIn.uniqueName = ''
         (Get-FakeSp -Id $script:Ids.SignInSpId).owners = @($script:Ids.Me)
         # A hand-made SharePoint app with a customer's own credential beside the deployment's.
-        $sp = New-FakeApp -Id 'spapp-obj' -AppId 'spapp-id' -DisplayName "Neologik SharePoint Access - $script:ShortName"
+        $sp = New-FakeApp -Id 'spapp-obj' -AppId $spAppId -DisplayName "Neologik SharePoint Access - $script:ShortName"
         $sp.owners = @($script:Ids.Me)
         $sp.passwordCredentials = @(@{ displayName = 'sharepoint-access' }, @{ displayName = 'power-automate' })
         $t.Apps += $sp
-        $spPrincipal = New-FakeSp -Id 'spsp-obj' -AppId 'spapp-id' -DisplayName $sp.displayName
+        $spPrincipal = New-FakeSp -Id 'spsp-obj' -AppId $spAppId -DisplayName $sp.displayName
         $spPrincipal.owners = @($script:Ids.Me)
         $t.ServicePrincipals += $spPrincipal
-        # A v4 bot app registration: adopted by discovery; a foreign secret the deployment will remove.
-        $bot = New-FakeApp -Id 'bot-obj' -AppId 'bot-id' -DisplayName "Neologik - ide - $script:ShortName"
+        # A hand-named v4 bot app registration, listed by id; a foreign secret the deployment will remove.
+        $bot = New-FakeApp -Id 'bot-obj' -AppId $botAppId -DisplayName 'ABC Chat Bot'
         $bot.owners = @($script:Ids.Me)
         $bot.passwordCredentials = @(@{ displayName = 'legacy-manual' })
         $t.Apps += $bot
-        $t.ServicePrincipals += (New-FakeSp -Id 'bot-sp' -AppId 'bot-id' -DisplayName $bot.displayName)
-        # Another customer's registration with a Neologik prefix but not this environment: untouched.
-        $t.Apps += (New-FakeApp -Id 'other-obj' -AppId 'other-id' -DisplayName 'Neologik - ide - otherenv')
+        $t.ServicePrincipals += (New-FakeSp -Id 'bot-sp' -AppId $botAppId -DisplayName $bot.displayName)
+        # Registrations named for the platform but NOT listed: reported, never touched.
+        $lookalike = New-FakeApp -Id 'look-obj' -AppId 'c3c3c3c3-0000-4000-8000-000000000003' -DisplayName "Neologik Integration - $script:ShortName"
+        $t.Apps += $lookalike
+        $t.Apps += (New-FakeApp -Id 'other-obj' -AppId 'c4c4c4c4-0000-4000-8000-000000000004' -DisplayName 'Neologik - ide - otherenv')
 
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); SharePointAppClientId = $spAppId; BotAppClientIds = @($botAppId) }
         $code | Should -Be 1 -Because 'the bot app carries a credential the deployment will remove'
         $signIn.owners | Should -Contain $script:Ids.DeploySpId
         (Get-FakeSp -Id $script:Ids.SignInSpId).owners | Should -Contain $script:Ids.DeploySpId
@@ -1776,20 +1804,43 @@ Context 'Platform app ownership (project#1012)' {
         $sp.uniqueName | Should -Be "sp-neologik-sharepoint-$script:ShortName"
         $bot.owners | Should -Contain $script:Ids.DeploySpId
         (Get-FakeSp -Id 'bot-sp').owners | Should -Contain $script:Ids.DeploySpId
+        $lookalike.owners | Should -HaveCount 0
         (Get-FakeApp -Id 'other-obj').owners | Should -HaveCount 0
         Get-SummaryResult "App 'Neologik SharePoint Access - $script:ShortName' credentials" | Should -Match '^Review - 1 credential\(s\) not minted by the deployment \(power-automate\)'
-        Get-SummaryResult "App 'Neologik - ide - $script:ShortName' credentials" | Should -Match '^PENDING - 1 credential\(s\) not minted by the deployment \(legacy-manual\)'
-        Get-SummaryResult "App 'Neologik - ide - $script:ShortName' uniqueName" | Should -Match '^Review - no uniqueName'
+        Get-SummaryResult "App 'ABC Chat Bot' credentials" | Should -Match '^PENDING - 1 credential\(s\) not minted by the deployment \(legacy-manual\)'
+        Get-SummaryResult "App 'ABC Chat Bot' uniqueName" | Should -Match '^Not required'
+        Get-SummaryResult "Platform apps: unlisted 'Neologik Integration - $script:ShortName'" | Should -Match '^Review - c3c3c3c3-0000-4000-8000-000000000003 is not on the list and was not touched'
+        Get-SummaryResult "Platform apps: unlisted 'Neologik - ide - otherenv'" | Should -Match '^Review - '
+        Get-SummaryResult 'Platform apps: bot registrations' | Should -BeNullOrEmpty
         ($script:Console -join "`n") | Should -Match 'removes every credential on this app'
+        @($script:Writes | Where-Object { $_ -match 'look-obj|other-obj' }) | Should -HaveCount 0
 
         # Second run: everything already in place; the bot credential still needs attention.
         $script:Writes = @()
         $script:Summary = @()
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); SharePointAppClientId = $spAppId; BotAppClientIds = @($botAppId) }
         $code | Should -Be 1
         $script:Writes | Should -HaveCount 0
         Get-SummaryResult "App 'Neologik SharePoint Access - $script:ShortName' owner" | Should -Be 'Already in place'
         Get-SummaryResult "App 'Neologik SharePoint Access - $script:ShortName' uniqueName" | Should -Be 'Already in place'
+        Get-SummaryResult "App 'ABC Chat Bot' owner" | Should -Be 'Already in place'
+    }
+
+    It 'accepts the bot ids as one comma-separated value and fails a listed id that is not in this tenant' {
+        Add-CompliantPreWindowState
+        $botAppId = 'b2b2b2b2-0000-4000-8000-000000000002'
+        $missingId = 'd5d5d5d5-0000-4000-8000-000000000005'
+        $bot = New-FakeApp -Id 'bot-obj' -AppId $botAppId -DisplayName 'ABC Chat Bot'
+        $bot.owners = @($script:Ids.DeploySpId)
+        $script:Tenant.Apps += $bot
+        $botSp = New-FakeSp -Id 'bot-sp' -AppId $botAppId -DisplayName $bot.displayName
+        $botSp.owners = @($script:Ids.DeploySpId)
+        $script:Tenant.ServicePrincipals += $botSp
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); BotAppClientIds = @("$botAppId,$missingId") }
+        $code | Should -Be 1
+        Get-SummaryResult "App 'ABC Chat Bot' owner" | Should -Be 'Already in place'
+        Get-SummaryResult "Platform app: bot registration $missingId" | Should -Match '^NOT FOUND - not registered in this tenant'
+        $script:Writes | Should -HaveCount 0
     }
 
     It 'records the adoption as pending in verify-only and writes nothing' {
@@ -1805,7 +1856,7 @@ Context 'Platform app ownership (project#1012)' {
         $signIn.owners | Should -Not -Contain $script:Ids.DeploySpId
     }
 
-    It 'fails the uniqueName when it differs from the deployment name, and asks for the solution name when it cannot be derived' {
+    It 'fails the uniqueName when it differs from the deployment name, and refuses to run without the solution name' {
         Add-CompliantPreWindowState
         $signIn = Get-FakeApp -Id $script:Ids.SignInAppObj
         $signIn.uniqueName = 'sp-admin-something-else'
@@ -1815,9 +1866,11 @@ Context 'Platform app ownership (project#1012)' {
 
         $signIn.uniqueName = ''
         $script:Summary = @()
+        $script:Console = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Remove @('SolutionName')) }
         $code | Should -Be 1
-        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' uniqueName" | Should -Match '^UNKNOWN - pass -SolutionName'
+        ($script:Console -join "`n") | Should -Match 'needs SolutionName'
+        $signIn.uniqueName | Should -Be ''
     }
 
     It 'reports a sign-in registration that is not in this tenant' {
@@ -2422,7 +2475,7 @@ Context 'Pre-window run: permission reduction (step 4)' {
 
     It 'accepts explicit parameters instead of a configuration file' {
         Add-CompliantPreWindowState
-        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 0
         $script:Writes | Should -HaveCount 0
     }
