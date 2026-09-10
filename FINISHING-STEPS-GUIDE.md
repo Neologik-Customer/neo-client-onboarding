@@ -315,7 +315,8 @@ anything would change. Neologik supplies the files it reads, and the files
 you give it select the run:
 
 - **Pre-window run** - the command line Neologik sends you, with no grants
-  file. Neologik fills in every value, so you type nothing but your
+  file. What the script checks and changes, and why, is explained step by
+  step in [ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md](ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md). Neologik fills in every value, so you type nothing but your
   sign-in, and the configuration file from your original onboarding is not
   needed. Download the latest `Update-NeologikEnvironmentAccess.ps1` from
   this repository, run the command exactly as sent, and return the summary
