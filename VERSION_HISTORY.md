@@ -9,6 +9,31 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Pre-window run adopts an explicit list of app registrations (project#2355)
+**Date**: 2026-09-10
+
+- `Update-NeologikEnvironmentAccess.ps1` step 3b takes exactly the app
+  registrations named by client id on the command line: the sign-in app
+  (`-SignInAppClientId`), the SharePoint app (new `-SharePointAppClientId`)
+  and the bot app registrations (new `-BotAppClientIds`, one id per bot or
+  one comma-separated value). Nothing is chosen by display name any more: a
+  listed id that is not in the tenant is a `NOT FOUND` failure, and every
+  other registration whose name starts with `Neologik` is reported for
+  review and never touched. A bot registration needs no uniqueName (the
+  deployment finds it by client id).
+- `-SignInAppClientId` and `-SolutionName` are required for the pre-window
+  run (from the configuration file or as parameters); a missing value used
+  to skip the sign-in app adoption and the uniqueName stamp in silence.
+- The customer guide and README describe the v5 migration path as the
+  command line Neologik generates (`neo-env-config`
+  `scripts/generate-migration-access-command.py`): the onboarding
+  configuration file is never a migration input, because many environments
+  predate it.
+- Tests: the Pester suite covers the listed, unlisted, comma-separated,
+  missing-id and required-input paths (150 tests).
+
+---
+
 ## Unreleased - Ignore per-environment answer and grants files (project#2354)
 **Date**: 2026-09-10
 

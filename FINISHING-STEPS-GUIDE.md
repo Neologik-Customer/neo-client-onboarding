@@ -314,23 +314,43 @@ to re-run; with `-Verify` it only reports what it would change (as
 anything would change. Neologik supplies the files it reads, and the files
 you give it select the run:
 
-- **Pre-window run** - `./Update-NeologikEnvironmentAccess.ps1
-  -ConfigurationFile <your onboarding configuration JSON>`, with no grants
-  file. Every customer has this one run, any time before the migration
-  window. It verifies or applies everything only a Global Administrator
-  can change: the agent identity blueprint and its principal role, the
-  deployment identity's two retained Microsoft Graph roles (its retired
-  tenant-wide roles are removed once those are in place), the NCE user
-  group assignment on the sign-in application, the sign-in application's
-  tenant-wide admin consent, the SharePoint `Sites.Selected` consent where
-  SharePoint ingestion is in use, and then the permission reduction: the
-  deployment identity receives the narrow resource-group role set and the
-  two retained subscription roles (Reader, Cost Management Contributor)
-  BEFORE its broad subscription roles (Contributor, User Access
-  Administrator) and its Application Administrator directory role are
-  removed. If any narrow role could not be applied, nothing is removed.
-  The account you sign in with needs Global Administrator in Entra ID and
-  Owner (or User Access Administrator) on the subscription.
+- **Pre-window run** - the command line Neologik sends you, with no grants
+  file. Neologik fills in every value, so you type nothing but your
+  sign-in, and the configuration file from your original onboarding is not
+  needed. Download the latest `Update-NeologikEnvironmentAccess.ps1` from
+  this repository, run the command exactly as sent, and return the summary
+  JSON it writes. Every customer has this one run, any time before the
+  migration window. It verifies or applies everything only a Global
+  Administrator can change: the agent identity blueprint and its principal
+  role, the deployment identity's two retained Microsoft Graph roles (its
+  retired tenant-wide roles are removed once those are in place), the NCE
+  user group assignment on the sign-in application, the sign-in
+  application's tenant-wide admin consent, the SharePoint `Sites.Selected`
+  consent where SharePoint ingestion is in use, ownership of your Neologik
+  application registrations by the deployment identity (exactly the ones
+  named on the command line; any other registration whose name starts
+  with "Neologik" is only reported, never changed), and then the
+  permission reduction: the deployment identity receives the narrow
+  resource-group role set and the two retained subscription roles (Reader,
+  Cost Management Contributor) BEFORE its broad subscription roles
+  (Contributor, User Access Administrator) and its Application
+  Administrator directory role are removed. If any narrow role could not
+  be applied, nothing is removed. The account you sign in with needs
+  Global Administrator in Entra ID and Owner (or User Access
+  Administrator) on the subscription.
+
+  The values Neologik fills in:
+
+  | Parameter | What it is |
+  |---|---|
+  | `-TenantId` | your Entra ID tenant |
+  | `-SubscriptionId`, `-ResourceGroupName` | the subscription and resource group Neologik deploys into |
+  | `-DeploySpClientId` | the deployment identity (the "Neologik GitHub Service Connection" application) |
+  | `-SolutionName`, `-SolutionShortName` | the names Neologik's deployment uses for your environment |
+  | `-SignInAppClientId` | the "Neologik Platform Sign-in" application that controls who can open the Neologik Context Engine |
+  | `-SharePointAppClientId` | the "Neologik SharePoint Access" application, only where you ingest from SharePoint |
+  | `-BotAppClientIds` | the application registration of each Neologik bot in your tenant |
+  | `-NceUserGroupId`, `-AdminGroupId` | your Neologik NCE User Group and Admin User Group |
 - **Post-window run** - the same script with `-AgentGrantsFile <json>`
   and/or `-MailboxGrantsFile <json>`, files Neologik exports from the
   platform. Needed only once an agent or App works unattended on your
