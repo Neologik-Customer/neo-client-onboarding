@@ -9,6 +9,20 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - AddRemoveCreds.All wording follows the agent identity token service (project#2221)
+**Date**: 2026-09-10
+
+- Comment and documentation currency only, no behaviour change. The
+  `AgentIdentityBlueprint.AddRemoveCreds.All` descriptions in
+  `Install-NeologikEnvironment.ps1`, `TECHNICAL-REFERENCE.md` and
+  `secure-overview.md` state what the deployment identity writes with the
+  role: one federated identity credential per blueprint for the agent
+  identity token service's Kubernetes service account, plus removal of the
+  retired per-workload credentials. The former "per-agent Kubernetes
+  credentials" wording described the model before the token service.
+
+---
+
 ## Unreleased - Pre-window run adopts an explicit list of app registrations (project#2355)
 **Date**: 2026-09-10
 

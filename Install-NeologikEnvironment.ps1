@@ -2154,7 +2154,8 @@ function Grant-GraphAppRolePermissions {
     $graphAppId = '00000003-0000-0000-c000-000000000000'
     $knownGraphAppRoleIds = @{
         # Deployment SP (least-privilege model, project#2144): manage owned app registrations
-        # and add the per-agent Kubernetes credentials to the agent identity blueprint.
+        # and add/remove credentials on the agent identity blueprint (the agent identity token
+        # service's credential, project#2221).
         'Application.ReadWrite.OwnedBy'             = '18a4783c-866b-4cc7-a460-3d5e5662c884'
         'AgentIdentityBlueprint.AddRemoveCreds.All' = '0510736e-bdfb-4b37-9a1f-89b4a074763a'
         # Blueprint PRINCIPAL: create/manage agent users parented by that blueprint only. Agent
@@ -2445,8 +2446,10 @@ function Set-AppRegistrationRoles {
         #     ones it owns (bot/channel/sign-in apps). Replaces the tenant-wide 'Application
         #     Administrator' directory role. Reads of applications and service principals
         #     come with it, so Application.Read.All is not granted.
-        #   - AgentIdentityBlueprint.AddRemoveCreds.All: add the per-agent Kubernetes
-        #     federated identity credentials to the environment's agent identity blueprint.
+        #   - AgentIdentityBlueprint.AddRemoveCreds.All: add and remove federated identity
+        #     credentials on the environment's agent identity blueprint - one credential for
+        #     the agent identity token service's Kubernetes service account (project#2221),
+        #     plus removal of retired per-workload credentials.
         #     The one residual tenant-wide Agent ID permission: Microsoft publishes no
         #     ownership-scoped variant and blueprint ownership is not honoured for app-only
         #     credential writes.
@@ -2492,8 +2495,10 @@ function New-NeologikAgentBlueprint {
         its credentials needs tenant-wide Graph application permissions, so those one-off
         operations run HERE under the Global Administrator instead of being granted to the
         deployment service principal. The deployment pipeline then:
-          - adds the per-agent Kubernetes federated identity credentials as the deployment SP
-            (AgentIdentityBlueprint.AddRemoveCreds.All - the one residual Agent ID role), and
+          - ensures the agent identity token service's federated identity credential on the
+            blueprint and removes retired per-workload credentials as the deployment SP
+            (AgentIdentityBlueprint.AddRemoveCreds.All - the one residual Agent ID role,
+            project#2221), and
           - mints agent identities and agent users AS THE BLUEPRINT, exchanging its GitHub
             OIDC token through the flexible federated identity credentials created below
             (neo-env-config scripts/get-blueprint-token.sh). Agent identity creation is
