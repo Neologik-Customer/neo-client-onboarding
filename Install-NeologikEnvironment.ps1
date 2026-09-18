@@ -2483,6 +2483,191 @@ function Set-AppRegistrationRoles {
     }
 }
 
+function New-NeologikNceAuthApp {
+    <#
+    .SYNOPSIS
+        Creates the 'Neologik Platform Sign-in' app registration and assigns the
+        Harness user group to it (project#1084).
+
+    .DESCRIPTION
+        From v5 the Harness admin tool (NCE) authorizes from the token's
+        groups claim only, and Entra emits that claim solely for groups
+        ASSIGNED to this app's enterprise application. The deployment
+        pipeline creates the app but its hardened service principal lacks
+        AppRoleAssignment.ReadWrite.All BY DESIGN, so the assignment used to
+        be a hard-blocking manual step (migration runsheet 7b) - skipping it
+        locked every user out of NCE. This script runs as a Global
+        Administrator, so the whole chain completes here instead:
+        app + claims config + deployment-SP ownership + secret in Key Vault
+        + group assignment. The pipeline (ensure-app-regs.sh) later finds
+        the app by its Graph uniqueName, reuses it, reconciles properties,
+        and rotates the secret when needed - its own best-effort group
+        assignment becomes a no-op.
+
+        Owner decision 2026-07-17: ONLY the Harness user group is assigned.
+        The Admin User Group is Azure RBAC only and never grants NCE access.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [array]$SecurityGroups,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DeploySpObjectId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$KeyVaultName
+    )
+
+    Write-Log "Creating the Neologik Platform Sign-in app registration (NCE + App portal login)..." -Level Info
+
+    try {
+        Import-Module Microsoft.Graph.Applications -ErrorAction Stop
+        Import-Module Microsoft.Graph.Groups -ErrorAction Stop
+
+        $solutionName = [string]$script:ConfigData['SolutionName']
+        $shortName = [string]$script:ConfigData['SolutionShortName']
+        $hostName = [string]$script:ConfigData['HostName']
+        # MUST match the deployment pipeline exactly: ensure-app-regs.sh
+        # resolves the app by uniqueName ('sp-admin-<solutionName>') and the
+        # Key Vault secret name derives from it.
+        $uniqueName = "sp-admin-$solutionName"
+        $displayName = "Neologik Platform Sign-in - $shortName"
+        $redirectUri = "https://$hostName/nce"
+
+        # Resolve by the immutable Graph uniqueName - the same key the
+        # deployment pipeline (ensure-app-regs.sh) uses. A display-name
+        # lookup would miss an app the pipeline has since renamed and
+        # attempt a duplicate create.
+        $existingApp = $null
+        try {
+            $found = Invoke-MgGraphRequest -Method GET -Uri "v1.0/applications(uniqueName='$uniqueName')" -ErrorAction Stop
+            $existingApp = Get-MgApplication -ApplicationId $found.id -ErrorAction Stop
+        }
+        catch {
+            $existingApp = $null   # 404 = not found = create below
+        }
+        $secretText = $null
+
+        if ($existingApp) {
+            Write-Log "App Registration '$($existingApp.DisplayName)' already exists (Client ID: $($existingApp.AppId))" -Level Info
+            $app = $existingApp
+            if ($app.DisplayName -ne $displayName) {
+                Update-MgApplication -ApplicationId $app.Id -DisplayName $displayName -ErrorAction Stop
+                Write-Log "App Registration renamed to '$displayName'" -Level Info
+            }
+        }
+        else {
+            Write-Log "Creating App Registration: $displayName..." -Level Info
+            $app = New-MgApplication -DisplayName $displayName `
+                -UniqueName $uniqueName `
+                -SignInAudience "AzureADMultipleOrgs" `
+                -GroupMembershipClaims "ApplicationGroup" `
+                -Web @{ RedirectUris = @($redirectUri) } `
+                -Api @{ RequestedAccessTokenVersion = 2 } `
+                -ErrorAction Stop
+            Write-Log "App Registration created successfully (Client ID: $($app.AppId))" -Level Success
+        }
+
+        $sp = Get-MgServicePrincipal -Filter "appId eq '$($app.AppId)'" -ErrorAction SilentlyContinue
+        if (-not $sp) {
+            $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
+            Write-Log "Service Principal created successfully" -Level Success
+        }
+
+        # Deployment SP as owner: the pipeline manages this app through
+        # Application.ReadWrite.OwnedBy, which only covers apps it owns.
+        $owners = Get-MgApplicationOwner -ApplicationId $app.Id -ErrorAction SilentlyContinue
+        if ($owners -and ($owners.Id -contains $DeploySpObjectId)) {
+            Write-Log "Deployment SP is already an owner of the auth app" -Level Info
+        }
+        else {
+            New-MgApplicationOwnerByRef -ApplicationId $app.Id `
+                -BodyParameter @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$DeploySpObjectId" } `
+                -ErrorAction Stop
+            Write-Log "Deployment SP added as owner of the auth app" -Level Success
+        }
+
+        # Deployment SP as owner of the SERVICE PRINCIPAL object too - application
+        # ownership does not extend to the service principal, so without this the
+        # pipeline's servicePrincipal updates (display-name sync) are denied with
+        # Authorization_RequestDenied on every deploy (project#1579). Idempotent:
+        # re-running onboarding adds the missing owner on existing environments.
+        $spOwners = Get-MgServicePrincipalOwner -ServicePrincipalId $sp.Id -ErrorAction SilentlyContinue
+        if ($spOwners -and ($spOwners.Id -contains $DeploySpObjectId)) {
+            Write-Log "Deployment SP is already an owner of the auth service principal" -Level Info
+        }
+        else {
+            New-MgServicePrincipalOwnerByRef -ServicePrincipalId $sp.Id `
+                -BodyParameter @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$DeploySpObjectId" } `
+                -ErrorAction Stop
+            Write-Log "Deployment SP added as owner of the auth service principal" -Level Success
+        }
+
+        # Client secret -> Key Vault under the name the pipeline expects.
+        # Only mint one when the app is new or the vault has no value yet -
+        # the pipeline rotates near-expiry credentials itself.
+        $kvSecretName = "$uniqueName-auth-secret"
+        $existingKvSecret = Get-AzKeyVaultSecret -VaultName $KeyVaultName -Name $kvSecretName -ErrorAction SilentlyContinue
+        if ($existingKvSecret) {
+            Write-Log "Key Vault already holds '$kvSecretName' - keeping the existing credential" -Level Info
+        }
+        else {
+            $passwordCred = Add-MgApplicationPassword -ApplicationId $app.Id `
+                -PasswordCredential @{ DisplayName = 'auth'; EndDateTime = (Get-Date).AddDays(365) } `
+                -ErrorAction Stop
+            $secretText = $passwordCred.SecretText
+            $secureSecret = ConvertTo-SecureString -String $secretText -AsPlainText -Force
+            $null = Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name $kvSecretName -SecretValue $secureSecret -ErrorAction Stop
+            Write-Log "Client secret stored in Key Vault as '$kvSecretName'" -Level Success
+        }
+
+        # Assign the NCE role groups so their members' tokens carry the
+        # groups claim NCE authorizes from (project#1341: contributors AND
+        # admins). Default app role, direct groups only (nested membership
+        # does not expand into the claim).
+        $defaultAppRole = '00000000-0000-0000-0000-000000000000'
+        $assignedGroups = @()
+        foreach ($rolePattern in @('Neologik NCE Contributors*', 'Neologik NCE Admins*')) {
+            $roleGroup = $SecurityGroups | Where-Object { $_.Name -like $rolePattern } | Select-Object -First 1
+            if (-not $roleGroup) {
+                Write-Log "Warning: no security group matches '$rolePattern' - NCE group assignment skipped. A Global Admin must assign it manually (runsheet steps 7b/7c)." -Level Warning
+                continue
+            }
+            $alreadyAssigned = Get-MgGroupAppRoleAssignment -GroupId $roleGroup.Id -ErrorAction SilentlyContinue |
+                Where-Object { $_.ResourceId -eq $sp.Id }
+            if ($alreadyAssigned) {
+                Write-Log "Group '$($roleGroup.Name)' is already assigned to the auth app" -Level Info
+            }
+            else {
+                $null = New-MgGroupAppRoleAssignment -GroupId $roleGroup.Id `
+                    -PrincipalId $roleGroup.Id `
+                    -ResourceId $sp.Id `
+                    -AppRoleId $defaultAppRole `
+                    -ErrorAction Stop
+                Write-Log "Group '$($roleGroup.Name)' assigned to the auth app - NCE login will carry the groups claim" -Level Success
+            }
+            $assignedGroups += $roleGroup.Name
+        }
+
+        $script:ConfigData['NceAuthApp'] = @{
+            Name = $displayName
+            ClientId = $app.AppId
+            ObjectId = $app.Id
+            ServicePrincipalId = $sp.Id
+            UniqueName = $uniqueName
+            KeyVaultSecretName = $kvSecretName
+            AssignedGroups = $assignedGroups
+        }
+
+        return $script:ConfigData['NceAuthApp']
+    }
+    catch {
+        Write-Log "Failed to create the NCE auth app: $_" -Level Error
+        throw
+    }
+}
+
 function New-NeologikAgentBlueprint {
     <#
     .SYNOPSIS

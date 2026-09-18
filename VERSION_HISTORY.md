@@ -9,6 +9,20 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Onboarding script: the Platform Sign-in registration step restored (project#2528)
+**Date**: 2026-09-18
+
+- `Install-NeologikEnvironment.ps1` regains `New-NeologikNceAuthApp` (step
+  12b, the Platform Sign-in registration): the resource-provider refactor
+  of project#2345 removed the function and left its call behind, so every
+  fresh onboarding stopped there with "The term 'New-NeologikNceAuthApp'
+  is not recognized". Restored exactly as it was. New static Pester test
+  (`tests/Install-NeologikEnvironment.Static.Tests.ps1`) parses the script
+  and fails when any called Neologik function is not defined.
+- https://github.com/Neologik-AI/project/issues/2528
+
+---
+
 ## Unreleased - AddRemoveCreds.All wording follows the agent identity token service (project#2221)
 **Date**: 2026-09-10
 
