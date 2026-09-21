@@ -29,7 +29,10 @@
     Azure Tenant ID. If not provided, will use current context.
 
 .PARAMETER SubscriptionName
-    Name for the Azure subscription. Default: 'Neologik-Development-01'
+    Name of the Azure subscription to onboard into. When supplied, the script
+    selects it after sign-in and stops if this login cannot see it. When
+    omitted, the subscription of the current Azure context is used. On a
+    resumed run the checkpoint's subscription wins.
 
 .PARAMETER KeyVaultName
     Override the Key Vault name. If omitted, the standard name
@@ -150,7 +153,7 @@ param(
     [string]$TenantId,
 
     [Parameter(Mandatory = $false)]
-    [string]$SubscriptionName = "Neologik-Development-01",
+    [string]$SubscriptionName,
 
     [Parameter(Mandatory = $false)]
     [ValidateLength(3, 24)]
@@ -4728,11 +4731,25 @@ function Start-NeologikOnboarding {
         
         $null = Connect-AzureEnvironment -TenantId $TenantId
 
-        # Step 5: Get current subscription from context
-        # On resume, switch to the subscription from the checkpoint before reading the context.
+        # Step 5: Select the subscription
+        # On resume, the checkpoint's subscription wins. On a fresh run a supplied
+        # -SubscriptionName selects that subscription and fails hard when this login
+        # cannot see it (project#2579); the login context is the fallback only when
+        # the parameter is absent.
+        $subscriptionSource = 'your login'
         if ($resuming -and $script:ConfigData['SubscriptionId']) {
             Set-AzContext -SubscriptionId $script:ConfigData['SubscriptionId'] -ErrorAction Stop | Out-Null
             Write-Log "Restored Azure context to subscription: $($script:ConfigData['SubscriptionId'])" -Level Info
+            $subscriptionSource = 'the checkpoint'
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace($SubscriptionName)) {
+            $requested = @(Get-AzSubscription -SubscriptionName $SubscriptionName -ErrorAction SilentlyContinue) | Select-Object -First 1
+            if (-not $requested) {
+                throw "Subscription '$SubscriptionName' not found for this login. Pass a subscription name this account can see, or omit -SubscriptionName to use the current context subscription."
+            }
+            Set-AzContext -SubscriptionId $requested.Id -ErrorAction Stop | Out-Null
+            Write-Log "Selected subscription from -SubscriptionName: $($requested.Name) (ID: $($requested.Id))" -Level Info
+            $subscriptionSource = '-SubscriptionName'
         }
 
         $currentContext = Get-AzContext
@@ -4749,7 +4766,7 @@ function Start-NeologikOnboarding {
         Write-Host "║                                                               ║" -ForegroundColor Cyan
         Write-Host "╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
         Write-Host ""
-        Write-Host "Using subscription from your login:" -ForegroundColor Yellow
+        Write-Host "Using subscription from ${subscriptionSource}:" -ForegroundColor Yellow
         Write-Host "  Name: $($currentContext.Subscription.Name)" -ForegroundColor Gray
         Write-Host "  ID:   $($currentContext.Subscription.Id)" -ForegroundColor Gray
         Write-Host ""

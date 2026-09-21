@@ -9,6 +9,19 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Unreleased - Onboarding script honours -SubscriptionName on a fresh run (project#2579)
+**Date**: 2026-09-21
+
+- `Install-NeologikEnvironment.ps1` step 5: a supplied `-SubscriptionName`
+  now selects that subscription after sign-in (`Get-AzSubscription` +
+  `Set-AzContext`) and stops with a clear error when this login cannot see
+  it; the login context is the fallback only when the parameter is
+  omitted, and a resumed run keeps the checkpoint's subscription. The
+  parameter's unused default `Neologik-Development-01` is gone and the
+  help text says what happens. The subscription banner names its source
+  (`-SubscriptionName`, the checkpoint, or your login). Static Pester test
+  added. https://github.com/Neologik-AI/project/issues/2579
+
 ## Unreleased - Onboarding script: the Platform Sign-in registration step restored (project#2528)
 **Date**: 2026-09-18
 

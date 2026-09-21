@@ -31,6 +31,15 @@ It 'defines every Neologik function it calls' {
     $missing | Should -BeNullOrEmpty -Because "a called function must exist in the script: $($missing -join ', ')"
 }
 
+It 'selects the subscription named by -SubscriptionName on a fresh run' {
+    # project#2579: a supplied name is resolved and set as the context; the
+    # login context is the fallback only when the parameter is absent.
+    $text = Get-Content -Raw $script:ScriptPath
+    $text | Should -Match ([regex]::Escape('[string]::IsNullOrWhiteSpace($SubscriptionName)'))
+    $text | Should -Match ([regex]::Escape('Get-AzSubscription -SubscriptionName $SubscriptionName'))
+    $text | Should -Not -Match ([regex]::Escape('$SubscriptionName = "Neologik-Development-01"'))
+}
+
 It 'creates the Platform Sign-in registration' {
     $script:Defined | Should -Contain 'New-NeologikNceAuthApp'
     $script:Called | Should -Contain 'New-NeologikNceAuthApp'
