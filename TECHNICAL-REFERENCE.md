@@ -307,8 +307,8 @@ Creates (or, with a client-provided service principal, reuses):
   - Reader (Subscription) - SKU/quota pre-flight reads only
   - Cost Management Contributor (Subscription) - cost-report configuration only
   - Contributor, Key Vault Certificates Officer, Key Vault Secrets Officer, Storage Blob Data Contributor, Azure Kubernetes Service RBAC Cluster Admin, Monitoring Contributor, Role Based Access Control Administrator (Resource Group)
-  - Microsoft Graph app roles: Application.ReadWrite.OwnedBy (manage only the app registrations it owns; reads come with it) and AgentIdentityBlueprint.AddRemoveCreds.All (the agent identity token service's credential on the agent identity blueprint, and removal of retired per-workload credentials). The blueprint principal - not the SP - holds AgentIdUser.ReadWrite.IdentityParentedBy; see section 6a.
-- **Added to**: `Neologik Admin User Group - <short-name>`
+  - Microsoft Graph app roles: Application.ReadWrite.OwnedBy (manage only the app registrations it owns; reads come with it) and AgentIdentityBlueprint.AddRemoveCreds.All (the agent identity token service's credential on the agent identity blueprint, and removal of retired per-workload credentials). The blueprint principal - not the SP - holds AgentIdUser.ReadWrite.IdentityParentedBy.
+- **Group membership**: none. The deployment service principal is not a member of `Neologik Admin User Group - <short-name>` (project#2269): its SQL access is the SQL server's Microsoft Entra administrator setting, declared by the platform infrastructure deployment.
 
 ### 6. Platform Sign-in App Registration
 

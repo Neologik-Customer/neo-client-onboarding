@@ -80,7 +80,7 @@ The operator running the onboarding script holds Subscription Owner and Global A
 
 - **No Azure role assignments** - the script assigns Reader and Cost Management Contributor at subscription scope and the resource-group role set
 - **No API permissions / admin consent on the app** - the script grants the Microsoft Graph application roles directly to the service principal
-- **No group setup** - the script adds the service principal to the Neologik Admin User Group
+- **No group setup** - the service principal is not a member of any group (project#2269)
 
 If you pre-assign roles or permissions anyway, the script treats them as already present and continues - but they are unnecessary.
 
