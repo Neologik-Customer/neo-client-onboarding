@@ -10,6 +10,8 @@ This document tracks the version history of the Neologik customer onboarding scr
 ---
 
 ## Unreleased - Onboarding script honours -SubscriptionName on a fresh run (project#2579)
+
+- `resource-providers.txt` gains `Microsoft.DevTestLab`: the neo-secure infrastructure creates the self-hosted runner VM's auto-shutdown schedule (`Microsoft.DevTestLab/schedules`), and a fresh subscription without the provider failed the stg02 infrastructure deployment with MissingSubscriptionRegistration (v5.0.0 staging build, 2026-09-23, https://github.com/Neologik-AI/project/issues/2812).
 **Date**: 2026-09-21
 
 - `Install-NeologikEnvironment.ps1` step 5: a supplied `-SubscriptionName`
