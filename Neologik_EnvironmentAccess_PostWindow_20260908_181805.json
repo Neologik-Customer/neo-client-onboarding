@@ -1,0 +1,37 @@
+{
+  "tenantId": "ff1fc9e3-26ae-45ae-a79a-32197c30c04d",
+  "deploymentIdentity": "0b5c0822-78a2-452f-af79-8e9be3922f7c",
+  "run": "PostWindow",
+  "verifyOnly": false,
+  "ranAt": "2026-09-08T17:18:05.2130949Z",
+  "deploymentGraphRoles": [
+    "Application.ReadWrite.OwnedBy",
+    "AppCatalog.ReadWrite.All",
+    "AgentIdentityBlueprint.AddRemoveCreds.All"
+  ],
+  "expectedGraphRoles": [
+    "Application.ReadWrite.OwnedBy",
+    "AgentIdentityBlueprint.AddRemoveCreds.All"
+  ],
+  "agentGrantsFile": "./agent-grants-neoprd.json",
+  "items": [
+    {
+      "Item": "Agent-user grant: agent Daily Digest",
+      "Result": "Granted (Calendars.Read Calendars.Read.Shared ChannelMessage.Read.All Mail.Read Mail.Read.Shared Mail.Send Mail.Send.Shared Team.ReadBasic.All User.Read)"
+    },
+    {
+      "Item": "Agent-user grant: agent Ideas Agent",
+      "Result": "Already granted"
+    },
+    {
+      "Item": "Agent-user grant: app MS Planner",
+      "Result": "Granted (Tasks.ReadWrite User.Read)"
+    },
+    {
+      "Item": "SharePoint Sites.Selected consent",
+      "Result": "Present"
+    }
+  ],
+  "attentionCount": 0,
+  "pendingChangeCount": 0
+}

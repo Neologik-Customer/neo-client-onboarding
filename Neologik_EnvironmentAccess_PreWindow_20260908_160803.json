@@ -1,0 +1,203 @@
+{
+  "tenantId": "ff1fc9e3-26ae-45ae-a79a-32197c30c04d",
+  "deploymentIdentity": "0b5c0822-78a2-452f-af79-8e9be3922f7c",
+  "run": "PreWindow",
+  "verifyOnly": true,
+  "ranAt": "2026-09-08T15:08:03.6209201Z",
+  "deploymentGraphRoles": [
+    "AgentIdentity.Create.All",
+    "Application.ReadWrite.OwnedBy",
+    "AppCatalog.ReadWrite.All",
+    "AgentIdentityBlueprint.Create",
+    "AgentIdentityBlueprint.UpdateAuthProperties.All",
+    "AgentIdentityBlueprintPrincipal.Create",
+    "AgentIdentityBlueprint.AddRemoveCreds.All",
+    "AgentIdUser.ReadWrite.All",
+    "Application.Read.All"
+  ],
+  "expectedGraphRoles": [
+    "Application.ReadWrite.OwnedBy",
+    "AgentIdentityBlueprint.AddRemoveCreds.All"
+  ],
+  "agentGrantsFile": "",
+  "items": [
+    {
+      "Item": "Agent blueprint",
+      "Result": "WOULD CREATE (Neologik Agent Blueprint - default - neo-prd)"
+    },
+    {
+      "Item": "Blueprint owner",
+      "Result": "WOULD ADD (set at creation)"
+    },
+    {
+      "Item": "Blueprint principal",
+      "Result": "WOULD CREATE"
+    },
+    {
+      "Item": "Blueprint principal owner",
+      "Result": "WOULD ADD"
+    },
+    {
+      "Item": "Blueprint principal role: AgentIdUser.ReadWrite.IdentityParentedBy",
+      "Result": "WOULD GRANT"
+    },
+    {
+      "Item": "Blueprint credential: github-oidc-neo-infrastructure",
+      "Result": "WOULD ADD"
+    },
+    {
+      "Item": "Blueprint credential: github-oidc-neo-bot-service",
+      "Result": "WOULD ADD"
+    },
+    {
+      "Item": "Blueprint credential: github-oidc-neo-env-config",
+      "Result": "WOULD ADD"
+    },
+    {
+      "Item": "Graph role: Application.ReadWrite.OwnedBy",
+      "Result": "Already granted"
+    },
+    {
+      "Item": "Graph role: AgentIdentityBlueprint.AddRemoveCreds.All",
+      "Result": "Already granted"
+    },
+    {
+      "Item": "Retired Graph role: Application.Read.All",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Retired Graph role: AgentIdentityBlueprint.Create",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Retired Graph role: AgentIdentityBlueprint.UpdateAuthProperties.All",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Retired Graph role: AgentIdentityBlueprintPrincipal.Create",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Retired Graph role: AgentIdentity.Create.All",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Retired Graph role: AgentIdUser.ReadWrite.All",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Retired Graph role: Group.Create",
+      "Result": "Not held"
+    },
+    {
+      "Item": "NCE group assignment",
+      "Result": "Already assigned"
+    },
+    {
+      "Item": "Admin consent",
+      "Result": "Present"
+    },
+    {
+      "Item": "SharePoint Sites.Selected consent",
+      "Result": "Not checked - runs with the agent grants file"
+    },
+    {
+      "Item": "RG role: Contributor",
+      "Result": "Already in place"
+    },
+    {
+      "Item": "RG role: Key Vault Certificates Officer",
+      "Result": "Already in place"
+    },
+    {
+      "Item": "RG role: Key Vault Secrets Officer",
+      "Result": "Already in place"
+    },
+    {
+      "Item": "RG role: Storage Blob Data Contributor",
+      "Result": "Already in place"
+    },
+    {
+      "Item": "RG role: Azure Kubernetes Service RBAC Cluster Admin",
+      "Result": "Already in place"
+    },
+    {
+      "Item": "RG role: Monitoring Contributor",
+      "Result": "Already in place"
+    },
+    {
+      "Item": "RG role: Role Based Access Control Administrator",
+      "Result": "WOULD CREATE"
+    },
+    {
+      "Item": "subscription role: Reader",
+      "Result": "WOULD CREATE"
+    },
+    {
+      "Item": "subscription role: Cost Management Contributor",
+      "Result": "Already in place"
+    },
+    {
+      "Item": "Legacy subscription role: Contributor",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Legacy subscription role: User Access Administrator",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Application Administrator role",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Admin User Group membership",
+      "Result": "Not held"
+    },
+    {
+      "Item": "Undeclared Azure role: Azure Kubernetes Service Cluster Admin Role @ subscription",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Undeclared Azure role: Contributor @ subscription",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Undeclared Azure role: Key Vault Certificates Officer @ subscription",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Undeclared Azure role: Key Vault Secrets Officer @ subscription",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Undeclared Azure role: User Access Administrator @ subscription",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Undeclared Azure role: Azure AI Developer @ resource group",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Undeclared Azure role: Reader @ resource group",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Undeclared Azure role: Search Index Data Reader @ resource group",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Undeclared Azure role: Foundry User @ resource group",
+      "Result": "WOULD REMOVE"
+    },
+    {
+      "Item": "Undeclared directory roles",
+      "Result": "None"
+    },
+    {
+      "Item": "Undeclared group memberships",
+      "Result": "None"
+    }
+  ],
+  "attentionCount": 28,
+  "pendingChangeCount": 28
+}
