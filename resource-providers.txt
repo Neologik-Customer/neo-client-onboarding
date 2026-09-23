@@ -25,6 +25,8 @@ Microsoft.ContainerRegistry
 Microsoft.ContainerInstance
 Microsoft.KubernetesConfiguration
 Microsoft.Network
+Microsoft.ServiceNetworking      # Application Gateway for Containers (the neo-secure ingress)
+Microsoft.NetworkFunction        # Application Gateway for Containers
 
 # Virtual machines (neo-secure: the self-hosted runner VM's auto-shutdown schedule is a
 # Microsoft.DevTestLab/schedules resource; found missing on the v5.0.0 stg02 build, 2026-09-23)
