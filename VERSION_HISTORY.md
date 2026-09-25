@@ -2,14 +2,20 @@
 
 This document tracks the version history of the Neologik customer onboarding scripts deployed from the main branch, including significant changes, dependencies, and infrastructure requirements.
 
-**Version Format**: `MAJOR.MINOR.PATCH` (currently: `1.9.x`)
-- Major version: 1
-- Minor version: 9
+**Version Format**: `MAJOR.MINOR.PATCH` (currently: `5.0.x`; from v5.0.0 the kit's version follows the platform line)
+- Major version: 5
+- Minor version: 0
 - Patch number: Incremented with each release
 
 ---
 
-## Unreleased - Onboarding script honours -SubscriptionName on a fresh run (project#2579)
+## Version 5.0.0
+**Built**: September 25, 2026  
+**Git Tag**: v5.0.0
+
+The first kit release for the Neologik Platform v5.0.0 (the staging environments stg01, stg02 and stg03 were onboarded from this content). The kit's version follows the platform line from here. The entries below are every change since Version 1.10.1, newest first.
+
+### Onboarding script honours -SubscriptionName on a fresh run (project#2579)
 
 - `resource-providers.txt` gains `Microsoft.ServiceNetworking` and `Microsoft.NetworkFunction`: the neo-secure ingress is Application Gateway for Containers, whose ALB controller install registers both providers, and the deployment identity holds no subscription-level right to register a provider (`Microsoft.ContainerService/register/action` refused on the v5.0.0 stg02 build). Registering them at onboarding, as for every other provider, removes the step from the deployment. https://github.com/Neologik-AI/project/issues/2812
 - `resource-providers.txt` gains `Microsoft.DevTestLab`: the neo-secure infrastructure creates the self-hosted runner VM's auto-shutdown schedule (`Microsoft.DevTestLab/schedules`), and a fresh subscription without the provider failed the stg02 infrastructure deployment with MissingSubscriptionRegistration (v5.0.0 staging build, 2026-09-23, https://github.com/Neologik-AI/project/issues/2812).
@@ -25,7 +31,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   (`-SubscriptionName`, the checkpoint, or your login). Static Pester test
   added. https://github.com/Neologik-AI/project/issues/2579
 
-## Unreleased - Onboarding script: the Platform Sign-in registration step restored (project#2528)
+### Onboarding script: the Platform Sign-in registration step restored (project#2528)
 **Date**: 2026-09-18
 
 - `Install-NeologikEnvironment.ps1` regains `New-NeologikNceAuthApp` (step
@@ -39,7 +45,7 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
-## Unreleased - AddRemoveCreds.All wording follows the agent identity token service (project#2221)
+### AddRemoveCreds.All wording follows the agent identity token service (project#2221)
 **Date**: 2026-09-10
 
 - Comment and documentation currency only, no behaviour change. The
@@ -53,7 +59,7 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
-## Unreleased - Pre-window run adopts an explicit list of app registrations (project#2355)
+### Pre-window run adopts an explicit list of app registrations (project#2355)
 **Date**: 2026-09-10
 
 - `Update-NeologikEnvironmentAccess.ps1` step 3b takes exactly the app
@@ -78,7 +84,7 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
-## Unreleased - Ignore per-environment answer and grants files (project#2354)
+### Ignore per-environment answer and grants files (project#2354)
 **Date**: 2026-09-10
 
 - `.gitignore` now excludes `inputs-<env>.json` answer files (`inputs-example.json`
@@ -88,7 +94,7 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
-## Unreleased - One resource provider list, registered in full on every run (project#2345)
+### One resource provider list, registered in full on every run (project#2345)
 **Date**: 2026-09-09
 
 - New `resource-providers.txt`: the single list of the 32 Azure resource
@@ -118,7 +124,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   deployment identity holds no subscription-scoped permission in customer
   tenants, so onboarding is the only place registration happens.
 
-## Unreleased - The pre-window run adopts every platform app registration for the deployment identity (project#1012)
+### The pre-window run adopts every platform app registration for the deployment identity (project#1012)
 **Date**: 2026-09-09
 
 - `Update-NeologikEnvironmentAccess.ps1` step 3b: the deployment identity
@@ -142,7 +148,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   suite.
 - https://github.com/Neologik-AI/project/issues/1012
 
-## Unreleased - Onboarding activates Directory Readers in a tenant that has never used it (dev10 virgin-tenant test)
+### Onboarding activates Directory Readers in a tenant that has never used it (dev10 virgin-tenant test)
 **Date**: 2026-09-09
 
 - `Install-NeologikEnvironment.ps1` assigns Directory Readers to the SQL
@@ -162,7 +168,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   and the export failed with "Could not find a part of the path". The
   resume now keeps the file name only and places it next to the script.
 
-## Unreleased - The sign-in works every time and the short name is never guessed (project#2306, project#2329)
+### The sign-in works every time and the short name is never guessed (project#2306, project#2329)
 **Date**: 2026-09-09
 
 - `Update-NeologikEnvironmentAccess.ps1` runs the device-code sign-in itself
@@ -195,7 +201,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   the harness gains the identity-platform seam (`Invoke-NeologikTokenRequest`),
   the endpoint seam (`Test-NeologikEndpoint`) and the signed-in account's
   roles.
-## Unreleased - The configuration summary records the two-role Graph set (project#2342)
+### The configuration summary records the two-role Graph set (project#2342)
 **Date**: 2026-09-09
 
 - `Install-NeologikEnvironment.ps1` still wrote `Application.Read.All` into
@@ -209,7 +215,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   is granted.
 - https://github.com/Neologik-AI/project/issues/2342
 
-## Unreleased - The directory-role checks read the identity's memberOf list (project#2297 dev03 finding)
+### The directory-role checks read the identity's memberOf list (project#2297 dev03 finding)
 **Date**: 2026-09-08
 
 - Microsoft Graph's `directoryRoles/{id}/members` list omits service
@@ -226,7 +232,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   role-list cmdlets throw if called; a case proves both steps find and
   remove the roles without them (Pester 131).
 
-## Unreleased - Declared set or nothing: the pre-window run removes every undeclared role and membership (project#2297)
+### Declared set or nothing: the pre-window run removes every undeclared role and membership (project#2297)
 **Date**: 2026-09-08
 
 - Owner decision 2026-09-08 (https://github.com/Neologik-AI/project/issues/2297):
@@ -252,7 +258,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   resource-scoped role kept, verify-only pending changes, narrow set
   incomplete, refused group removal).
 
-## Unreleased - Az modules import at their own versions (project#2269 dev03 finding)
+### Az modules import at their own versions (project#2269 dev03 finding)
 **Date**: 2026-09-08
 
 - The first dev03 `-Verify` run after the Admin User Group step failed its
@@ -263,7 +269,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   version). The Az set now imports with `-Independent`: each module at its
   own highest available version, no common pin. Pester 125.
 
-## Unreleased - The deployment principal leaves the Admin User Group; SQL access is the declared server administrator (project#2269)
+### The deployment principal leaves the Admin User Group; SQL access is the declared server administrator (project#2269)
 **Date**: 2026-09-07
 
 - Owner decision 2026-09-07 (option A on https://github.com/Neologik-AI/project/issues/2269): the deployment service
@@ -295,7 +301,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   One fixture change: the missing-group test now uses an id no fake object
   carries, since the Admin User Group is a real group in the fake tenant.
 
-## Unreleased - -UseAzureCliToken signs the Azure half in too (project#2234 follow-up)
+### -UseAzureCliToken signs the Azure half in too (project#2234 follow-up)
 **Date**: 2026-09-07
 
 - `Update-NeologikEnvironmentAccess.ps1 -UseAzureCliToken` now also signs
@@ -313,7 +319,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   Azure sign-in, and ACTION REQUIRED with the reduction skipped when the
   CLI has no token for the subscription).
 
-## Unreleased - Global Administrator script: single-session migration model, verify-only switch, adopted email identities (project#2234)
+### Global Administrator script: single-session migration model, verify-only switch, adopted email identities (project#2234)
 **Date**: 2026-09-07
 
 - `Update-NeologikEnvironmentAccess.ps1` has no `-Phase` parameter: the
@@ -367,7 +373,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   nothing and exits 1, adopted identities are kept, and the parameter set
   refuses `-Phase`. PSScriptAnalyzer: 0 findings.
 
-## Unreleased - Global Administrator script: zero-error run, exhaustive review and test harness (project#2217)
+### Global Administrator script: zero-error run, exhaustive review and test harness (project#2217)
 **Date**: 2026-09-06
 
 - `Update-NeologikEnvironmentAccess.ps1` no longer stops on the first
@@ -409,12 +415,12 @@ This document tracks the version history of the Neologik customer onboarding scr
   PSScriptAnalyzer (default rules and PSUseCompatibleSyntax 7.4) reports no
   findings.
 
-## Unreleased - Sites.Selected check resolves the environment's own SharePoint app (project#2213 dev03 finding)
+### Sites.Selected check resolves the environment's own SharePoint app (project#2213 dev03 finding)
 **Date**: 2026-09-06
 
 - Step 3a looked up the SharePoint access app by the name prefix alone and took the first match, so in a tenant hosting several environments it tested another environment's app (dev03 reported "consent missing" against neodev01's app while its own app held the consent). The check now resolves `Neologik SharePoint Access - <SolutionShortName>` from the configuration file first, accepts the prefix search only when it yields exactly one app, and otherwise reports the ambiguity instead of a wrong answer.
 
-## Unreleased - One Global Administrator script per migration: agent-user grants, component roles, SharePoint consent, JSON summary (project#2213)
+### One Global Administrator script per migration: agent-user grants, component roles, SharePoint consent, JSON summary (project#2213)
 **Date**: 2026-09-05
 
 - `Update-NeologikEnvironmentAccess.ps1` gains `-AgentGrantsFile <json>` (the
@@ -437,7 +443,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   deployment identity's Graph roles, every consent and grant state) for the
   migration ticket (https://github.com/Neologik-AI/project/issues/2213).
 
-## Unreleased - Least-privilege Graph model for the deployment SP (project#2144)
+### Least-privilege Graph model for the deployment SP (project#2144)
 **Date**: 2026-09-03
 
 - The deployment service principal now receives two Microsoft Graph
@@ -472,7 +478,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   (AgentIdentityBlueprint.Create, AgentIdentityBlueprint.AddRemoveCreds.All,
   AgentIdentityBlueprintPrincipal.Create).
 
-## Unreleased - Email channel mailbox grants in the GA migration script (project#990)
+### Email channel mailbox grants in the GA migration script (project#990)
 **Date**: 2026-09-03
 
 - Update-NeologikEnvironmentAccess.ps1 gains Window step 3b: with
@@ -491,7 +497,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   like the Graph sign-in. A PENDING mailbox grant (propagation) is an
   attention item (exit 1) until a re-run confirms InScope.
 
-## Unreleased - Storage uploads verified and surfaced (project#1652 process item 4)
+### Storage uploads verified and surfaced (project#1652 process item 4)
 **Date**: 2026-08-21
 
 - The configuration JSON and log uploads are verified (blob read back)
@@ -503,7 +509,7 @@ This document tracks the version history of the Neologik customer onboarding scr
 - Non-interactive runs attempt the upload once instead of skipping it;
   it succeeds when the CI login can authenticate data-plane calls.
 
-## Unreleased - Fixes from the dev06 v5 run transcript (project#1652)
+### Fixes from the dev06 v5 run transcript (project#1652)
 **Branch**: `bugfix/v5-run-findings`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1652
 **Date**: 2026-08-20
@@ -532,7 +538,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   registration loop and the bare configuration-file path echoed after the
   Next Steps block.
 
-## Unreleased - Invite list extendable at the prompt (project#1064)
+### Invite list extendable at the prompt (project#1064)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1064
 **Date**: 2026-08-17
@@ -549,7 +555,7 @@ This document tracks the version history of the Neologik customer onboarding scr
 - Configuration summary shows "Yes (N from file + M typed)"; unattended
   (-NonInteractive) runs use the file only.
 
-## Unreleased - Add existing accounts to groups when invitations are declined (project#1064)
+### Add existing accounts to groups when invitations are declined (project#1064)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1064
 **Date**: 2026-08-17
@@ -575,7 +581,7 @@ This document tracks the version history of the Neologik customer onboarding scr
 - Docs: README, TECHNICAL-REFERENCE, QUICK-REFERENCE (+ PDF),
   PRE-ONBOARDING-INFO-GATHERING, inputs-example.json.
 
-## Unreleased - v5 documentation alignment (project#1527)
+### v5 documentation alignment (project#1527)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1527
 **Date**: 2026-08-17
@@ -601,7 +607,7 @@ This document tracks the version history of the Neologik customer onboarding scr
   README, PRE-ONBOARDING-INFO-GATHERING, QUICK-REFERENCE and
   TECHNICAL-REFERENCE.
 
-## Unreleased - Group.Create removed from the deployment SP grant set (project#1519)
+### Group.Create removed from the deployment SP grant set (project#1519)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1519
 **Date**: 2026-08-17
@@ -618,7 +624,7 @@ This document tracks the version history of the Neologik customer onboarding scr
 - Tenants already granted `Group.Create` keep the assignment until revoked
   as a separate operational action (tracked on the ticket).
 
-## Unreleased - Pooja Pandey added to Neologik guest users (project#1448)
+### Pooja Pandey added to Neologik guest users (project#1448)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1448
 **Date**: 2026-08-13
@@ -626,7 +632,7 @@ This document tracks the version history of the Neologik customer onboarding scr
 - Pooja.Pandey@neologik.ai added to `NeologikGuestUsers.txt`, matching the
   hotfix already landed on main (7f1363d) and develop (d648d2d).
 
-## Unreleased - Recover a missing NeologikGuestUsers.txt interactively (project#1383)
+### Recover a missing NeologikGuestUsers.txt interactively (project#1383)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1383
 **Date**: 2026-08-10
@@ -647,7 +653,7 @@ recover at the guest-invitation configuration prompt via the new
   file. Non-interactive (CI) mode behaviour unchanged (warn and continue;
   governed by `-SkipGuestInvitation` / answer file).
 
-## Unreleased - Azure mandatory MFA: claims-challenge handling (project#1381)
+### Azure mandatory MFA: claims-challenge handling (project#1381)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1381
 **Date**: 2026-08-10
@@ -676,7 +682,7 @@ without authenticating through MFA" during a v4.5.0 onboarding.
 - Dependencies: `Az.Accounts` minimum raised 3.0.0 -> 5.2.0 (first version
   with `Connect-AzAccount -ClaimsChallenge`).
 
-## Unreleased - NCE delegation model groups (project#1341)
+### NCE delegation model groups (project#1341)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1341
 **Date**: 2026-08-06
@@ -697,7 +703,7 @@ without authenticating through MFA" during a v4.5.0 onboarding.
   neo-env-config variables file (bootstrap-if-empty seeding at database
   deploy).
 
-## Unreleased
+### Other changes
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1063
 
@@ -820,6 +826,17 @@ without authenticating through MFA" during a v4.5.0 onboarding.
   so Harness channel provisioning can create per-agent user groups at channel
   attach. Agents and channels are created post-deployment in the Harness
   admin tool.
+- **Agent account access guide** (project#2239, owner decision 2026-09-07):
+  new `AGENT-ACCOUNT-ACCESS-GUIDE.md` tells a customer's administrators how
+  to licence an agent account, give it Full Access and Send As on a shared
+  mailbox, and make it a member of a SharePoint site or a Teams team - the
+  portals' pickers cannot find agent accounts, so each step is a short
+  command - and how the admin tool's chips confirm each step. Linked from
+  the README's post-deployment section and as Step 5 of the
+  post-deployment guide.
+- **Pooja Pandey added to `NeologikGuestUsers.txt`** (project#1448): future
+  onboarding runs invite Pooja.Pandey@neologik.ai as a B2B guest and seed
+  her into the per-environment security groups.
 - **Onboarding-kit zip builder moved out of this repo** (owner decision
   2026-07-16): this repository is customer-facing and carries no customer
   data - contents, history, or Actions. `prepare-onboarding-zip.yml`
@@ -852,7 +869,7 @@ without authenticating through MFA" during a v4.5.0 onboarding.
 
 ---
 
-## Version NEXT - deployment SP owns the sign-in service principal (project#1579)
+### deployment SP owns the sign-in service principal (project#1579)
 
 - Date: 2026-08-19
 - Summary: The sign-in (NCE auth) app setup now adds the deployment SP as
@@ -861,14 +878,14 @@ without authenticating through MFA" during a v4.5.0 onboarding.
   the pipeline's servicePrincipal updates were denied on every deploy.
   Idempotent - re-running onboarding backfills existing environments.
 
-## Version NEXT - summary alignment (project#1577)
+### summary alignment (project#1577)
 
 - Date: 2026-08-19
 - Summary: The configuration summary renders every row through one
   label-padding helper (single 24-character label column); the value
   column previously drifted after the Azure Region row.
 
-## Version NEXT - remove model quota pre-flight (project#1578)
+### remove model quota pre-flight (project#1578)
 
 - Date: 2026-08-19
 - Summary: Test-QuotaRequirements removed (owner ruling). It warned on a
@@ -878,7 +895,7 @@ without authenticating through MFA" during a v4.5.0 onboarding.
   manual model-deployment step. vCPU guidance in QUICK-REFERENCE stays;
   the Azure OpenAI quota section there is removed.
 
-## Version NEXT - naming formula fix (project#1576)
+### naming formula fix (project#1576)
 
 - Date: 2026-08-19
 - Summary: Computed solution names now follow the estate formula
@@ -891,7 +908,7 @@ without authenticating through MFA" during a v4.5.0 onboarding.
   secure-overview, inputs-example naming note); QUICK-REFERENCE.pdf not
   regenerated. Found live during the dev01 v5 onboarding.
 
-## Version NEXT
+### Other changes (unversioned)
 **Branch**: `feature/ideas-agent`
 **Status**: Pending
 
