@@ -13,10 +13,10 @@ This document tracks the version history of the Neologik customer onboarding scr
 **Built**: September 25, 2026  
 **Git Tag**: v5.0.1
 
-### Neologik guest users: Adam Smith replaces David Katende (project#2934)
+### Neologik guest users list updated (project#2934)
 **Date**: 2026-09-25
 
-- `NeologikGuestUsers.txt`: `Adam.Smith@neologik.ai` added and `david.katende@neologik.ai` removed. The next customer onboarding run invites Adam Smith as a B2B guest and seeds him into the security groups alongside the other Neologik guests; David Katende is no longer invited. https://github.com/Neologik-AI/project/issues/2934
+- `NeologikGuestUsers.txt`: one Neologik support account added and one removed. The next customer onboarding run invites the current Neologik support accounts as B2B guests and seeds them into the security groups; the removed account is no longer invited. https://github.com/Neologik-AI/project/issues/2934
 
 ## Version 5.0.0
 **Built**: September 25, 2026  
@@ -633,13 +633,13 @@ The first kit release for the Neologik Platform v5.0.0 (the staging environments
 - Tenants already granted `Group.Create` keep the assignment until revoked
   as a separate operational action (tracked on the ticket).
 
-### Pooja Pandey added to Neologik guest users (project#1448)
+### Neologik guest users list updated (project#1448)
 **Branch**: `feature/agent-platform`
 **Ticket**: https://github.com/Neologik-AI/project/issues/1448
 **Date**: 2026-08-13
 
-- Pooja.Pandey@neologik.ai added to `NeologikGuestUsers.txt`, matching the
-  hotfix already landed on main (7f1363d) and develop (d648d2d).
+- One Neologik support account added to `NeologikGuestUsers.txt`, matching
+  the hotfix already landed on main (7f1363d) and develop (d648d2d).
 
 ### Recover a missing NeologikGuestUsers.txt interactively (project#1383)
 **Branch**: `feature/agent-platform`
@@ -843,9 +843,9 @@ without authenticating through MFA" during a v4.5.0 onboarding.
   command - and how the admin tool's chips confirm each step. Linked from
   the README's post-deployment section and as Step 5 of the
   post-deployment guide.
-- **Pooja Pandey added to `NeologikGuestUsers.txt`** (project#1448): future
-  onboarding runs invite Pooja.Pandey@neologik.ai as a B2B guest and seed
-  her into the per-environment security groups.
+- **Neologik guest users list updated** (project#1448): future onboarding
+  runs invite an additional Neologik support account as a B2B guest and
+  seed it into the per-environment security groups.
 - **Onboarding-kit zip builder moved out of this repo** (owner decision
   2026-07-16): this repository is customer-facing and carries no customer
   data - contents, history, or Actions. `prepare-onboarding-zip.yml`
