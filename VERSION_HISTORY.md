@@ -820,6 +820,17 @@ without authenticating through MFA" during a v4.5.0 onboarding.
   so Harness channel provisioning can create per-agent user groups at channel
   attach. Agents and channels are created post-deployment in the Harness
   admin tool.
+- **Agent account access guide** (project#2239, owner decision 2026-09-07):
+  new `AGENT-ACCOUNT-ACCESS-GUIDE.md` tells a customer's administrators how
+  to licence an agent account, give it Full Access and Send As on a shared
+  mailbox, and make it a member of a SharePoint site or a Teams team - the
+  portals' pickers cannot find agent accounts, so each step is a short
+  command - and how the admin tool's chips confirm each step. Linked from
+  the README's post-deployment section and as Step 5 of the
+  post-deployment guide.
+- **Pooja Pandey added to `NeologikGuestUsers.txt`** (project#1448): future
+  onboarding runs invite Pooja.Pandey@neologik.ai as a B2B guest and seed
+  her into the per-environment security groups.
 - **Onboarding-kit zip builder moved out of this repo** (owner decision
   2026-07-16): this repository is customer-facing and carries no customer
   data - contents, history, or Actions. `prepare-onboarding-zip.yml`

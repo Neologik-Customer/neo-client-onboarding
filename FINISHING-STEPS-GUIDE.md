@@ -255,6 +255,14 @@ Managing group membership is an **ongoing administrative task**. When new employ
 
 ---
 
+## Step 5: Give agent accounts access to your resources (only when an agent works on its own)
+
+An agent that runs on a schedule, reads files from a SharePoint library or emails from a shared mailbox has an agent account in your directory. Your administrators licence it and share the mailbox, site or team with it; the portals' pickers cannot find these accounts, so each step is a short command. The admin tool shows a chip per resource that turns green once the step is done.
+
+📋 **See: [AGENT-ACCOUNT-ACCESS-GUIDE.md](AGENT-ACCOUNT-ACCESS-GUIDE.md)** for the commands and how to check them.
+
+---
+
 ## Verification Checklist
 
 Before considering the deployment complete, verify:
