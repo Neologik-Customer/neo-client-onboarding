@@ -13,7 +13,7 @@ This document tracks the version history of the Neologik customer onboarding scr
 **Built**: September 25, 2026  
 **Git Tag**: v5.0.0
 
-The first kit release for the Neologik Platform v5.0.0 (the staging environments stg01, stg02 and stg03 were onboarded from this content). The kit's version follows the platform line from here. The entries below are every change since v1.9.0, newest first.
+The first kit release for the Neologik Platform v5.0.0 (the staging environments stg01, stg02 and stg03 were onboarded from this content). The kit's version follows the platform line from here. The entries below are every change since Version 1.10.1, newest first.
 
 ### Onboarding script honours -SubscriptionName on a fresh run (project#2579)
 
@@ -908,7 +908,7 @@ without authenticating through MFA" during a v4.5.0 onboarding.
   secure-overview, inputs-example naming note); QUICK-REFERENCE.pdf not
   regenerated. Found live during the dev01 v5 onboarding.
 
-## Version NEXT
+### Other changes (unversioned)
 **Branch**: `feature/ideas-agent`
 **Status**: Pending
 
