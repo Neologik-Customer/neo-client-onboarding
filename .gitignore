@@ -8,6 +8,9 @@
 
 # Real predefined-input file (client-specific values)
 inputs.json
+# Per-environment answer files copied from inputs-example.json (inputs-<env>.json)
+inputs-*.json
+!inputs-example.json
 
 # PowerShell temporary files
 *.tmp
@@ -39,3 +42,11 @@ secrets/
 *.backup
 *~
 NeologikCheckpoint.json
+
+# JSON summaries written by Update-NeologikEnvironmentAccess.ps1 (never commit run output)
+Neologik_EnvironmentAccess_*.json
+# Agent and mailbox grants exports fed to Update-NeologikEnvironmentAccess.ps1
+agent-grants-*.json
+mailbox-grants-*.json
+# Pester -CI output
+testResults.xml

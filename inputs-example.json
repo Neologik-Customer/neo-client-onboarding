@@ -1,5 +1,5 @@
 {
-  "_readme": "Predefined inputs for Install-NeologikEnvironment.ps1. Copy this file to 'inputs.json' (auto-detected next to the script) or pass its path with -AnswerFile. Every value here pre-fills the matching prompt: press Enter to accept, or type to override. This file contains ONLY configuration inputs that end up in the exported config; runtime decisions (Terms acceptance, PowerShell/module install, re-auth, quota/permission warnings) are always asked interactively and are never read from here. Replace every REPLACE_ME / example value below before use. Remove any field to fall back to its built-in default (for default fields) or to be prompted with no pre-fill (for per-client fields).",
+  "_readme": "Predefined inputs for Install-NeologikEnvironment.ps1. Copy this file to 'inputs.json' (auto-detected next to the script) or pass its path with -AnswerFile. Every value here pre-fills the matching prompt: press Enter to accept, or type to override. This file holds configuration inputs plus the provisioning decisions (skipGuestInvitation, addExistingAccountsToGroups with existingAccountEmails, useExistingServicePrincipal with its object ID/secret); the CLI switches -SkipGuestInvitation / -ExistingServicePrincipalObjectId take precedence when passed. Runtime decisions (Terms acceptance, PowerShell/module install, re-auth, quota/permission warnings) are always asked interactively and are never read from here. Replace every REPLACE_ME / example value below before use. Remove any field to fall back to its built-in default (for default fields) or to be prompted with no pre-fill (for per-client fields). CI/unattended: with -NonInteractive this file must be fully populated (organizationCode, organizationName, fqdn); Terms are acknowledged with -AcceptTerms, and the caller pre-establishes the Az/Graph contexts - see the CI example in the script help.",
 
   "organizationCode": "REPLACE_ME — client 3-letter code, lowercase, e.g. abc",
   "organizationName": "REPLACE_ME — full company name, e.g. Contoso Ltd",
@@ -8,9 +8,29 @@
   "environmentType": "dev",
   "azureRegion": "uksouth",
   "environmentIndex": "01",
+  "budgetCostReportEmailRecipients": ["support_budget_alerts@neologik.ai"],
 
-  "botCount": 1,
-  "bots": [
-    { "agentName": "REPLACE_ME — full agent name, e.g. Neologik", "shortName": "REPLACE_ME — lowercase, max 4 chars, e.g. bot" }
-  ]
+  "_resourceTags_note": "applyResourceTags true (the default) tags every script-created Azure resource (resource group, Key Vault, deployment storage account, both managed identities) at creation with Vendor, ApplicationName, ManagedBy, Environment, Solution and DeploymentDate - required by tenants whose Azure Policies deny creation of untagged resources. resourceTagsCustom holds optional extra tags as an object (or a 'Key=Value,Key2=Value2' string); keys use letters/digits/._- only, values must not contain ',' or '='; custom tags override the defaults on key collision. Ignored when applyResourceTags is false.",
+  "applyResourceTags": true,
+  "resourceTagsCustom": {},
+
+  "_naming_note": "Optional resource-name overrides for client-specific naming conventions (see neo-env-config naming/templates). Remove any of these to accept the computed Neologik-standard name: solution neo-{org}{env}-{region}-{index} (e.g. neo-abcprd-uks-01; internal neo-neodev-cus-01), short name {org}{env}{index} (e.g. abcprd01; internal neodev01). solutionShortName also drives the security-group, app-registration, and managed-identity name suffixes. keyVaultName: 3-24 chars, letters/digits/hyphens, starts with a letter. storageAccountName: 3-24 chars, lowercase letters/digits only. scriptRunnerIdentityName/sqlIdentityName: 3-128 chars, letters/digits/hyphens/underscores, starts with a letter or digit.",
+  "solutionName": "",
+  "solutionShortName": "",
+  "resourceGroupName": "",
+  "keyVaultName": "",
+  "storageAccountName": "",
+  "scriptRunnerIdentityName": "",
+  "sqlIdentityName": "",
+
+  "skipGuestInvitation": false,
+  "_existingAccounts_note": "Only used when skipGuestInvitation is true: addExistingAccountsToGroups true adds pre-created accounts (B2B guests or members) to the security groups without sending any invitation. existingAccountEmails lists the addresses (array or comma-separated string); when omitted the NeologikGuestUsers.txt entries are used (interactive runs can also type the addresses at the prompt). Each address must exactly match the account's mail or user principal name; a non-existent account is reported and skipped - the run continues. Accounts added this way join ALL Neologik groups, including the Admin User Group (Azure admin access).",
+  "addExistingAccountsToGroups": false,
+  "existingAccountEmails": [],
+  "useExistingServicePrincipal": false,
+  "existingServicePrincipalObjectId": "",
+  "_existingServicePrincipalSecret_note": "Prefer the -ExistingServicePrincipalSecret CLI parameter (masked, not written to disk) over storing a client secret in this file. If set here, it is used; leave blank to be prompted (or to skip and add it to Key Vault manually).",
+  "existingServicePrincipalSecret": "",
+
+  "_v5_note": "Agents (bots) are no longer created at onboarding - they are created post-deployment in the Neologik Harness admin tool. botCount/bots keys from older kits are ignored."
 }

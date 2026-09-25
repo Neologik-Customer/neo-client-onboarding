@@ -83,7 +83,7 @@ Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) ten
 #### A. Grant Access to Bot Application
 
 1. **Open the Bot consent URL** provided by Neologik in your browser
-   - Format: `https://login.microsoftonline.com/common/adminconsent?client_id={bot-id}&redirect_uri=https://{hostName}/nce`
+   - Format: `https://login.microsoftonline.com/common/adminconsent?client_id={bot-id}&redirect_uri=https://{hostName}/nce/consent-complete`
    - `{hostName}` = Your full qualified hostname
    - `{bot-id}` = Bot application ID provided by Neologik
 
@@ -96,12 +96,14 @@ Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) ten
 
 4. **Click "Accept"** to grant tenant-wide consent
 
-5. **Confirmation:** You should see a success message
+5. **Confirmation:** the browser lands on the consent confirmation page
+   (`https://{hostName}/nce/consent-complete`), which reports success or the
+   Microsoft error message
 
 #### B. Grant Access to NCE Admin Tool Application
 
 1. **Open the Admin Tool consent URL** provided by Neologik in your browser
-   - Format: `https://login.microsoftonline.com/common/adminconsent?client_id={nce-admin-id}&redirect_uri=https://{hostName}/nce`
+   - Format: `https://login.microsoftonline.com/common/adminconsent?client_id={nce-admin-id}&redirect_uri=https://{hostName}/nce/consent-complete`
    - `{hostName}` = Your full qualified hostname (same as above)
    - `{nce-admin-id}` = NCE Admin Tool application ID provided by Neologik
 
@@ -114,7 +116,9 @@ Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) ten
 
 4. **Click "Accept"** to grant tenant-wide consent
 
-5. **Confirmation:** You should see a success message
+5. **Confirmation:** the browser lands on the consent confirmation page
+   (`https://{hostName}/nce/consent-complete`), which reports success or the
+   Microsoft error message
 
 ### Verify Consent
 
@@ -213,13 +217,12 @@ After deployment, inform your users:
 
 ## Step 4: Grant Users Access to the Bot
 
-Bot access is controlled by security groups in your Entra ID. Each bot has its own dedicated group — **only users who are members of the group can use that bot.** Users who are not in the group will be denied access even if they can see the app in Teams.
+Bot access is controlled by security groups in your Entra ID. Each bot (agent) is attached to an access group — **only users who are members of that group can use it.** Users who are not in the group will be denied access even if they can see the app in Teams.
 
-These groups are created automatically during deployment. **Your Entra ID administrator is responsible for managing membership on an ongoing basis.**
+By default every agent uses the group created during onboarding, named `Neologik User Group - <short name>` (e.g., `Neologik User Group - neokad01`). If you want a different or per-agent group, tell Neologik which existing Entra group to attach — the platform never creates groups itself. **Your Entra ID administrator is responsible for managing membership on an ongoing basis.**
 
 ### What You Need
-- **Group names** provided by Neologik — one per bot, named in the format:
-  `Neologik User Group <bot name> - <environment>` (e.g., `Neologik User Group Contract Agent - kadprd`)
+- **Group name(s)** confirmed with Neologik — the default `Neologik User Group - <short name>`, or the group(s) you chose per agent
 - **Global Administrator** or **Groups Administrator** role in Entra ID
 
 ### Instructions
@@ -228,7 +231,7 @@ These groups are created automatically during deployment. **Your Entra ID admini
 
 1. Go to **Azure Portal** (portal.azure.com)
 2. Navigate to **Microsoft Entra ID** > **Groups**
-3. Search for `Neologik User Group` — you will see one group per bot
+3. Search for `Neologik User Group` — you will see the default access group (and any other groups you chose per agent)
 4. Click the group for the bot you want to manage
 
 #### B. Add Users to the Group
@@ -270,7 +273,7 @@ Before considering the deployment complete, verify:
 - [ ] Both applications appear in Enterprise applications with "Admin consent granted"
 - [ ] Teams app is uploaded to Teams Admin Center
 - [ ] Teams app is available to the Neologik User Group
-- [ ] At least one test user has been added to each bot's access group in Entra ID
+- [ ] At least one test user has been added to each agent's access group in Entra ID
 - [ ] Test user can find and open the app in Microsoft Teams
 - [ ] Test user can send a message and receive a response (confirms group access is working)
 - [ ] Application loads correctly when accessed via the FQDN (https://app.yourcompany.com)
@@ -295,7 +298,7 @@ Before considering the deployment complete, verify:
 
 ### Bot Access Issues
 **Problem:** User sees "You do not have permission to use this bot" or "Unauthorized"
-- **Solution:** The user is not a member of the bot's access group in Entra ID. Go to **Microsoft Entra ID** > **Groups** > find the `Neologik User Group <bot name>` group > **Members** > **Add members**. Access is granted immediately.
+- **Solution:** The user is not a member of the bot's access group in Entra ID. Go to **Microsoft Entra ID** > **Groups** > find the agent's access group (default `Neologik User Group - <short name>`) > **Members** > **Add members**. Access is granted immediately.
 
 **Problem:** User was just added to the group but still sees "Unauthorized"
 - **Solution:** Ask the user to close and reopen the bot in Teams. Group changes can take a few minutes to propagate.
@@ -306,6 +309,101 @@ Before considering the deployment complete, verify:
 
 **Problem:** App won't load or shows error
 - **Solution:** Verify app was uploaded correctly, check for any blocking policies, try removing and re-adding the app
+
+---
+
+## Later changes and migration windows
+
+After onboarding, the one script a Global Administrator ever runs again is
+`Update-NeologikEnvironmentAccess.ps1` (in this repository). It verifies
+before it writes, changes nothing on a compliant environment and is safe
+to re-run; with `-Verify` it only reports what it would change (as
+`WOULD ...` items in its summary) and writes nothing, exiting 1 when
+anything would change. Neologik supplies the files it reads, and the files
+you give it select the run:
+
+- **Pre-window run** - the command line Neologik sends you, with no grants
+  file. What the script checks and changes, and why, is explained step by
+  step in [ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md](ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md). Neologik fills in every value, so you type nothing but your
+  sign-in, and the configuration file from your original onboarding is not
+  needed. Download the latest `Update-NeologikEnvironmentAccess.ps1` from
+  this repository, run the command exactly as sent, and return the summary
+  JSON it writes. Every customer has this one run, any time before the
+  migration window. It verifies or applies everything only a Global
+  Administrator can change: the agent identity blueprint and its principal
+  role, the deployment identity's two retained Microsoft Graph roles (its
+  retired tenant-wide roles are removed once those are in place), the NCE
+  user group assignment on the sign-in application, the sign-in
+  application's tenant-wide admin consent, the SharePoint `Sites.Selected`
+  consent where SharePoint ingestion is in use, ownership of your Neologik
+  application registrations by the deployment identity (exactly the ones
+  named on the command line; any other registration whose name starts
+  with "Neologik" is only reported, never changed), and then the
+  permission reduction: the deployment identity receives the narrow
+  resource-group role set and the two retained subscription roles (Reader,
+  Cost Management Contributor) BEFORE its broad subscription roles
+  (Contributor, User Access Administrator) and its Application
+  Administrator directory role are removed. If any narrow role could not
+  be applied, nothing is removed. The account you sign in with needs
+  Global Administrator in Entra ID and Owner (or User Access
+  Administrator) on the subscription.
+
+  The values Neologik fills in:
+
+  | Parameter | What it is |
+  |---|---|
+  | `-TenantId` | your Entra ID tenant |
+  | `-SubscriptionId`, `-ResourceGroupName` | the subscription and resource group Neologik deploys into |
+  | `-DeploySpClientId` | the deployment identity (the "Neologik GitHub Service Connection" application) |
+  | `-SolutionName`, `-SolutionShortName` | the names Neologik's deployment uses for your environment |
+  | `-SignInAppClientId` | the "Neologik Platform Sign-in" application that controls who can open the Neologik Context Engine |
+  | `-SharePointAppClientId` | the "Neologik SharePoint Access" application, only where you ingest from SharePoint |
+  | `-BotAppClientIds` | the application registration of each Neologik bot in your tenant |
+  | `-NceUserGroupId`, `-AdminGroupId` | your Neologik NCE User Group and Admin User Group |
+- **Post-window run** - the same script with `-AgentGrantsFile <json>`
+  and/or `-MailboxGrantsFile <json>`, files Neologik exports from the
+  platform. Needed only once an agent or App works unattended on your
+  organisation's behalf in Microsoft 365 - an autonomy-adoption event, not
+  a migration step; a customer with no unattended work never has this
+  run. It applies exactly what the files list and nothing else: the
+  agent-user delegated grants for the agents and Apps with enabled
+  permission packs, and/or the Exchange Online mailbox grants for email
+  channels. `-RemoveLegacyGrantAppIds` (with `-MailboxGrantsFile`) removes
+  a retired identity's mailbox assignments; an identity the file lists as
+  adopted by the v5 email channel keeps its assignment.
+
+Every run prints any consent URL you still need to open, writes a JSON
+summary beside itself (or in the current folder when that location is
+read-only) for Neologik's ticket, never stops on the first problem, lists
+anything that needs you in the summary with the reason, and exits 0 only
+when everything is in the expected state. Full parameter help:
+`Get-Help ./Update-NeologikEnvironmentAccess.ps1 -Detailed`.
+
+### What the sign-in asks you to approve
+
+The script signs in to Microsoft Graph under your own account (device
+code). On first use Microsoft shows a consent screen listing the
+delegated permissions the script requests. All of them are delegated:
+they let the script act as you for this session only and grant nothing
+to any application.
+
+| Permission | Why the script needs it |
+|---|---|
+| `Application.ReadWrite.All` | Read and adopt the agent identity blueprint and its principal; add the pipeline's federated credentials |
+| `AppRoleAssignment.ReadWrite.All` | Grant and remove the deployment identity's Microsoft Graph application roles; assign the NCE user group to the sign-in application |
+| `Directory.Read.All` | Read the service principals, groups and directory roles the checks compare against (read-only) |
+| `User.Read` | Resolve your own account as the sponsor when the agent identity blueprint has to be created (read-only) |
+| `DelegatedPermissionGrant.Read.All` | Read the sign-in application's tenant-wide admin consent |
+| `AgentIdentityBlueprint.Create`, `AgentIdentityBlueprint.AddRemoveCreds.All`, `AgentIdentityBlueprintPrincipal.Create` | Create the agent identity blueprint, its principal and its credentials when they do not exist yet |
+| `RoleManagement.ReadWrite.Directory` (pre-window run only) | Remove the deployment identity's Application Administrator directory role membership |
+| `DelegatedPermissionGrant.ReadWrite.All` (post-window run with `-AgentGrantsFile` only) | Create the agent-user delegated grants the file lists |
+
+`Directory.Read.All` and `User.Read` are read-only: the script can change
+nothing with them, and without them the group, consent and directory-role
+checks fail on a tenant where no earlier consent exists. The Azure sign-in
+(pre-window run) and the Exchange Online sign-in (post-window run with
+`-MailboxGrantsFile`) use the same account. A `-Verify` run signs in the
+same way and shows the same screen.
 
 ---
 

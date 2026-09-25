@@ -61,31 +61,21 @@ Before running the script, prepare the following information. You will be prompt
   - Default: "uksouth"
   - Will be automatically converted to lowercase
 
-### 6. Bot Configuration
+### 6. Provisioning Decisions
 
-- [ ] **Bot Count**
-  - How many bots will be deployed? (1-10)
-  - Default: 1
-  - Used to create separate user groups for each bot
+Note: you will **not** be asked about bots or agents - agents and their channels are created after deployment in the Neologik admin tool.
 
-For **each bot**, prepare:
+- [ ] **Resource naming** (optional)
+  - The script computes Neologik-standard names for everything it creates (resource group, Key Vault, storage account, managed identities) and shows each as a default you can accept with Enter
+  - If your organisation mandates its own Azure naming convention, prepare the names in advance (they can also be pre-filled via `inputs.json`) and share the convention with Neologik
 
-- [ ] **Agent Name** (descriptive name)
-  - Example: "bot", "RAMS Agent", "support"
-  - Lowercase only
-  - Maximum 7 characters
-  - Letters and dashes only
-  - Used in security group names
+- [ ] **Neologik guest invitations** (yes/no)
+  - Default: yes - the Neologik team members listed in `NeologikGuestUsers.txt` are invited as B2B guests; the list is shown on screen and you can add further addresses at the prompt (typed one per line)
+  - Choose no if you provision accounts for the Neologik team in your own tenant instead
+  - If you choose no, a follow-up question offers to add your pre-created accounts (guests or full members) to the security groups with no invitation sent - prepare their exact email addresses (each must match the account's mail or user principal name); addresses can come from the file or be typed in
 
-- [ ] **Short Name** (short identifier)
-  - Example: "bot", "sup", "rams"
-  - Lowercase only
-  - Maximum 7 characters
-  - Letters and dashes only
-  - Used internally for identification
-
-- [ ] **Authentication type** (select "anonymous" or "Teams")
-  - Select "anonymous" to use in public web chats that do not require login
-  - Select "Teams" to use as an app that is integrated into your Teams workspace
+- [ ] **Deployment service principal** (create vs. bring your own)
+  - Default: the script creates the deployment service principal for you
+  - If you prefer to create it yourself, follow [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md) and have ready: its **object ID** (the enterprise-application / service-principal object ID, not the client/app ID) and, optionally, its client secret (or add the secret to Key Vault yourself before the first deployment)
 
 ---
