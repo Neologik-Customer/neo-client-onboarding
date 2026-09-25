@@ -9,6 +9,15 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Version 5.0.1
+**Built**: September 25, 2026  
+**Git Tag**: v5.0.1
+
+### Neologik guest users: Adam Smith replaces David Katende (project#2934)
+**Date**: 2026-09-25
+
+- `NeologikGuestUsers.txt`: `Adam.Smith@neologik.ai` added and `david.katende@neologik.ai` removed. The next customer onboarding run invites Adam Smith as a B2B guest and seeds him into the security groups alongside the other Neologik guests; David Katende is no longer invited. https://github.com/Neologik-AI/project/issues/2934
+
 ## Version 5.0.0
 **Built**: September 25, 2026  
 **Git Tag**: v5.0.0
