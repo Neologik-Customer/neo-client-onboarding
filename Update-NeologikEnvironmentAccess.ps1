@@ -513,6 +513,10 @@ $script:GraphModules = @(
 $script:Summary = @()
 # Shared run state (inputs, resolved principals); populated by the main entry.
 $script:State = @{}
+# The kit version: the git tag of this kit release. Recorded on the resource group as the
+# tag NeologikOnboardingKit once the permission reduction is complete (project#2922);
+# bumped with every kit release, and checked against VERSION_HISTORY.md by the tests.
+$script:KitVersion = 'v5.0.2'
 
 # ----- console + summary helpers ---------------------------------------------
 
@@ -3166,6 +3170,41 @@ function Remove-NeologikUndeclaredGroupMembership {
     }
 }
 
+function Set-NeologikKitVersionTag {
+    # 4h. The kit version this environment is kept with (project#2922,
+    # decision 13): the tag NeologikOnboardingKit on the resource group. The
+    # platform's full-environment deployment reads it before an upgrade and
+    # refuses an environment whose kit is older than the release names, so
+    # it is written last, once every step above is in place. Merged with
+    # the existing tags; written only when it differs.
+    param([Parameter(Mandatory)][string]$ResourceId)
+    $label = 'Kit version tag'
+    try {
+        $rg = Get-AzResourceGroup -Name $script:State.ResourceGroupName -ErrorAction Stop
+        $tags = Get-NeologikProperty $rg 'Tags' @{}
+        if ($null -eq $tags) { $tags = @{} }
+        $current = [string](Get-NeologikProperty $tags 'NeologikOnboardingKit' '')
+        if ($current -eq $script:KitVersion) {
+            Write-Log "  $label - $current (in place)" -Level Success
+            Add-Summary $label "In place ($current)"
+            return
+        }
+        if (Test-NeologikVerifyOnly) {
+            Add-NeologikPendingChange $label "SET $($script:KitVersion) (currently '$current')"
+            return
+        }
+        Invoke-NeologikWrite -Command 'Update-AzTag' -Parameters @{ ResourceId = $ResourceId; Tag = @{ NeologikOnboardingKit = $script:KitVersion }; Operation = 'Merge' } | Out-Null
+        $was = if ($current) { " (was $current)" } else { '' }
+        Write-Log "  $label - SET $($script:KitVersion)$was" -Level Success
+        Add-Summary $label "Set ($($script:KitVersion))"
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        Write-Log "  $label - FAILED ($reason)" -Level Error
+        Add-Summary $label "FAILED - $reason"
+    }
+}
+
 function Invoke-NeologikPermissionReduction {
     <#
     Step 4 of the pre-window run: the deployment identity moves to the
@@ -3239,6 +3278,9 @@ function Invoke-NeologikPermissionReduction {
     Remove-NeologikUndeclaredAzureRole
     Remove-NeologikUndeclaredDirectoryRole
     Remove-NeologikUndeclaredGroupMembership
+
+    # 4h. the kit version, once everything above is in place (project#2922).
+    Set-NeologikKitVersionTag -ResourceId $rgScope
 }
 
 # ----- the two runs ---------------------------------------------------------------

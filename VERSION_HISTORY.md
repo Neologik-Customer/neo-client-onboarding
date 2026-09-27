@@ -9,6 +9,16 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Version 5.0.2
+**Built**: September 27, 2026
+**Git Tag**: v5.0.2
+
+### The kit version recorded on the resource group (project#2922)
+**Date**: 2026-09-27
+
+- `Install-NeologikEnvironment.ps1` (step 7, the resource group) and `Update-NeologikEnvironmentAccess.ps1` (a new last step of the permission reduction) record the kit's version on the resource group as the tag `NeologikOnboardingKit` (`Update-AzTag -Operation Merge`: the customer's tags are kept). The Neologik platform's full-environment deployment reads the tag before an upgrade and refuses an environment onboarded with a kit older than the release names, naming the update script. Both scripts carry `$script:KitVersion`, the kit's git tag, checked against this file by the tests. https://github.com/Neologik-AI/project/issues/2922
+- `TECHNICAL-REFERENCE.md` and `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` describe the tag. Ported to the delegated provisioning mode edition (installer only).
+
 ## Version 5.0.1
 **Built**: September 25, 2026  
 **Git Tag**: v5.0.1

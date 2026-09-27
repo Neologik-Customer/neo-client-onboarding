@@ -291,7 +291,7 @@ Users are only invited if no account with that email already exists in the tenan
 ### 4. Resource Creation
 
 Creates or validates:
-- **Resource Group**: pre-created here so the deployment pipeline never needs subscription-level write access
+- **Resource Group**: pre-created here so the deployment pipeline never needs subscription-level write access; tagged `NeologikOnboardingKit=<kit version>` (an existing group receives the tag too). The Neologik platform reads that tag before an upgrade and refuses an environment whose kit is older than the release needs; `Update-NeologikEnvironmentAccess.ps1` refreshes it
 - **Security Groups** (each seeded with the signed-in user plus any invited/pre-existing Neologik users):
   - `Neologik User Group - <short-name>` - default users group; agent channels created in the NCE reuse this group, or an administrator supplies another existing group at channel attach. The platform never creates groups itself
   - `Neologik NCE Contributors - <short-name>` and `Neologik NCE Admins - <short-name>` - NCE role groups, assigned to the Platform Sign-in application

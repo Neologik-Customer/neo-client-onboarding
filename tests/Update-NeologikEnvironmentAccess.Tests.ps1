@@ -43,6 +43,8 @@ BeforeAll {
     function Get-AzSqlServerActiveDirectoryAdministrator { [CmdletBinding()] param($ResourceGroupName, $ServerName) }
     function Connect-AzAccount { [CmdletBinding()] param($Tenant, $Subscription, $UseDeviceAuthentication, $ClaimsChallenge, $AccessToken, $AccountId) }
     function Get-AzContext { [CmdletBinding()] param() }
+    function Get-AzResourceGroup { [CmdletBinding()] param($Name) }
+    function Update-AzTag { [CmdletBinding()] param($ResourceId, $Tag, $Operation) }
     function Get-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $Scope) }
     function New-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $Scope) }
     function Remove-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $Scope) }
@@ -161,6 +163,8 @@ BeforeAll {
             PrincipalCreateDelays = 0
             GrantRefusals         = @()
             SqlServers            = @()
+            # project#2922: the resource group's tags (the kit version tag lives here).
+            ResourceGroupTags     = @{}
             # The signed-in administrator (project#2306 rights preflight): a
             # Global Administrator who owns the subscription.
             MeDirectoryRoles      = @(@{ id = 'role-ga'; displayName = 'Global Administrator'; roleTemplateId = '62e90394-69f5-4237-9190-012177145e10' })
@@ -247,6 +251,8 @@ BeforeAll {
             $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = $roleName; Scope = $script:SubScope }
         }
         $t.DirectoryRoles += @{ Id = $script:Ids.AppAdminRole; RoleTemplateId = $script:AppAdminRoleTemplateId; members = @() }
+        # project#2922: an environment kept with this kit carries its version tag.
+        $t.ResourceGroupTags = @{ NeologikOnboardingKit = $script:KitVersion }
     }
 
     function Add-LegacyAzureState {
@@ -751,6 +757,15 @@ BeforeAll {
     }
     Mock Connect-AzAccount { $script:AzConnected = $true }
     Mock Get-AzContext { [pscustomobject]@{ Subscription = [pscustomobject]@{ Id = $script:AzContextSubscription } } }
+    Mock Get-AzResourceGroup {
+        param($Name)
+        [pscustomobject]@{ ResourceGroupName = $Name; ResourceId = $script:RgScope; Tags = $script:Tenant.ResourceGroupTags }
+    }
+    Mock Update-AzTag {
+        param($ResourceId, $Tag, $Operation)
+        foreach ($key in @($Tag.Keys)) { $script:Tenant.ResourceGroupTags[$key] = $Tag[$key] }
+        Add-Write "SET tag $(@($Tag.Keys) -join ',') $ResourceId"
+    }
     Mock Get-AzRoleAssignment {
         param($ObjectId, $RoleDefinitionName, $Scope)
         # Azure returns the assignment at the scope and every inherited one above it.
@@ -1440,6 +1455,38 @@ Context 'Blueprint short name (project#2329)' {
 }
 
 Context 'Pre-window run on a compliant environment' {
+    It 'records the kit version on the resource group once the reduction is complete, and leaves it when in place (project#2922)' {
+        Add-CompliantPreWindowState
+        $script:Tenant.ResourceGroupTags = @{ Vendor = 'Neologik' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Kit version tag' | Should -Be "Set ($script:KitVersion)"
+        @($script:Writes | Where-Object { $_ -like 'SET tag NeologikOnboardingKit*' }) | Should -HaveCount 1
+        $script:Tenant.ResourceGroupTags['NeologikOnboardingKit'] | Should -Be $script:KitVersion
+        $script:Tenant.ResourceGroupTags['Vendor'] | Should -Be 'Neologik' -Because 'the tag is merged, never replacing the others'
+        $script:Writes = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Kit version tag' | Should -Be "In place ($script:KitVersion)"
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'reports an older kit version tag as a pending change in verify-only (project#2922)' {
+        Add-CompliantPreWindowState
+        $script:Tenant.ResourceGroupTags = @{ NeologikOnboardingKit = 'v5.0.1' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 1 -Because 'a pending change needs attention'
+        Get-SummaryResult 'Kit version tag' | Should -Match '^WOULD SET'
+        $script:Writes | Should -HaveCount 0
+        $script:Tenant.ResourceGroupTags['NeologikOnboardingKit'] | Should -Be 'v5.0.1'
+    }
+
+    It 'declares the kit version the version history opens with (project#2922)' {
+        $history = Get-Content -Raw (Join-Path (Split-Path -Parent $script:ScriptPath) 'VERSION_HISTORY.md')
+        $top = [regex]::Match($history, '(?m)^## Version (\d+\.\d+\.\d+)').Groups[1].Value
+        $script:KitVersion | Should -Be "v$top"
+    }
+
     It 'is a pure verification pass: exit 0, no writes, every item in place' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
