@@ -51,7 +51,7 @@ The script is safe to run more than once. A second run finds everything in order
 
 ## What the script checks and changes
 
-The script works through six steps. Each step reads the current state first, changes only what differs from the expected state, and records the result.
+The script works through seven steps. Each step reads the current state first, changes only what differs from the expected state, and records the result.
 
 | Step | What it does | What it changes |
 |---|---|---|
@@ -60,7 +60,8 @@ The script works through six steps. Each step reads the current state first, cha
 | 3. Sign-in application | Confirms your Neologik user group is assigned to the "Neologik Platform Sign-in" application, so that only members of that group can open the Neologik Context Engine, and that the application has tenant-wide admin consent. Where you ingest documents from SharePoint, confirms the SharePoint application's `Sites.Selected` consent | Adds the group assignment if missing; prints a consent link for you to open if consent is missing |
 | 4. Application registration ownership | Makes the deployment identity an owner of exactly the application registrations Neologik named on the command line: the sign-in application, the SharePoint application, and each Neologik bot. The deployment identity can then manage those registrations, and only those, under its narrow permission. Any other application in your directory whose name starts with "Neologik" is listed in the summary for your review and is not changed | Adds the owner if missing; sets the registration's uniqueName so the deployment pipeline can find it; lists any password credential the pipeline did not create |
 | 5. Permission reduction | First confirms the deployment identity holds the narrow role set it needs: seven roles on your Neologik resource group only, plus Reader and Cost Management Contributor on the subscription. Only then removes the broad grants: Contributor and User Access Administrator on the subscription, the Application Administrator directory role, and membership of the Neologik Admin User Group. Removes any other role, directory role or group membership the identity holds outside that declared set | If any narrow role could not be applied, nothing is removed. Deployments never lose access part way through |
-| 6. Summary | Prints a table of every item and its result, and writes the same table to a file beside the script | Nothing |
+| 6. Kit version | Once every step above is in place, records the version of this kit on your Neologik resource group as the tag `NeologikOnboardingKit`. The Neologik platform reads it before an upgrade and refuses an environment whose kit is older than the release needs, naming this script | Sets the tag when it is missing or older, merged with your other tags; nothing else |
+| 7. Summary | Prints a table of every item and its result, and writes the same table to a file beside the script | Nothing |
 
 The seven resource-group roles are Contributor, Key Vault Certificates Officer, Key Vault Secrets Officer, Storage Blob Data Contributor, Azure Kubernetes Service RBAC Cluster Admin, Monitoring Contributor, and Role Based Access Control Administrator. Each is scoped to your Neologik resource group and to nothing else in the subscription.
 

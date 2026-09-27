@@ -205,6 +205,11 @@ $WarningPreference = 'Continue'
 # Script version
 $script:Version = 'v5.0.0'
 
+# The kit version: the git tag of this kit release (both editions carry the same tag).
+# Recorded on the resource group as the tag NeologikOnboardingKit (project#2922); bumped
+# with every kit release, and checked against VERSION_HISTORY.md by the static test.
+$script:KitVersion = 'v5.0.2'
+
 # Initialize with timestamp - will be updated after org code and environment type are collected
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $script:LogFile = Join-Path $PSScriptRoot "NeologikOnboarding_$($script:FileTimestamp).log"
@@ -602,6 +607,27 @@ function Get-NeologikResourceTags {
 
     $script:ResourceTagsCache = $tags
     return $tags
+}
+
+function Set-NeologikKitVersionTag {
+    <#
+    .SYNOPSIS
+        Records the kit version on the resource group as the tag NeologikOnboardingKit
+        (project#2922, decision 13). Merged with the existing tags, never removing one;
+        written whether or not resource tagging is enabled, because it is the platform's
+        record, not a customer tag. The platform's full-environment deployment reads it
+        before an upgrade and refuses an environment onboarded with a kit older than the
+        release names.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceId
+    )
+
+    Write-Log "Recording the kit version $($script:KitVersion) on the resource group (tag NeologikOnboardingKit)..." -Level Info
+    Update-AzTag -ResourceId $ResourceId -Tag @{ NeologikOnboardingKit = $script:KitVersion } -Operation Merge -ErrorAction Stop | Out-Null
+    Write-Log "Kit version recorded" -Level Success
 }
 
 #endregion
@@ -1320,6 +1346,10 @@ function New-NeologikResourceGroup {
             $script:ConfigData['ResourceGroupName'] = $rg.ResourceGroupName
             $script:ConfigData['AzureRegion'] = $rg.Location
         }
+
+        # Created or already there, the resource group records the kit version it was
+        # onboarded (or re-onboarded) with.
+        Set-NeologikKitVersionTag -ResourceId $rg.ResourceId
 
         return $rg
     }
