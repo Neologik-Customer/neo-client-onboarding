@@ -45,4 +45,14 @@ It 'creates the Platform Sign-in registration' {
     $script:Called | Should -Contain 'New-NeologikNceAuthApp'
 }
 
+It 'records the kit version on the resource group, at the version the version history opens with (project#2922)' {
+    $script:Defined | Should -Contain 'Set-NeologikKitVersionTag'
+    $script:Called | Should -Contain 'Set-NeologikKitVersionTag'
+    $text = Get-Content -Raw $script:ScriptPath
+    $text | Should -Match ([regex]::Escape('Update-AzTag -ResourceId $ResourceId -Tag @{ NeologikOnboardingKit = $script:KitVersion } -Operation Merge'))
+    $history = Get-Content -Raw (Join-Path (Split-Path -Parent $PSScriptRoot) 'VERSION_HISTORY.md')
+    $top = [regex]::Match($history, '(?m)^## Version (\d+\.\d+\.\d+)').Groups[1].Value
+    $text | Should -Match ([regex]::Escape("`$script:KitVersion = 'v$top'"))
+}
+
 }
