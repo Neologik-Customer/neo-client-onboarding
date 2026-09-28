@@ -1,32 +1,34 @@
 <#
 .SYNOPSIS
-    Registers every Azure resource provider and preview feature the Neologik platform requires on
-    a subscription, from the single list in resource-providers.txt.
+    Registers, on one Azure subscription, the Azure resource providers and preview
+    features the Neologik Platform requires, from the list in resource-providers.txt.
 
 .DESCRIPTION
-    Provider and feature registration is a subscription-scoped operation. Install-Neologik-
-    Environment.ps1 registers the full list during onboarding; this script re-checks and repairs
-    the same list afterwards - for example when the onboarding run reported registrations still
-    pending, or before the platform deployment on a subscription onboarded earlier. Run it as a
-    user with Contributor (or Owner) on the subscription. The deployment identity never registers
-    providers, so a provider missing here surfaces as a deployment failure.
+    Registration is an operation on the subscription. Install-NeologikEnvironment.ps1
+    submits the whole list during onboarding. This script confirms the same list
+    afterwards, and completes any registration that is outstanding, for example when the
+    onboarding run reported registrations still in progress.
 
-    Every registration is submitted first (each request returns in about a second), then the whole
-    list is polled together until every entry reports Registered or the timeout expires.
-    Idempotent: entries already registered are skipped. Safe to re-run. Exits 1 if any entry is
-    still not Registered at the end.
+    Run it with an account that holds Contributor or Owner on the subscription. The
+    deployment identity cannot register a provider, so a provider that is not registered
+    causes the platform deployment to fail.
+
+    Every registration is submitted first, then the whole list is checked together
+    until every entry is registered or the time allowed has passed. An entry that is
+    registered already is left alone, so the script can be run as often as needed. It
+    exits with code 1 if an entry is still not registered at the end.
 
 .PARAMETER SubscriptionId
-    Target subscription. Defaults to the current Azure context's subscription.
+    The subscription on which to register. Default: the subscription of the Azure session.
 
 .PARAMETER TenantId
-    Optional tenant to authenticate against if no Azure context exists.
+    The tenant to sign in to. Used only when no Azure session exists.
 
 .PARAMETER TimeoutSeconds
-    How long to wait for the registrations to complete after submitting them. Default 900.
+    How long to wait for the registrations to complete. Default: 900.
 
 .PARAMETER ListOnly
-    Print the parsed provider and feature list and exit without touching Azure.
+    Shows the list and stops. No sign-in takes place and Azure is not contacted.
 
 .EXAMPLE
     ./Register-NeologikResourceProviders.ps1 -SubscriptionId 00000000-0000-0000-0000-000000000000
@@ -35,8 +37,8 @@
     ./Register-NeologikResourceProviders.ps1 -ListOnly
 
 .NOTES
-    Requires PowerShell 7.4+ and the Az.Accounts + Az.Resources modules. The list lives in
-    resource-providers.txt next to this script; to add a provider, add one line there.
+    Requires PowerShell 7.4 or later and the modules Az.Accounts and Az.Resources.
+    The list is the file resource-providers.txt, beside this script.
 #>
 [CmdletBinding()]
 param(
@@ -59,7 +61,7 @@ $ErrorActionPreference = 'Stop'
 function Get-PlatformResourceProviderList {
     $path = Join-Path $PSScriptRoot 'resource-providers.txt'
     if (-not (Test-Path $path)) {
-        throw "Resource provider list not found: $path. The file ships with the onboarding kit; restore it before running."
+        throw "Resource provider list not found: $path. The file is part of the onboarding kit; restore it before running the script."
     }
 
     $providers = [System.Collections.Generic.List[string]]::new()
@@ -103,15 +105,15 @@ if ($ListOnly) {
     exit 0
 }
 
-# --- Connect / select subscription ---------------------------------------------------------------
+# --- Sign in and select the subscription ---------------------------------------------------------
 $context = Get-AzContext -ErrorAction SilentlyContinue
 if (-not $context) {
     Write-Host "No Azure context found - signing in..." -ForegroundColor Yellow
     $connectParams = @{}
     if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    # Azure mandatory MFA (ARM-layer): request the 'p1' authentication-context claim so
-    # provider registration (an ARM write) is not rejected with a claims-challenge error.
-    # Decodes to {"access_token":{"acrs":{"essential":true,"values":["p1"]}}}; needs Az.Accounts >= 5.2.0.
+    # Azure requires multi-factor authentication for every write. The sign-in requests the
+    # 'p1' authentication-context claim, so that a registration is not refused.
+    # The value decodes to {"access_token":{"acrs":{"essential":true,"values":["p1"]}}}. Requires Az.Accounts 5.2.0 or later.
     if ((Get-Command Connect-AzAccount).Parameters.ContainsKey('ClaimsChallenge')) {
         $connectParams['ClaimsChallenge'] = 'eyJhY2Nlc3NfdG9rZW4iOnsiYWNycyI6eyJlc3NlbnRpYWwiOnRydWUsInZhbHVlcyI6WyJwMSJdfX19'
     }
@@ -163,7 +165,7 @@ foreach ($f in $list.Features) {
     $pendingFeatures.Add($f)
 }
 
-# --- Poll the whole list together ----------------------------------------------------------------
+# --- Check the whole list together ---------------------------------------------------------------
 if ($pendingProviders.Count -eq 0 -and $pendingFeatures.Count -eq 0) {
     Write-Host ""
     Write-Host "Done. Every provider and preview feature is already registered." -ForegroundColor Green
@@ -195,7 +197,7 @@ while ($true) {
         try { $state = (Get-AzProviderFeature -ProviderNamespace $f.Provider -FeatureName $f.Feature -ErrorAction Stop).RegistrationState }
         catch { Write-Warning "  Could not read the state of $key ($($_.Exception.Message)); retrying on the next pass"; continue }
         if ($state -eq 'Registered') {
-            # Re-register the provider so the newly enabled feature propagates to it.
+            # Register the provider again, so that the feature takes effect on it.
             Register-AzResourceProvider -ProviderNamespace $f.Provider -ErrorAction Stop | Out-Null
             Write-Host "  + $key registered" -ForegroundColor Green
             $pendingFeatures.Remove($f) | Out-Null
@@ -219,5 +221,5 @@ if ($remaining.Count -eq 0) {
     exit 0
 }
 
-Write-Warning "Still not registered after ${TimeoutSeconds}s: $($remaining -join ', '). Azure continues in the background; re-run this script to confirm before deploying."
+Write-Warning "Still not registered after ${TimeoutSeconds}s: $($remaining -join ', '). Azure continues in the background; run this script again to confirm before the deployment."
 exit 1

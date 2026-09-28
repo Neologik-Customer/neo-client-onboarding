@@ -43,10 +43,11 @@ secrets/
 *~
 NeologikCheckpoint.json
 
-# JSON summaries written by Update-NeologikEnvironmentAccess.ps1 (never commit run output)
+# Summary files written by Update-NeologikEnvironmentAccess.ps1
 Neologik_EnvironmentAccess_*.json
-# Agent and mailbox grants exports fed to Update-NeologikEnvironmentAccess.ps1
+# Grants files supplied for Update-NeologikEnvironmentAccess.ps1
 agent-grants-*.json
 mailbox-grants-*.json
-# Pester -CI output
+
+# Test output
 testResults.xml

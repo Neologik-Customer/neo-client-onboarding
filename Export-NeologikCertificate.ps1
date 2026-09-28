@@ -1,25 +1,28 @@
 <#
 .SYNOPSIS
-    Creates a PFX certificate file for Neologik deployment.
+    Creates the PFX file of the TLS certificate for a Neologik Platform environment.
 
 .DESCRIPTION
-    Combines a private key, server certificate, and CA bundle into a PFX file
-    ready for upload to Azure Key Vault. Expects input files in the cert\ subfolder.
+    Combines a private key, a server certificate and a certificate authority bundle into
+    one password-protected PFX file, ready to import into the environment's Azure Key
+    Vault. The script runs on the workstation with OpenSSL. It signs in to nothing and
+    sends nothing. Run it from the kit folder: the default paths are relative to the
+    current folder.
 
 .PARAMETER KeyFile
-    Path to the private key file. Defaults to cert\private.key.
+    The private key, in PEM format. Default: cert\private.key.
 
 .PARAMETER CertFile
-    Path to the server certificate file. Defaults to cert\server.crt.
+    The server certificate, in PEM format. Default: cert\server.crt.
 
 .PARAMETER BundleFile
-    Path to the CA bundle file (.pem or .p7b). Defaults to cert\ca-bundle.pem.
+    The certificate authority bundle, in PEM or P7B format. Default: cert\ca-bundle.pem.
 
 .PARAMETER OutFile
-    Output PFX path. Defaults to cert\certificate.pfx.
+    The PFX file to write. Default: cert\certificate.pfx.
 
 .PARAMETER Password
-    Password to protect the PFX. Prompted securely if not provided.
+    The password of the PFX file, as a secure string. Asked for when omitted.
 
 .EXAMPLE
     .\Export-NeologikCertificate.ps1
@@ -43,7 +46,7 @@ function Write-Step([string]$msg) { Write-Host "`n==> $msg" -ForegroundColor Cya
 function Write-Ok([string]$msg)   { Write-Host "    OK: $msg" -ForegroundColor Green }
 function Write-Fail([string]$msg) { Write-Host "    ERROR: $msg" -ForegroundColor Red }
 
-# ── OpenSSL install (if missing) ─────────────────────────────────────────────
+# -- Install OpenSSL if it is absent ------------------------------------------
 Write-Step "Checking OpenSSL"
 $opensslOk = $false
 try {
@@ -55,11 +58,11 @@ try {
 } catch { }
 
 if (-not $opensslOk) {
-    Write-Host "    OpenSSL not found — attempting install via winget..." -ForegroundColor Yellow
+    Write-Host "    OpenSSL not found - attempting install via winget..." -ForegroundColor Yellow
     $winget = Get-Command winget -ErrorAction SilentlyContinue
     if ($winget) {
         & winget install --id ShiningLight.OpenSSL.Light --silent --accept-package-agreements --accept-source-agreements
-        # Refresh PATH for the current session
+        # Refresh the path of the current session
         $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
                     [System.Environment]::GetEnvironmentVariable('Path', 'User')
         try {
@@ -79,17 +82,17 @@ if (-not $opensslOk) {
     }
 }
 
-# ── Resolve input files ───────────────────────────────────────────────────────
+# -- Check the input files ----------------------------------------------------
 Write-Step "Checking input files"
 foreach ($f in @($KeyFile, $CertFile, $BundleFile)) {
     if (-not (Test-Path $f)) {
-        Write-Fail "Not found: $f — drop your files in the cert\ folder and re-run."
+        Write-Fail "Not found: $f - place your files in the cert\ folder and run the script again."
         exit 1
     }
     Write-Ok "Found: $f"
 }
 
-# ── Password ──────────────────────────────────────────────────────────────────
+# -- Password -----------------------------------------------------------------
 if (-not $Password) {
     $Password = Read-Host "Enter PFX password" -AsSecureString
     $confirm  = Read-Host "Confirm PFX password" -AsSecureString
@@ -103,17 +106,18 @@ if (-not $Password) {
     $p1 = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($Password))
 }
 
-# ── Convert .p7b bundle to .pem if needed ────────────────────────────────────
+# -- Convert a P7B bundle to PEM ----------------------------------------------
 $resolvedBundle = $BundleFile
 if ($BundleFile -match '\.p7b$') {
     Write-Step "Converting .p7b bundle to .pem"
     $pemBundle = [IO.Path]::ChangeExtension($BundleFile, '.pem')
     & openssl pkcs7 -print_certs -in $BundleFile -out $pemBundle 2>&1 | Out-Null
 
-    # If the bundle contains the server cert, strip the first entry
+    # Where the bundle holds more than one certificate, remove the first: in a P7B
+    # file from a certificate authority the first certificate is the server certificate.
     $subjects = (& openssl pkcs7 -print_certs -in $BundleFile 2>&1 | Select-String "subject=").Count
     if ($subjects -gt 1) {
-        Write-Host "    Bundle contains server cert — removing duplicate" -ForegroundColor Yellow
+        Write-Host "    The bundle holds more than one certificate - removing the first (the server certificate)" -ForegroundColor Yellow
         $content = Get-Content $pemBundle -Raw
         $certs   = $content -split '(?=-----BEGIN CERTIFICATE-----)' | Where-Object { $_ -match 'BEGIN CERTIFICATE' }
         ($certs[1..($certs.Count - 1)] -join '') | Set-Content $pemBundle
@@ -122,7 +126,7 @@ if ($BundleFile -match '\.p7b$') {
     Write-Ok "Bundle ready: $resolvedBundle"
 }
 
-# ── Clean private key (strip any CSR section) ─────────────────────────────────
+# -- Prepare the private key (remove any signing request) ---------------------
 Write-Step "Preparing private key"
 $cleanKey = [IO.Path]::Combine([IO.Path]::GetDirectoryName($KeyFile), "private-clean.key")
 & openssl rsa -in $KeyFile -out $cleanKey 2>&1 | Out-Null
@@ -132,7 +136,7 @@ if (-not (Test-Path $cleanKey)) {
 }
 Write-Ok "Key ready: $cleanKey"
 
-# ── Build PFX ────────────────────────────────────────────────────────────────
+# -- Build the PFX file -------------------------------------------------------
 Write-Step "Creating PFX"
 & openssl pkcs12 -export `
     -out $OutFile `
@@ -149,7 +153,7 @@ if (-not (Test-Path $OutFile)) {
     exit 1
 }
 
-# ── Verify ───────────────────────────────────────────────────────────────────
+# -- Check the PFX file -------------------------------------------------------
 Write-Step "Verifying PFX"
 $verify = & openssl pkcs12 -in $OutFile -passin "pass:$p1" -noout 2>&1
 if ($LASTEXITCODE -ne 0) {
@@ -158,21 +162,21 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $certCount = (& openssl pkcs12 -in $OutFile -passin "pass:$p1" -nokeys 2>&1 | Select-String "BEGIN CERTIFICATE").Count
-Write-Ok "PFX valid — $certCount certificate(s) included"
+Write-Ok "PFX valid - $certCount certificate(s) included"
 
 if ($certCount -lt 2) {
-    Write-Host "    WARNING: expected at least 2 certificates (server + CA). Chain may be incomplete." -ForegroundColor Yellow
+    Write-Host "    Warning: at least 2 certificates were expected (the server certificate and the certificate authority). The chain may be incomplete." -ForegroundColor Yellow
 }
 
-# ── Clean up intermediate files ───────────────────────────────────────────────
+# -- Delete the intermediate files --------------------------------------------
 Remove-Item $cleanKey -ErrorAction SilentlyContinue
 if ($resolvedBundle -ne $BundleFile) {
     Remove-Item $resolvedBundle -ErrorAction SilentlyContinue
 }
 
-# ── Done ──────────────────────────────────────────────────────────────────────
+# -- Done ---------------------------------------------------------------------
 Write-Host ""
 Write-Host "PFX created: $OutFile" -ForegroundColor Green
 Write-Host ""
-Write-Host "Next step: upload $OutFile and its password to your Azure Key Vault with the name ''keyvault-neo-ingress''." -ForegroundColor Cyan
-Write-Host "Do NOT send the PFX file or password to Neologik." -ForegroundColor Yellow
+Write-Host "Next step: import $OutFile into your Azure Key Vault as a certificate named 'keyvault-neo-ingress'. Enter the password when the import asks for it." -ForegroundColor Cyan
+Write-Host "Do not send the PFX file or its password to Neologik." -ForegroundColor Yellow
