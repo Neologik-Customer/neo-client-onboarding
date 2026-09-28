@@ -506,7 +506,7 @@ $script:Summary = @()
 $script:State = @{}
 # The version of the onboarding kit. The script records the version on the resource
 # group, in the tag NeologikOnboardingKit, when the permission reduction is complete.
-$script:KitVersion = 'v5.0.6'
+$script:KitVersion = 'v5.0.7'
 
 # ----- Console and summary -----------------------------------------------------
 
