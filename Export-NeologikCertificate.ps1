@@ -36,6 +36,9 @@
 
 .EXAMPLE
     .\Export-NeologikCertificate.ps1 -KeyFile cert\mysite.key -CertFile cert\mysite.crt -BundleFile cert\chain.pem
+
+.NOTES
+    Version: 1.1
 #>
 [CmdletBinding()]
 param(
@@ -113,72 +116,77 @@ if (-not $Password) {
     $p1 = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($Password))
 }
 
-# -- Convert a P7B bundle to PEM ----------------------------------------------
+# -- Convert a P7B bundle to PEM, prepare the key, build and check the PFX file --
+# The finally block deletes the temporary files after success and after a failure, so
+# that the private key without encryption never stays on disk.
 $resolvedBundle = $BundleFile
-if ($BundleFile -match '\.p7b$') {
-    Write-Step "Converting the P7B bundle to PEM format"
-    $pemBundle = [IO.Path]::ChangeExtension($BundleFile, '.pem')
-    & openssl pkcs7 -print_certs -in $BundleFile -out $pemBundle 2>&1 | Out-Null
-
-    # A P7B file from a certificate authority usually holds the server certificate first.
-    # The script removes the first certificate when the bundle holds more than one certificate.
-    $subjects = (& openssl pkcs7 -print_certs -in $BundleFile 2>&1 | Select-String "subject=").Count
-    if ($subjects -gt 1) {
-        Write-Host "    The bundle holds more than one certificate. The script removes the first certificate, which is the server certificate." -ForegroundColor Yellow
-        $content = Get-Content $pemBundle -Raw
-        $certs   = $content -split '(?=-----BEGIN CERTIFICATE-----)' | Where-Object { $_ -match 'BEGIN CERTIFICATE' }
-        ($certs[1..($certs.Count - 1)] -join '') | Set-Content $pemBundle
-    }
-    $resolvedBundle = $pemBundle
-    Write-Ok "Bundle ready: $resolvedBundle"
-}
-
-# -- Write the private key without the certificate signing request ------------
-Write-Step "Preparing the private key"
 $cleanKey = [IO.Path]::Combine([IO.Path]::GetDirectoryName($KeyFile), "private-clean.key")
-& openssl rsa -in $KeyFile -out $cleanKey 2>&1 | Out-Null
-if (-not (Test-Path $cleanKey)) {
-    Write-Fail "The script could not read the private key from $KeyFile"
-    exit 1
+try {
+    if ($BundleFile -match '\.p7b$') {
+        Write-Step "Converting the P7B bundle to PEM format"
+        $pemBundle = [IO.Path]::ChangeExtension($BundleFile, '.pem')
+        & openssl pkcs7 -print_certs -in $BundleFile -out $pemBundle 2>&1 | Out-Null
+
+        # A P7B file from a certificate authority usually holds the server certificate first.
+        # The script removes the first certificate when the bundle holds more than one certificate.
+        $subjects = (& openssl pkcs7 -print_certs -in $BundleFile 2>&1 | Select-String "subject=").Count
+        if ($subjects -gt 1) {
+            Write-Host "    The bundle holds more than one certificate. The script removes the first certificate, which is the server certificate." -ForegroundColor Yellow
+            $content = Get-Content $pemBundle -Raw
+            $certs   = $content -split '(?=-----BEGIN CERTIFICATE-----)' | Where-Object { $_ -match 'BEGIN CERTIFICATE' }
+            ($certs[1..($certs.Count - 1)] -join '') | Set-Content $pemBundle
+        }
+        $resolvedBundle = $pemBundle
+        Write-Ok "Bundle ready: $resolvedBundle"
+    }
+
+    # -- Write the private key without the certificate signing request --------
+    Write-Step "Preparing the private key"
+    & openssl rsa -in $KeyFile -out $cleanKey 2>&1 | Out-Null
+    if (-not (Test-Path $cleanKey)) {
+        Write-Fail "The script could not read the private key from $KeyFile"
+        exit 1
+    }
+    Write-Ok "Key ready: $cleanKey"
+
+    # -- Build the PFX file -------------------------------------------------------
+    Write-Step "Creating PFX"
+    & openssl pkcs12 -export `
+        -out $OutFile `
+        -inkey $cleanKey `
+        -in $CertFile `
+        -certfile $resolvedBundle `
+        -passout "pass:$p1" `
+        -keypbe PBE-SHA1-3DES `
+        -certpbe PBE-SHA1-3DES `
+        -maciter 2>&1 | Out-Null
+
+    if (-not (Test-Path $OutFile)) {
+        Write-Fail "PFX was not created. Check the private key, the server certificate and the certificate authority bundle."
+        exit 1
+    }
+
+    # -- Check the PFX file -------------------------------------------------------
+    Write-Step "Verifying PFX"
+    $verify = & openssl pkcs12 -in $OutFile -passin "pass:$p1" -noout 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "The check of the PFX file failed: $verify"
+        exit 1
+    }
+
+    $certCount = (& openssl pkcs12 -in $OutFile -passin "pass:$p1" -nokeys 2>&1 | Select-String "BEGIN CERTIFICATE").Count
+    Write-Ok "The PFX file is valid. Number of certificates in the PFX file: $certCount"
+
+    if ($certCount -lt 2) {
+        Write-Host "    Warning: the script expected at least 2 certificates, the server certificate and one certificate of the certificate authority. The certificate chain may be incomplete." -ForegroundColor Yellow
+    }
 }
-Write-Ok "Key ready: $cleanKey"
-
-# -- Build the PFX file -------------------------------------------------------
-Write-Step "Creating PFX"
-& openssl pkcs12 -export `
-    -out $OutFile `
-    -inkey $cleanKey `
-    -in $CertFile `
-    -certfile $resolvedBundle `
-    -passout "pass:$p1" `
-    -keypbe PBE-SHA1-3DES `
-    -certpbe PBE-SHA1-3DES `
-    -maciter 2>&1 | Out-Null
-
-if (-not (Test-Path $OutFile)) {
-    Write-Fail "PFX was not created. Check the private key, the server certificate and the certificate authority bundle."
-    exit 1
-}
-
-# -- Check the PFX file -------------------------------------------------------
-Write-Step "Verifying PFX"
-$verify = & openssl pkcs12 -in $OutFile -passin "pass:$p1" -noout 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Fail "The check of the PFX file failed: $verify"
-    exit 1
-}
-
-$certCount = (& openssl pkcs12 -in $OutFile -passin "pass:$p1" -nokeys 2>&1 | Select-String "BEGIN CERTIFICATE").Count
-Write-Ok "The PFX file is valid. Number of certificates in the PFX file: $certCount"
-
-if ($certCount -lt 2) {
-    Write-Host "    Warning: the script expected at least 2 certificates, the server certificate and one certificate of the certificate authority. The certificate chain may be incomplete." -ForegroundColor Yellow
-}
-
-# -- Delete the temporary files -----------------------------------------------
-Remove-Item $cleanKey -ErrorAction SilentlyContinue
-if ($resolvedBundle -ne $BundleFile) {
-    Remove-Item $resolvedBundle -ErrorAction SilentlyContinue
+finally {
+    # -- Delete the temporary files -------------------------------------------
+    Remove-Item $cleanKey -ErrorAction SilentlyContinue
+    if ($resolvedBundle -ne $BundleFile) {
+        Remove-Item $resolvedBundle -ErrorAction SilentlyContinue
+    }
 }
 
 # -- Done ---------------------------------------------------------------------
