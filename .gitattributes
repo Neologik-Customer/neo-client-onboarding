@@ -1,0 +1,5 @@
+# GitHub omits each path below from the zip of the repository. The customer's zip
+# holds the scripts, the documents and the supporting files only.
+.gitattributes export-ignore
+.gitignore export-ignore
+tests/ export-ignore
