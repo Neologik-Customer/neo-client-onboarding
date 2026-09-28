@@ -1,35 +1,35 @@
-# Azure resource providers and preview features the Neologik platform requires.
+# Azure resource providers and preview features the Neologik Platform requires.
 #
-# This file is the single list. Install-NeologikEnvironment.ps1 registers every entry during
-# onboarding and Register-NeologikResourceProviders.ps1 re-checks and repairs the same list.
-# To add a provider, add one line here; nothing else changes.
+# Install-NeologikEnvironment.ps1 registers every entry during onboarding, and
+# Register-NeologikResourceProviders.ps1 confirms the same list afterwards.
 #
 # One entry per line. Blank lines are ignored; anything from # to the end of a line is a comment.
 #   Provider:         Microsoft.Storage
 #   Preview feature:  Microsoft.Compute/EncryptionAtHost   (the provider must also be listed)
 #
-# The five providers the onboarding script itself creates resources with (Resources, KeyVault,
-# Storage, ManagedIdentity, Compute) are registered first and confirmed before the first resource
-# is created. Every other entry is confirmed before the configuration is exported.
+# The onboarding script registers the five providers it creates resources with (Resources,
+# KeyVault, Storage, ManagedIdentity, Compute) first and confirms each before its resource is
+# created. Every other entry is confirmed before the configuration is exported.
+# Register-NeologikResourceProviders.ps1 submits every entry in file order and waits for the
+# whole list together.
 
-# Onboarding script's own resources
+# The onboarding script's own resources
 Microsoft.Resources
 Microsoft.KeyVault
 Microsoft.Storage
 Microsoft.ManagedIdentity
 Microsoft.Compute
 
-# AKS cluster and container platform
+# Containers and network
 Microsoft.ContainerService
 Microsoft.ContainerRegistry
 Microsoft.ContainerInstance
 Microsoft.KubernetesConfiguration
 Microsoft.Network
-Microsoft.ServiceNetworking      # Application Gateway for Containers (the neo-secure ingress)
-Microsoft.NetworkFunction        # Application Gateway for Containers
+Microsoft.ServiceNetworking      # Application Gateway for Containers (neo-secure deployments)
+Microsoft.NetworkFunction        # Application Gateway for Containers (neo-secure deployments)
 
-# Virtual machines (neo-secure: the self-hosted runner VM's auto-shutdown schedule is a
-# Microsoft.DevTestLab/schedules resource; found missing on the v5.0.0 stg02 build, 2026-09-23)
+# Virtual machine schedules (neo-secure deployments)
 Microsoft.DevTestLab
 
 # Data, search and AI

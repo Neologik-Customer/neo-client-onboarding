@@ -1,320 +1,219 @@
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
-    The Global Administrator's script for a Neologik v5 migration.
-    Verifies - and where missing, applies - the directory, Azure RBAC and
-    Exchange Online state that only a customer Global Administrator can
-    change.
+    Brings the access of the Neologik deployment identity to the least-privilege model
+    of Neologik Platform version 5. Run by your Global Administrator, under their own
+    sign-in.
 
 .DESCRIPTION
-    Run by the customer's Global Administrator (or Privileged Role
-    Administrator for the directory steps), under their own sign-in, on a
-    machine with PowerShell 7.4+.
+    The script checks before it writes. Every action reads the current state first,
+    so on an environment that is already in order it changes nothing, and it can be
+    run as often as needed. With -Verify it reports what it would change and writes
+    nothing.
 
-    The script is idempotent and verification-first: every action checks
-    current state before writing, so on an already-compliant environment it
-    is a pure verification pass and changes nothing. Run it as often as you
-    like. With -Verify it reports what it would change and writes nothing.
+    The script does not stop at the first problem. Every item is checked or applied
+    on its own, and an item that fails is recorded in the summary with its reason.
+    The run ends with a summary table and a summary file in JSON. The exit code is 0
+    when everything is in the expected state, and 1 when an item needs attention or,
+    with -Verify, when a change is pending.
 
-    The script never stops on the first problem: every item is verified or
-    applied independently, a failing item is recorded in the summary with
-    its reason, and dependent removals are held back whenever the narrow
-    grants that must precede them did not all land. The run ends with a
-    summary table and a machine-readable JSON summary; the exit code is 0
-    when everything is in the expected state and 1 when any item needs
-    attention (in a verify-only run, also when anything would change).
+    The files given select the run.
 
-    THE FILES GIVEN SELECT THE RUN - there is no phase parameter.
+    THE FIRST RUN (no -AgentGrantsFile and no -MailboxGrantsFile)
+      1. Agent identity blueprint. Confirms that 'Neologik Agent Blueprint - <key> -
+         <short name>' and its principal exist, that the deployment identity owns
+         both, that the principal holds AgentIdUser.ReadWrite.IdentityParentedBy, and
+         that the three federated credentials are present through which the Neologik
+         deployment acts as the blueprint. Each is created only if it is absent.
+         Then the Microsoft Graph application permissions of the deployment identity:
+         the two it keeps (Application.ReadWrite.OwnedBy,
+         AgentIdentityBlueprint.AddRemoveCreds.All) are confirmed first, and the
+         seven it no longer needs are then removed (Application.Read.All,
+         AgentIdentityBlueprint.Create, AgentIdentityBlueprint.UpdateAuthProperties.All,
+         AgentIdentityBlueprintPrincipal.Create, AgentIdentity.Create.All,
+         AgentIdUser.ReadWrite.All, Group.Create).
+      2. Sign-in group assignment. Assigns your Neologik NCE user group to the
+         'Neologik Platform Sign-in' enterprise application. The Neologik Context
+         Engine authorises from the groups claim of the sign-in token, and that
+         claim carries only the groups assigned to the application.
+      3. Administrator consent. Confirms that the sign-in application has consent
+         for the whole tenant. If it has not, the script prints the consent address
+         for you to open: consent stays with you, so that you see what you approve.
+      3a. SharePoint consent. Checked when the configuration file records that
+         SharePoint ingestion is part of the solution.
+      3b. Ownership of the application registrations. The deployment identity may
+         manage only the registrations it owns. The step takes exactly the
+         registrations named by client id: the sign-in application
+         (-SignInAppClientId), the SharePoint application (-SharePointAppClientId)
+         and the agent registrations (-BotAppClientIds). For each it adds the
+         deployment identity as an owner where it is missing, and sets the unique
+         name of the sign-in and SharePoint applications where it is empty. Every
+         other registration whose name begins 'Neologik' is reported for review
+         and is not changed.
+      4. Permission reduction. Confirms first that the deployment identity holds its
+         seven roles on the resource group and its two roles on the subscription
+         (Reader, and Cost Management Contributor for the daily cost report). Only
+         then does it remove the wider access: Contributor and User Access
+         Administrator on the subscription, the Application Administrator directory
+         role, membership of the Admin User Group, and any other role or membership
+         outside the declared set. If any of the nine roles could not be applied,
+         nothing is removed. Last, the version of the kit is recorded on the
+         resource group as the tag NeologikOnboardingKit.
 
-    PRE-WINDOW RUN (no -AgentGrantsFile and no -MailboxGrantsFile). Every
-    customer has this one run, any time before the migration window:
-      1. Least-privilege Graph model (project#2144):
-         a. Agent identity blueprint: ensures 'Neologik Agent Blueprint -
-            <key> - <short-name>' and its principal exist (created here if
-            absent, adopted if the pipeline created it), that the
-            deployment identity owns both, that the principal holds
-            AgentIdUser.ReadWrite.IdentityParentedBy, and that the GitHub
-            OIDC federated credentials the deployment pipeline uses to act
-            AS the blueprint are present.
-         b. Deployment identity Graph roles: ensures the two retained
-            application roles (Application.ReadWrite.OwnedBy,
-            AgentIdentityBlueprint.AddRemoveCreds.All), then REMOVES the
-            retired tenant-wide roles (Application.Read.All,
-            AgentIdentityBlueprint.Create, .UpdateAuthProperties.All,
-            AgentIdentityBlueprintPrincipal.Create, AgentIdentity.Create.All,
-            AgentIdUser.ReadWrite.All, Group.Create) - narrow before broad,
-            so the pipeline never loses a capability in between. Only a
-            Global Administrator can grant or revoke Graph application
-            roles - Application Administrator is not sufficient.
-      2. Sign-in group assignment: assigns the Neologik NCE user group to
-         the 'Neologik Platform Sign-in' enterprise application. From v5,
-         NCE authorises purely from the sign-in token's groups claim, and
-         that claim only carries groups assigned to the application -
-         without this step every user is locked out of NCE after the
-         upgrade. (Only the user group is assigned; the Admin User Group
-         is Azure RBAC only and never grants NCE access.)
-      3. Admin consent check: verifies tenant-wide admin consent exists for
-         the sign-in application. If it is missing the script prints the
-         consent URL for you to open and approve - consent itself stays
-         interactive so you see exactly what you are approving.
-      3a. SharePoint Sites.Selected consent: checked when the configuration
-         file records that SharePoint ingestion is part of the solution
-         ("SharePointIngestion": true). When the configuration file does
-         not say, the summary notes that the check runs with the agent
-         grants file (post-window run) and the item needs no attention.
-      3b. Platform app registrations owned by the deployment identity
-         (project#1012, explicit list project#2355): the deployment
-         identity holds only Application.ReadWrite.OwnedBy, so every app
-         registration the platform manages must list it as an owner of the
-         application and of the service principal, and the deployment
-         finds an existing registration by its uniqueName. The step takes
-         exactly the registrations named by client id on the command line
-         (or in the configuration file): the sign-in app
-         (-SignInAppClientId), the environment's SharePoint app
-         (-SharePointAppClientId, when the environment has one) and the bot
-         app registrations (-BotAppClientIds). Nothing is chosen by
-         display name. For each it adds the deployment identity as owner
-         where it is missing, stamps the deployment's uniqueName on the
-         sign-in app (sp-admin-<solution name>) and the SharePoint app
-         (sp-neologik-sharepoint-<short name>), and lists password
-         credentials the deployment did not mint (the deployment removes
-         every credential on the sign-in and bot apps, only its own on the
-         SharePoint app). A listed registration that is not in this tenant
-         is a failure. Every other registration in the tenant whose name
-         starts with 'Neologik' is reported for review and never touched.
-      4. Permission reduction: first ensures the deployment identity holds
-         the narrow resource-group-scoped role set and the two retained
-         subscription-scoped roles (read-only Reader for SKU/quota
-         pre-flight; Cost Management Contributor so the deployment
-         pipeline can keep the cost report emails current - cost
-         configuration only), then removes its legacy broad grants - the
-         Application Administrator directory role and the
-         subscription-scoped Contributor and User Access Administrator
-         assignments. Narrow roles are applied before broad ones are
-         removed so deployments never lose access in between; if any
-         narrow role could not be applied, nothing is removed. On an
-         already-hardened environment the Cost Management Contributor
-         grant is the only change this step makes. Needs the subscription
-         id and resource group name (both in the configuration file) and
-         an Azure sign-in holding Owner or User Access Administrator on
-         the subscription.
+    THE LATER RUN (-AgentGrantsFile or -MailboxGrantsFile given)
+    Needed only when an agent or App works unattended in Microsoft 365 on behalf of
+    your organisation. It applies what the files list and nothing else.
+      5. Grants to agent users (-AgentGrantsFile). For each agent and App in the
+         file, the delegated permission grant that lets its agent identity act as
+         its own agent user, with exactly the permissions the file lists. The file
+         may also list Microsoft Graph application permissions for named workload
+         identities, which are granted here, and records whether SharePoint
+         ingestion is part of the solution, in which case the SharePoint consent is
+         checked.
+      6. Mailbox grants (-MailboxGrantsFile). For each email channel in the file,
+         grants the identity of the channel the Exchange Online roles Application
+         Mail.Read, Application Mail.ReadWrite and Application Mail.Send, limited
+         to that one mailbox. With -RemoveLegacyGrantAppIds it also removes the
+         Exchange Online assignments of an identity that is no longer used. Needs an
+         Exchange Administrator or Global Administrator sign-in.
 
-    POST-WINDOW RUN (-AgentGrantsFile and/or -MailboxGrantsFile given).
-    Needed only once an agent or App works unattended on the customer's
-    behalf in Microsoft 365 - an autonomy-adoption event, not a migration
-    step; a customer with no unattended work never has this run. It
-    applies exactly what the files list and nothing else: no blueprint,
-    no roles, no group assignment, no permission reduction.
-      5. Agent-user delegated grants (-AgentGrantsFile, the file the
-         platform exports from GET /nce-api/v5/environment/agent-grants):
-         for every agent and App with ENABLED agent-lane permission packs,
-         the oAuth2PermissionGrant that lets its agent identity act as its
-         own agent user with exactly the exported scope set - created or
-         aligned, verified by reading it back. Nothing speculative: an
-         agent or App with no packs is absent from the file and gets no
-         grant (least exposure, project#2213). The file also carries the
-         declared component Graph roles the deployment identity could not
-         grant itself - granted here to the named workload identities
-         (tenant-scoped reads only) - and whether SharePoint ingestion is
-         part of the solution, in which case the Sites.Selected admin
-         consent of the environment's SharePoint app is checked and its
-         consent URL printed when missing.
-      6. Shared-mailbox grants (-MailboxGrantsFile): for each email channel
-         listed, grants the agent's channel identity Application Mail.Read
-         / Mail.ReadWrite / Mail.Send in Exchange Online, scoped to that
-         one mailbox (RBAC for Applications - nothing is granted in Entra
-         ID). With -RemoveLegacyGrantAppIds it also removes a retired
-         identity's Exchange assignments - except an identity the file
-         lists under adoptedIdentityAppIds (a v4 email monitor identity
-         the v5 email channel adopted), whose assignment is kept. Needs
-         the Exchange Online PowerShell module and an Exchange
-         Administrator or Global Administrator sign-in.
-
-    Microsoft Graph sign-in scopes requested (all delegated, under your own
-    account): Application.ReadWrite.All, AppRoleAssignment.ReadWrite.All,
+    Permissions requested at the Microsoft Graph sign-in, all delegated, under your
+    own account: Application.ReadWrite.All, AppRoleAssignment.ReadWrite.All,
     Directory.Read.All, User.Read, DelegatedPermissionGrant.Read.All,
-    AgentIdentityBlueprint.Create, AgentIdentityBlueprint.AddRemoveCreds.All,
-    AgentIdentityBlueprintPrincipal.Create; plus
-    RoleManagement.ReadWrite.Directory and GroupMember.ReadWrite.All in the
-    pre-window run (the Application Administrator directory role removal and
-    the Admin User Group membership removal of project#2269) and
-    DelegatedPermissionGrant.ReadWrite.All in the post-window run with
-    -AgentGrantsFile. The read-only Directory.Read.All and User.Read are
-    what the group, consent and directory-role checks need on a tenant
-    where no earlier consent exists.
+    AgentIdentityBlueprint.Create, AgentIdentityBlueprint.AddRemoveCreds.All and
+    AgentIdentityBlueprintPrincipal.Create. The first run adds
+    RoleManagement.ReadWrite.Directory and GroupMember.ReadWrite.All. A run with
+    -AgentGrantsFile adds DelegatedPermissionGrant.ReadWrite.All.
 
-    Output: a summary table, and a JSON summary file
-    Neologik_EnvironmentAccess_<PreWindow|PostWindow>_<stamp>.json written
-    beside the script (or in the current folder, or the temp folder, when
-    that location is not writable). Exit code 0 = everything in the
-    expected state; 1 = at least one item needs attention (see the
-    summary) or, with -Verify, at least one change is pending.
+    Output: a summary table, and the file
+    Neologik_EnvironmentAccess_<PreWindow|PostWindow>_<time stamp>.json, written
+    beside the script, or in the current folder or the temporary folder when that
+    location cannot be written.
+
+    ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md describes the script in full.
 
 .PARAMETER ConfigurationFile
-    Path to the Neologik_..._Configuration_....json file produced by
-    Install-NeologikEnvironment.ps1 at onboarding. Optional: it carries the
-    tenant, subscription, resource group, deployment identity, sign-in app,
-    group ids and solution names. A v5 migration never depends on it -
-    Neologik sends the complete command line with every value as an
-    explicit parameter (many environments predate the file).
+    The configuration file Install-NeologikEnvironment.ps1 wrote at onboarding.
+    Optional. It carries the tenant, the subscription, the resource group, the
+    deployment identity, the sign-in application, the group ids and the solution
+    names. Neologik sends the complete command with every value as a parameter, so
+    the file is not needed.
 
 .PARAMETER Verify
-    Verify-only: every step reports what it would change as a 'WOULD ...'
-    summary item and nothing is written - the two write seams refuse
-    every write, whatever a step does. The sign-ins (and their consent
-    screens) are the same as a real run. Exit code 1 when anything would
-    change or needs attention, 0 when the environment is already in the
-    expected state.
+    Reports what the run would change, as 'WOULD ...' items in the summary, and
+    writes nothing. The sign-ins are the same as those of a run that writes. Exit
+    code 1 when a change is pending or an item needs attention, 0 otherwise.
 
 .PARAMETER TenantId
-    Entra tenant id of the environment's home tenant. Required only when no
-    ConfigurationFile is given.
+    The id of your Microsoft Entra tenant. Required when no configuration file is
+    given.
 
 .PARAMETER DeploySpClientId
-    Application (client) id of the 'Neologik GitHub Service Connection'
-    app registration. Required only when no ConfigurationFile is given.
+    The application (client) id of the deployment identity, the application
+    'Neologik GitHub Service Connection'. Required when no configuration file is
+    given.
 
 .PARAMETER SolutionName
-    The environment's full solution name (e.g. neo-abcprd-uks-01, the value
-    the deployment pipeline names resources by): step 3b stamps the sign-in
-    app's uniqueName as sp-admin-<solution name>. Read from the configuration
-    file (SolutionName) when present; required for the pre-window run.
+    The solution name of the environment, for example neo-abcprd-uks-01. Required
+    for the first run.
 
 .PARAMETER SolutionShortName
-    The environment's solution short name (the value the onboarding
-    configuration records as SolutionShortName, e.g. abcprd01): the
-    deployment pipeline names the agent identity blueprint by it. Read from
-    the configuration file; required when no ConfigurationFile is given.
-    Never guessed from a display name (project#2329): an environment whose
-    deployment identity is named '... - abc-prd' while its short name is
-    abcprd01 would otherwise get a second blueprint the pipeline never uses.
+    The short name of the environment, for example abcprd01. The agent identity
+    blueprint is named by it. Required for the first run.
 
 .PARAMETER SignInAppClientId
-    Application (client) id of the 'Neologik Platform Sign-in' app
-    registration (older environments may still show it as 'Neologik NCE
-    Auth' or 'Neologik Admin Auth' - it is the same registration). Read
-    from the configuration file (NceAuthApp) when present; required for the
-    pre-window run (project#2355: the sign-in app is adopted by this id and
-    never found by name).
+    The application (client) id of the application 'Neologik Platform Sign-in'.
+    Required for the first run.
 
 .PARAMETER SharePointAppClientId
-    Application (client) id of the environment's SharePoint app
-    registration ('Neologik SharePoint Access - <short name>'), the value
-    Neologik holds as SHAREPOINT_CLIENT_ID. Give it when the environment
-    ingests from SharePoint; step 3b then adopts that registration for the
-    deployment identity. Without it no SharePoint registration is touched
-    and the deployment creates one when SharePoint ingestion is configured.
+    The application (client) id of the application 'Neologik SharePoint Access -
+    <short name>'. Given when the environment ingests from SharePoint. Without it
+    no SharePoint registration is changed.
 
 .PARAMETER BotAppClientIds
-    Application (client) ids of the bot app registrations the platform
-    manages in this tenant (one per bot; the values Neologik holds as
-    BOT_ID, BOT2_ID, BOT3_ID). Step 3b adopts exactly these for the
-    deployment identity. A registration not listed here is never touched,
-    whatever its name; an environment with no bots passes none.
+    The application (client) ids of the agent registrations the platform manages in
+    this tenant. A registration that is not listed is not changed, whatever its name.
 
 .PARAMETER NceUserGroupId
-    Object id of the Neologik NCE user group. Required only when no
-    ConfigurationFile is given.
+    The object id of your Neologik NCE user group. When it is absent, steps 2 and 3
+    are not carried out.
 
 .PARAMETER AdminGroupId
-    Object id of the Neologik Admin User Group (the human administrators).
-    Read from the configuration file's SecurityGroups when not given; without
-    either, the Admin User Group membership check of the pre-window run
-    (project#2269) reports "Not checked".
+    The object id of the Neologik Admin User Group. When it is absent and no
+    configuration file names the group, the membership check of the first run
+    reports "Not checked".
 
 .PARAMETER AgentGrantsFile
-    Path to the JSON file the platform exports (NCE: GET
-    /nce-api/v5/environment/agent-grants): the agent-user delegated grants
-    driven by the packs actually enabled, the declared component Graph
-    roles and the SharePoint ingestion marker. Giving it selects the
-    post-window run; step 5 applies exactly those grants and nothing more
-    (project#2213). The file's tenant id must match the tenant this run
-    targets.
+    The JSON file of grants to agent users, which Neologik exports from the platform
+    and supplies. Giving it selects the later run. The tenant id in the file must be
+    that of the run.
 
 .PARAMETER MailboxGrantsFile
-    Path to the JSON file Neologik exports from the platform's email
-    channel registrations: either an array of entries, or an object with
-    'grants' (the entries) and 'adoptedIdentityAppIds' (client ids of the
-    v4 email monitor identities the v5 email channel adopted, which
-    -RemoveLegacyGrantAppIds never removes). Each entry carries
-    IdentityAppId, IdentityObjectId, Mailbox and DisplayName. Giving it
-    selects the post-window run; step 6 applies the scoped Exchange
-    Online grants.
+    The JSON file of mailbox grants, which Neologik exports from the platform and
+    supplies. Giving it selects the later run.
 
 .PARAMETER RemoveLegacyGrantAppIds
-    Application ids of retired identities whose Exchange Online mailbox
-    assignments should be removed (an email monitor identity the v5 email
-    channel did NOT adopt). Requires -MailboxGrantsFile, the export that
-    also lists the adopted identities: an id listed there is skipped and
-    its assignment kept.
+    The application ids of identities that are no longer used, whose Exchange Online
+    mailbox assignments are to be removed. Requires -MailboxGrantsFile. An identity
+    the file records as still in use keeps its assignment.
 
 .PARAMETER UseAzureCliToken
-    Sign in to Microsoft Graph AND Azure with the Azure CLI session's tokens
-    for the tenant (az account get-access-token) instead of the sign-in
-    prompts. For Neologik engineers running the script from a workstation
-    whose az session in the tenant already satisfies multi-factor
-    authentication. The CLI's Azure token carries no MFA claims challenge,
-    so it suits -Verify runs and verification passes; a role write the
-    tenant refuses with a claims challenge means run again without the
-    switch. Customers keep the default sign-in.
-
-.NOTES
-    Sign-in (project#2306). The script runs the device-code sign-in itself:
-    it prints the address and the code, waits no longer than the code is
-    valid (at most 15 minutes) and says every 30 seconds that it is still
-    waiting. Nothing else on the machine is needed - a browser on any device
-    and a Global Administrator account of the tenant. When that sign-in
-    does not complete the script tries the next method by itself: the Azure
-    CLI session on the machine, if there is one, then the Microsoft Graph
-    PowerShell device-code prompt. Only when every method has failed does
-    it stop, saying what to do. Before anything is changed it also checks
-    that the four Microsoft endpoints it needs are reachable, that the
-    PowerShell modules load, and that the signed-in account holds Global
-    Administrator (active) and Owner or User Access Administrator on the
-    subscription - each failure names the one thing to fix.
+    Signs in to Microsoft Graph and to Azure with the Azure CLI session of the
+    workstation, in place of the sign-in prompts. For use by Neologik. Use the
+    default sign-in.
 
 .PARAMETER SubscriptionId
-    Azure subscription id. Required for the pre-window run (the permission
-    reduction) when no ConfigurationFile is given.
+    The id of the Azure subscription. Required for the first run when no
+    configuration file is given.
 
 .PARAMETER ResourceGroupName
-    Neologik resource group name. Required for the pre-window run (the
-    permission reduction) when no ConfigurationFile is given.
+    The name of the Neologik resource group. Required for the first run when no
+    configuration file is given.
 
 .PARAMETER BlueprintKey
-    Key segment of the agent identity blueprint name ('default' unless
-    Neologik tells you otherwise).
+    The key in the name of the agent identity blueprint. 'default' unless Neologik
+    tells you otherwise.
 
 .EXAMPLE
-    ./Update-NeologikEnvironmentAccess.ps1 -TenantId <tenant id> -DeploySpClientId <deployment identity client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <sign-in app client id> -SharePointAppClientId <SharePoint app client id> -BotAppClientIds <bot app client id>,<bot app client id> -NceUserGroupId <group object id> -AdminGroupId <group object id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01
+    ./Update-NeologikEnvironmentAccess.ps1 -TenantId <tenant id> -DeploySpClientId <deployment identity client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <sign-in application client id> -SharePointAppClientId <SharePoint application client id> -BotAppClientIds <client id>,<client id> -NceUserGroupId <group object id> -AdminGroupId <group object id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01
 
-    The pre-window run, as Neologik sends it: checks and grants, then the guarded permission reduction.
-    The reduction is "declared set or nothing" (project#2297): every directory
-    role, group membership and Azure role assignment the deployment identity
-    holds outside the declared set is reported (-Verify) and removed.
+    The first run, as Neologik sends it.
 
 .EXAMPLE
     ./Update-NeologikEnvironmentAccess.ps1 -TenantId <tenant id> -DeploySpClientId <client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <client id> -BotAppClientIds <client id> -NceUserGroupId <group id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01 -Verify
 
-    The pre-window run in verify-only mode: every pending change reported, nothing written.
+    The first run with -Verify: every pending change is reported and nothing is written.
 
 .EXAMPLE
-    ./Update-NeologikEnvironmentAccess.ps1 -ConfigurationFile ./Neologik_abcprd_Configuration_20250101_120000.json -AgentGrantsFile ./agent-grants-abcprd01.json
+    ./Update-NeologikEnvironmentAccess.ps1 -ConfigurationFile ./Neologik_abc01_Configuration_20260101_120000.json -AgentGrantsFile ./agent-grants-abcprd01.json
 
-    The post-window run: the agent-user grants the exported file lists, nothing else.
+    The later run: the grants to agent users that the file lists.
 
 .EXAMPLE
-    ./Update-NeologikEnvironmentAccess.ps1 -ConfigurationFile ./Neologik_abcprd_Configuration_20250101_120000.json -MailboxGrantsFile ./mailbox-grants-abcprd01.json -RemoveLegacyGrantAppIds 11111111-2222-3333-4444-555555555555
+    ./Update-NeologikEnvironmentAccess.ps1 -ConfigurationFile ./Neologik_abc01_Configuration_20260101_120000.json -MailboxGrantsFile ./mailbox-grants-abcprd01.json -RemoveLegacyGrantAppIds 11111111-2222-3333-4444-555555555555
 
-    The post-window run: the mailbox grants the file lists, and the retired identity's assignments removed unless the file records it as adopted.
+    The later run: the mailbox grants that the file lists, and the removal of the assignments of an identity that is no longer used.
+
+.NOTES
+    Requires PowerShell 7.4 or later.
+
+    Sign-in. The script prints a web address and a code, waits for as long as the
+    code is valid (15 minutes at most) and reports every 30 seconds that it is
+    waiting. A browser on any device and a Global Administrator account are all that
+    is needed. If that sign-in does not complete, the script tries the Azure CLI
+    session of the workstation, if there is one, and then the device code prompt of
+    Microsoft Graph PowerShell.
+
+    Before it changes anything the script confirms that it can reach the Microsoft
+    addresses it uses, that its modules load, and that the signed-in account holds
+    Global Administrator, and Owner or User Access Administrator on the subscription.
 #>
 
-# This is an interactive console script: Write-Host is the intended output
-# channel (the summary table and consent URLs must reach the operator, never
-# the pipeline). The Azure CLI token is converted to a SecureString because
-# Connect-MgGraph 2.x accepts nothing else; it is never written anywhere.
-# Write-Log matches the sibling Install-NeologikEnvironment.ps1. ShouldProcess
-# is not used: every write is preceded by a verification of the same state.
+# The script writes to the console with Write-Host: the summary table and the consent
+# addresses are for the operator. The Azure CLI token is held as a secure string,
+# which Connect-MgGraph requires, and is written nowhere. ShouldProcess is not used:
+# every write follows a check of the same state.
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Interactive console script; the summary and consent URLs are for the operator.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'Connect-MgGraph 2.x requires a SecureString; the token comes from the Azure CLI cache and is never persisted.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'Write-Log matches the sibling onboarding script; no built-in Write-Log exists in PowerShell 7.')]
@@ -375,17 +274,15 @@ param(
     [switch]$UseAzureCliToken
 )
 
-# The two Microsoft Graph application roles the deployment identity keeps
-# (least-privilege model, project#2144). Canonical inventory (names, ids,
-# where each is used): neo-bot-service/docs/NEOLOGIK_PLATFORM_DEPLOYMENT_SP_PERMISSIONS.md.
-# Matched by role value against the Graph service principal at runtime.
-# Must match Install-NeologikEnvironment.ps1.
+# The two Microsoft Graph application permissions the deployment identity keeps.
+# They are matched by name against the service principal of Microsoft Graph, and are
+# the same two that Install-NeologikEnvironment.ps1 grants.
 $script:RequiredGraphRoles = @(
     'Application.ReadWrite.OwnedBy',
     'AgentIdentityBlueprint.AddRemoveCreds.All'
 )
-# The tenant-wide roles retired by project#2144 - removed from the deployment
-# identity AFTER the retained roles and the blueprint set-up are in place.
+# The permissions for the whole tenant that the deployment identity no longer needs.
+# They are removed when the two it keeps are in place.
 $script:RetiredGraphRoles = @(
     'Application.Read.All',
     'AgentIdentityBlueprint.Create',
@@ -393,14 +290,13 @@ $script:RetiredGraphRoles = @(
     'AgentIdentityBlueprintPrincipal.Create',
     'AgentIdentity.Create.All',
     'AgentIdUser.ReadWrite.All',
-    # Granted by onboarding before project#1519 and never revoked on those
-    # environments; the platform never creates Entra groups.
+    # The platform creates no group, so the permission to create groups is removed.
     'Group.Create'
 )
-# The blueprint PRINCIPAL's own role: agent users parented by that blueprint only.
+# The role of the blueprint principal: the agent users of that blueprint only.
 $script:BlueprintPrincipalGraphRoles = @('AgentIdUser.ReadWrite.IdentityParentedBy')
-# Deployment pipeline repositories allowed to obtain a token as the blueprint
-# (GitHub OIDC, bound to the immutable repository id). Must match
+# The repositories of the Neologik deployment that may obtain a token as the blueprint.
+# Each is named by its repository id, which does not change. The same three as in
 # Install-NeologikEnvironment.ps1.
 $script:PipelineRepositories = @(
     @{ Name = 'neo-infrastructure'; Id = '995398788' },
@@ -408,8 +304,8 @@ $script:PipelineRepositories = @(
     @{ Name = 'neo-env-config';     Id = '995441655' }
 )
 
-# The narrow resource-group role set that replaces the legacy broad grants
-# (issue #774 least-privilege model). Must match Install-NeologikEnvironment.ps1.
+# The roles of the deployment identity on the resource group. The same seven as in
+# Install-NeologikEnvironment.ps1.
 $script:RequiredRgRoles = @(
     'Contributor',
     'Key Vault Certificates Officer',
@@ -420,47 +316,40 @@ $script:RequiredRgRoles = @(
     'Role Based Access Control Administrator'
 )
 
-# The two subscription-scoped roles the deployment identity keeps under the
-# least-privilege model. Must match Install-NeologikEnvironment.ps1.
-# 'Reader': the infrastructure deploy's SKU/quota pre-flight reads
-# subscription/location-level usage APIs that RG scope does not grant.
-# 'Cost Management Contributor': lets the deployment pipeline keep the
-# subscription-scoped cost report emails current (project#1215) - cost
-# configuration only, no control over resources.
+# The two roles the deployment identity keeps on the subscription. The same two as in
+# Install-NeologikEnvironment.ps1.
+# Reader: the deployment reads usage and quota, which are held for the subscription and
+# the region.
+# Cost Management Contributor: the deployment maintains the daily cost report. The
+# role manages cost configuration only and gives no control of resources.
 $script:RequiredSubRoles = @(
     'Reader',
     'Cost Management Contributor'
 )
 
-# The legacy subscription-scoped roles the pre-window run's permission
-# reduction (step 4) removes once the narrow set is in place.
+# The roles on the subscription that the permission reduction (step 4) removes, once
+# the roles above are in place.
 $script:LegacySubRoles = @('Contributor', 'User Access Administrator')
 
-# The deployment identity is never a member of the Admin User Group
-# (project#2269, owner decision 2026-09-07): its SQL access is the SQL
-# server's Microsoft Entra administrator setting, declared by the platform
-# infrastructure deployment; the Admin User Group (the human administrators)
-# is a db_owner contained user in every platform and App database instead.
-# The pre-window run removes an existing membership ONLY once every SQL
-# server in the resource group names the deployment identity as its
-# administrator - before that the membership is the identity's only SQL
-# access. The group is found in the configuration's SecurityGroups by name.
+# The deployment identity is not a member of the Admin User Group. Its access to SQL
+# comes from the Microsoft Entra administrator setting of the SQL server, which the
+# platform deployment declares. The first run removes an existing membership only
+# when every SQL server in the resource group names the deployment identity as its
+# administrator: until then the membership is its only access to SQL. The group is
+# found by name in the SecurityGroups of the configuration.
 $script:AdminGroupNamePattern = 'Neologik Admin User Group*'
 
-# Declared set or nothing (project#2297, owner decision 2026-09-08): the
-# deployment identity holds the roles above and nothing else. The one
-# declared resource-scoped role - allowed at any scope BELOW the resource
-# group - is granted by the platform infrastructure deployment on the Content
-# Understanding account (it sets the account defaults). Everything else the
-# identity holds in the subscription, every directory role and every group
-# membership is removed by the pre-window run. The evaluation harness runs as
-# the test-runner managed identity, so it needs nothing on this identity.
+# The declared set. The deployment identity holds the roles above and nothing else.
+# One further role is declared, at any scope below the resource group: the platform
+# deployment grants it on the Content Understanding account. Everything else the
+# identity holds in the subscription, every directory role and every group membership
+# is removed by the first run.
 $script:DeclaredResourceRoles = @('Cognitive Services Content Understanding Contributor')
 
 $script:GraphSpAppId = '00000003-0000-0000-c000-000000000000'
-# The SharePoint app's role (Sites.Selected), checked when the configuration
-# file (pre-window run) or the exported grants file (post-window run) says
-# SharePoint ingestion is part of the solution.
+# The role of the SharePoint application (Sites.Selected), checked when the
+# configuration file or the grants file says that SharePoint ingestion is part of
+# the solution.
 $script:SharePointAppDisplayNamePrefix = 'Neologik SharePoint Access - '
 $script:AppAdminRoleTemplateId = '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3'
 $script:GraphV1 = 'https://graph.microsoft.com/v1.0'
@@ -472,36 +361,34 @@ $script:GuidPattern = '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
 # run reports instead of performing.
 $script:AttentionPattern = 'MISSING|SKIPPED|NOT FOUND|PENDING|FAILED|UNKNOWN|WOULD'
 
-# Sign-in (project#2306): the script runs the device-code flow itself so the
-# address and the code are printed by this script, the wait is bounded by the
-# code's own lifetime and a failed method falls back to the next one. The
-# flows reuse the public client ids of two Microsoft first-party tools, so no
-# Neologik application and no consent beyond the scopes asked for are needed:
-# Microsoft Graph Command Line Tools (the Graph scopes) and Microsoft Azure
-# PowerShell (Azure Resource Manager).
+# Sign-in. The script runs the device code sign-in itself, so that it prints the
+# address and the code, waits no longer than the code is valid, and tries the next
+# method when one fails. The sign-in uses the public client ids of two Microsoft
+# applications, so no Neologik application is involved: Microsoft Graph Command Line
+# Tools for Microsoft Graph, and Microsoft Azure PowerShell for Azure Resource Manager.
 $script:GraphPublicClientId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
 $script:AzurePublicClientId = '1950a258-227b-4e31-a9cf-717495945fc2'
 $script:LoginEndpoint = 'https://login.microsoftonline.com'
-# Azure mandatory MFA (ARM layer): the 'p1' authentication-context claim the
-# role-assignment writes need, asked for with the Azure device code.
+# Azure requires multi-factor authentication for every write. The 'p1'
+# authentication-context claim is requested with the Azure device code.
 $script:AzureMfaClaims = '{"access_token":{"acrs":{"essential":true,"values":["p1"]}}}'
 # The longest the script waits on one device code, whatever lifetime the
 # identity platform grants it.
 $script:DeviceCodeMaximumWaitSeconds = 900
 $script:DeviceCodeReportEverySeconds = 30
-# Directory role template of Global Administrator - the rights preflight.
+# The role template of Global Administrator, for the check of the signed-in account.
 $script:GlobalAdministratorTemplateId = '62e90394-69f5-4237-9190-012177145e10'
 # The subscription roles that let the signed-in account write role assignments.
 $script:SubscriptionAdministratorRoles = @('Owner', 'User Access Administrator')
-# Everything the script talks to; each must answer before anything runs.
+# Every address the script uses. Each must answer before anything is changed.
 $script:PreflightEndpoints = @(
     @{ Name = 'Microsoft Entra sign-in'; Uri = 'https://login.microsoftonline.com/' },
     @{ Name = 'Microsoft Graph'; Uri = 'https://graph.microsoft.com/' },
     @{ Name = 'Azure Resource Manager'; Uri = 'https://management.azure.com/' },
     @{ Name = 'PowerShell Gallery (module installs)'; Uri = 'https://www.powershellgallery.com/' }
 )
-# Microsoft Graph PowerShell SDK 2.x is required (SecureString access tokens,
-# -SkipHttpErrorCheck); ExchangeOnlineManagement 3.x for device-code sign-in.
+# Microsoft Graph PowerShell 2.0 or later and ExchangeOnlineManagement 3.0 or later
+# are required.
 $script:GraphModuleMinimumVersion = [version]'2.0.0'
 $script:ExchangeModuleMinimumVersion = [version]'3.0.0'
 $script:GraphModules = @(
@@ -511,11 +398,10 @@ $script:GraphModules = @(
     'Microsoft.Graph.Identity.DirectoryManagement'
 )
 $script:Summary = @()
-# Shared run state (inputs, resolved principals); populated by the main entry.
+# The state of the run: the inputs and the principals found.
 $script:State = @{}
-# The kit version: the git tag of this kit release. Recorded on the resource group as the
-# tag NeologikOnboardingKit once the permission reduction is complete (project#2922);
-# bumped with every kit release, and checked against VERSION_HISTORY.md by the tests.
+# The version of the kit, recorded on the resource group as the tag
+# NeologikOnboardingKit when the permission reduction is complete.
 $script:KitVersion = 'v5.0.3'
 
 # ----- console + summary helpers ---------------------------------------------
@@ -537,7 +423,7 @@ function Write-Log {
 }
 
 function Write-ActionRequired {
-    # One clear instruction block for the operator: what to do and why.
+    # One instruction for the operator: what to do and why.
     param([string]$Message)
     Write-Host ''
     Write-Host 'ACTION REQUIRED' -ForegroundColor Yellow
@@ -679,8 +565,8 @@ function Invoke-NeologikWrite {
 }
 
 # ----- module, sign-in and process seams ----------------------------------------
-# Thin wrappers around the commands that touch the machine or the network;
-# they carry no logic so the test harness can replace them.
+# Wrappers around the commands that touch the workstation or the network. They hold
+# no logic.
 
 function Get-NeologikAvailableModuleVersion {
     param([string]$Name)
@@ -766,12 +652,11 @@ function Get-NeologikTokenError {
 
 function Get-NeologikDeviceCodeToken {
     <#
-    The device-code sign-in, run by this script (project#2306): the address
-    and the code are printed here, the wait is bounded by the code's
-    lifetime (at most DeviceCodeMaximumWaitSeconds) and the script says
-    every 30 seconds that it is still waiting. Returns the token set, or
-    $null after logging why the sign-in did not complete - the caller then
-    tries the next method.
+    The device code sign-in, run by this script. The address and the code are
+    printed here, the wait is limited by the lifetime of the code (at most
+    DeviceCodeMaximumWaitSeconds), and the script reports every 30 seconds that it
+    is waiting. Returns the tokens, or $null after logging why the sign-in did not
+    complete; the caller then tries the next method.
     #>
     param([string]$ClientId, [string[]]$Scopes, [string]$Label, [string]$Claims)
     $state = $script:State
@@ -866,8 +751,8 @@ function Get-NeologikDeviceCodeToken {
 }
 
 function Test-NeologikPreflightEndpoint {
-    # Every endpoint the run talks to must answer before anything is changed
-    # (project#2306). Returns $true, or $false after naming the one to fix.
+    # Every address the run uses must answer before anything is changed.
+    # Returns $true, or $false after naming the address that did not answer.
     $unreachable = @()
     foreach ($endpoint in $script:PreflightEndpoints) {
         if (Test-NeologikEndpoint -Uri $endpoint.Uri) {
@@ -1045,20 +930,20 @@ function Resolve-NeologikInput {
             'NceUserGroupId', 'AdminGroupId', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'AgentGrantsFile', 'MailboxGrantsFile')) {
         $state[$name] = ([string](Get-NeologikProperty $Parameters $name '')).Trim()
     }
-    # Bot app registrations (project#2355): one client id per bot; a comma
-    # list inside one element is accepted for the generated command line.
+    # Agent registrations: one client id for each. A list separated by commas within
+    # one element is accepted.
     $state.BotAppClientIds = @(@(Get-NeologikProperty $Parameters 'BotAppClientIds' @()) | ForEach-Object { "$_" -split ',' } |
         ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
     if (-not $state.BlueprintKey) { $state.BlueprintKey = 'default' }
     $state.RemoveLegacyGrantAppIds = @(Get-NeologikProperty $Parameters 'RemoveLegacyGrantAppIds' @() | Where-Object { $_ })
     $state.UseAzureCliToken = [bool](Get-NeologikProperty $Parameters 'UseAzureCliToken' $false)
     $state.Verify = [bool](Get-NeologikProperty $Parameters 'Verify' $false)
-    # The files given select the run (project#2234): a grants file of either
-    # kind is the post-window run; none is the pre-window run.
+    # The files given select the run: a grants file of either kind selects the later
+    # run; none selects the first run.
     $state.Run = if ($state.AgentGrantsFile -or $state.MailboxGrantsFile) { 'PostWindow' } else { 'PreWindow' }
     $state.Config = $null
-    # The short name names the agent identity blueprint (project#2329): the
-    # parameter wins, else the configuration file; never a display name.
+    # The short name names the agent identity blueprint. The parameter takes precedence,
+    # then the configuration file. It is never taken from a display name.
     $state.ShortName = $state.SolutionShortName.Trim()
     $state.ShortNameSource = if ($state.ShortName) { '-SolutionShortName' } else { '' }
     $state.AgentGrants = $null
@@ -1125,17 +1010,17 @@ function Resolve-NeologikInput {
         throw [System.ArgumentException]::new('The pre-window run needs SubscriptionId and ResourceGroupName for the permission reduction - pass them explicitly or supply -ConfigurationFile.')
     }
     if ($state.Run -eq 'PreWindow' -and -not $state.ShortName) {
-        # The blueprint is named by the short name (project#2329) - never
-        # guessed from a display name.
-        throw [System.ArgumentException]::new("The pre-window run needs SolutionShortName (the solution short name the deployment pipeline names its blueprint by, e.g. abcprd01) - pass -SolutionShortName or supply -ConfigurationFile. It is never guessed from a display name.")
+        # The blueprint is named by the short name, which is never taken from a display
+        # name.
+        throw [System.ArgumentException]::new("The first run needs SolutionShortName (the short name of the environment, by which the agent identity blueprint is named, for example abcprd01) - pass -SolutionShortName or supply -ConfigurationFile. It is never taken from a display name.")
     }
     if ($state.Run -eq 'PreWindow' -and -not $state.SignInAppClientId) {
-        # The sign-in app is adopted by its client id (project#2355) - never
-        # found by display name.
-        throw [System.ArgumentException]::new("The pre-window run needs SignInAppClientId (the client id of the 'Neologik Platform Sign-in' app registration, the value Neologik holds as ADMIN_CLIENT_ID) - pass -SignInAppClientId or supply -ConfigurationFile. The sign-in app is never found by name.")
+        # The sign-in application is named by its client id and is never found by display
+        # name.
+        throw [System.ArgumentException]::new("The first run needs SignInAppClientId (the client id of the 'Neologik Platform Sign-in' application registration) - pass -SignInAppClientId or supply -ConfigurationFile. The sign-in application is never found by name.")
     }
     if ($state.Run -eq 'PreWindow' -and -not $state.SolutionName) {
-        throw [System.ArgumentException]::new("The pre-window run needs SolutionName (the full solution name the deployment pipeline names resources by, e.g. neo-abcprd-uks-01; the sign-in app's uniqueName is sp-admin-<solution name>) - pass -SolutionName or supply -ConfigurationFile.")
+        throw [System.ArgumentException]::new("The first run needs SolutionName (the solution name of the environment, for example neo-abcprd-uks-01; the unique name of the sign-in application is sp-admin-<solution name>) - pass -SolutionName or supply -ConfigurationFile.")
     }
     foreach ($legacyAppId in $state.RemoveLegacyGrantAppIds) {
         if (-not (Test-NeologikGuid $legacyAppId)) {
@@ -1180,10 +1065,9 @@ function Resolve-NeologikInput {
 
     if ($state.MailboxGrantsFile) {
         $mailboxFile = Read-NeologikJsonFile -Path $state.MailboxGrantsFile -Label 'Mailbox grants file'
-        # Two shapes: a bare array of entries, or an object with 'grants'
-        # (the entries) and 'adoptedIdentityAppIds' (client ids of the v4
-        # email monitor identities the v5 email channel adopted - never
-        # removed by -RemoveLegacyGrantAppIds).
+        # Two forms: a list of entries, or an object with 'grants' (the entries) and
+        # 'adoptedIdentityAppIds' (the client ids of identities that remain in use, which
+        # -RemoveLegacyGrantAppIds never removes).
         $rawEntries = @()
         $adopted = @()
         if ($mailboxFile -is [System.Array]) {
@@ -1344,10 +1228,9 @@ function Get-NeologikGraphScope {
         $scopes += 'DelegatedPermissionGrant.ReadWrite.All'
     }
     if ($state.Run -eq 'PreWindow') {
-        # The permission reduction removes the deployment identity's
-        # Application Administrator directory role membership and, once the
-        # SQL server administrator is the deployment identity, its Admin User
-        # Group membership (project#2269).
+        # The permission reduction removes the Application Administrator directory role of
+        # the deployment identity and, once the SQL server administrator is the deployment
+        # identity, its membership of the Admin User Group.
         $scopes += 'RoleManagement.ReadWrite.Directory'
         $scopes += 'GroupMember.ReadWrite.All'
     }
@@ -1375,9 +1258,8 @@ function Connect-NeologikGraph {
             Connect-MgGraph -AccessToken (ConvertTo-SecureString -String $cliToken.Trim() -AsPlainText -Force) -NoWelcome -ErrorAction Stop
         }
         else {
-            # project#2306: the script's own device code first (visible,
-            # bounded), then the Azure CLI session on this machine if there
-            # is one, then the Microsoft Graph PowerShell device-code prompt.
+            # The script's own device code first, then the Azure CLI session of the workstation
+            # if there is one, then the device code prompt of Microsoft Graph PowerShell.
             $connected = $false
             Write-Log 'Signing in to Microsoft Graph - use your Global Administrator account' -Level Info
             $token = Get-NeologikDeviceCodeToken -ClientId $script:GraphPublicClientId -Label 'Microsoft Graph' `
@@ -1440,11 +1322,11 @@ function Connect-NeologikGraph {
 
 function Test-NeologikGlobalAdministrator {
     <#
-    Rights preflight (project#2306): the signed-in account must hold Global
-    Administrator, active, before anything is changed. A real run stops
-    with the one instruction; a verify-only run warns and carries on (its
-    reads still work, the items needing the role report as failed). The
-    account's object id is kept for the Azure rights check.
+    Check of the signed-in account: it must hold Global Administrator, active,
+    before anything is changed. A run that writes stops with the one instruction. A
+    run with -Verify warns and carries on: its reads still work, and the items that
+    need the role are reported as failed. The object id of the account is kept for
+    the check of its Azure roles.
     #>
     $state = $script:State
     $graph = $script:GraphV1
@@ -1579,7 +1461,7 @@ function Grant-NeologikGraphAppRole {
     return $outcome
 }
 
-# ----- agent-user delegated grants (project#2213) --------------------------
+# ----- grants to agent users ---------------------------------------------------
 
 function Get-NeologikAgentUserGrant {
     # The one delegated grant client -> agent user on Microsoft Graph.
@@ -1591,15 +1473,13 @@ function Get-NeologikAgentUserGrant {
 
 function Grant-NeologikAgentUserAccess {
     <#
-    One delegated permission grant per agent or App: client = the agent
-    identity (the FOUNDATION identity, by its stored client id), principal =
-    the agent user (by its stored object id), resource = Microsoft Graph,
-    scope = exactly the exported set. Created or aligned (a differing scope
-    is PATCHed), success only after reading the grant back and comparing
-    the scope SETS - Entra refuses some scope strings transiently, so a
-    refused write is retried with the same scopes in a rotated order
-    (project#1732). The platform never reads these grants itself: the
-    operator confirms them in the NCE afterwards.
+    One delegated permission grant for each agent or App: client = the agent
+    identity (by its client id), principal = the agent user (by its object id),
+    resource = Microsoft Graph, scope = exactly the set in the file. The grant is
+    created, or changed where its scope differs, and counts as made only when it has
+    been read back and its scope compared. Microsoft Entra ID refuses some scope
+    strings for a short time, so a write that is refused is tried again with the
+    same scopes in another order.
     #>
     param(
         [Parameter(Mandatory)][string]$Kind,
@@ -1682,11 +1562,10 @@ function Grant-NeologikAgentUserAccess {
 
 function Grant-NeologikComponentGraphRole {
     <#
-    A declared component Graph role (project#1451) the deployment identity
-    could not grant: the application role on the named workload identity.
-    Only unscoped roles are granted here (tenant-scoped reads); a
-    mailbox- or site-scoped declaration is reported for the customer's
-    Exchange or SharePoint administrator.
+    A Microsoft Graph application permission for a named workload identity, from
+    the grants file. Only permissions that are not limited to a mailbox or a site
+    are granted here; one that is limited is reported for your Exchange or
+    SharePoint administrator.
     #>
     param(
         [Parameter(Mandatory)][string]$App,
@@ -1717,7 +1596,7 @@ function Grant-NeologikComponentGraphRole {
     }
 }
 
-# ----- shared-mailbox grants (email channels, project#990) ---------------------
+# ----- mailbox grants (email channels) ------------------------------------------
 
 function Get-NeologikExchangeServicePrincipal {
     param([string]$Identity)
@@ -1726,13 +1605,12 @@ function Get-NeologikExchangeServicePrincipal {
 
 function Grant-NeologikMailboxAccess {
     <#
-    Exchange Online RBAC for Applications, scoped to ONE mailbox: the channel
-    pod identity's Exchange service principal pointer, a management scope
-    whose recipient filter names the mailbox, and Application Mail.Read /
-    Mail.ReadWrite / Mail.Send assignments on that scope. Idempotent, and
-    Exchange refuses a second scope with the same recipient filter, so an
-    existing scope naming the mailbox (for example the retired email
-    monitor's) is reused whatever its name.
+    Exchange Online role-based access control for applications, limited to one
+    mailbox: the Exchange service principal of the channel identity, a management
+    scope whose recipient filter names the mailbox, and the roles Application
+    Mail.Read, Application Mail.ReadWrite and Application Mail.Send on that scope.
+    Exchange refuses a second scope with the same recipient filter, so an existing
+    scope that names the mailbox is used, whatever its name.
     #>
     param(
         [Parameter(Mandatory)][string]$IdentityAppId,
@@ -1839,10 +1717,9 @@ function Get-NeologikExchangeAssignment {
 
 function Remove-NeologikMailboxAccess {
     <#
-    Removes a retired identity's Exchange role assignments and service
-    principal pointer (the email monitor's identity, replaced by the
-    channel pod identity at the migration window). The management scope is
-    left in place: the replacement grant reuses it.
+    Removes the Exchange role assignments and the Exchange service principal of an
+    identity that is no longer used. The management scope is left in place: the
+    grant that replaces it uses the same scope.
     #>
     param([Parameter(Mandatory)][string]$LegacyAppId)
     $label = "Legacy mailbox grant: $LegacyAppId"
@@ -1872,14 +1749,14 @@ function Remove-NeologikMailboxAccess {
     }
 }
 
-# ----- run steps (pre-window 1-4, post-window 5-6) -----------------------------
+# ----- the steps (first run 1 to 4, later run 5 and 6) --------------------------
 
 function Set-NeologikAgentBlueprint {
     <#
-    Step 1a-1c: the agent identity blueprint, its ownership, its principal,
-    the principal's Graph role and the GitHub OIDC credentials. Each item is
-    independent once the blueprint exists; when the blueprint itself cannot
-    be resolved the dependents are recorded as skipped.
+    Step 1a to 1c: the agent identity blueprint, its owner, its principal, the role
+    of the principal and the federated credentials. Each item stands alone once the
+    blueprint exists. When the blueprint cannot be found or created, the items that
+    depend on it are recorded as skipped.
     #>
     $state = $script:State
     $deploySp = $state.DeploySp
@@ -1887,9 +1764,9 @@ function Set-NeologikAgentBlueprint {
     $graphBeta = $script:GraphBeta
 
     Write-Log 'Step 1a/4: agent identity blueprint' -Level Info
-    # The short name comes from the configuration file or -SolutionShortName,
-    # never from a display name (project#2329): the pipeline resolves the
-    # blueprint by 'Neologik Agent Blueprint - <key> - <short name>'.
+    # The short name comes from the configuration file or -SolutionShortName, never
+    # from a display name. The blueprint is named
+    # 'Neologik Agent Blueprint - <key> - <short name>'.
     $shortName = $state.ShortName
     $blueprintName = "Neologik Agent Blueprint - $($state.BlueprintKey) - $shortName"
     Write-Log "  blueprint name '$blueprintName' (short name '$shortName' from $($state.ShortNameSource))" -Level Info
@@ -1899,10 +1776,10 @@ function Set-NeologikAgentBlueprint {
     try {
         $blueprint = @(Get-NeologikGraphCollection -Uri "$graph/applications?`$filter=displayName eq '$escaped'&`$select=id,appId") | Select-Object -First 1
         if (-not $blueprint) {
-            # Adoption (project#2329): a blueprint the deployment identity
-            # already owns under another short name is the pipeline's
-            # blueprint - adopt it rather than create a second one. Several
-            # such blueprints cannot be told apart: stop and name them.
+            # A blueprint the deployment identity already owns under another short name is
+            # the blueprint of the environment: it is adopted, so that no second one is
+            # created. Several such blueprints cannot be told apart: the script stops and
+            # names them.
             $prefix = "Neologik Agent Blueprint - $($state.BlueprintKey) - "
             $prefixEscaped = $prefix -replace "'", "''"
             $owned = @()
@@ -1921,7 +1798,7 @@ function Set-NeologikAgentBlueprint {
             }
             elseif ($owned.Count -gt 1) {
                 $names = @($owned | ForEach-Object { [string](Get-NeologikProperty $_ 'displayName' '') })
-                Write-Log "  blueprint '$blueprintName' - FAILED (the deployment identity owns $($owned.Count) blueprints under other short names: $($names -join ', ') - pass -SolutionShortName naming the one the pipeline uses)" -Level Error
+                Write-Log "  blueprint '$blueprintName' - FAILED (the deployment identity owns $($owned.Count) blueprints under other short names: $($names -join ', ') - pass -SolutionShortName naming the one the environment uses)" -Level Error
                 Add-Summary 'Agent blueprint' "FAILED - several blueprints owned by the deployment identity: $($names -join ', ')"
                 foreach ($item in @('Blueprint owner', 'Blueprint principal', 'Blueprint principal owner', 'Blueprint principal role', 'Blueprint credentials')) {
                     Add-Summary $item 'SKIPPED - blueprint not available'
@@ -2147,10 +2024,9 @@ function Set-NeologikAgentBlueprint {
 
 function Set-NeologikDeploymentGraphRole {
     <#
-    Step 1d: the deployment identity's Graph roles - retained first, then
-    the retired tenant-wide ones removed. The removals run only when every
-    retained role is confirmed held, so the pipeline never loses a
-    capability in between.
+    Step 1d: the Microsoft Graph application permissions of the deployment
+    identity. The two it keeps are confirmed first, and the others are then
+    removed. The removals are made only when both are confirmed.
     #>
     $state = $script:State
     $deploySp = $state.DeploySp
@@ -2213,7 +2089,7 @@ function Set-NeologikSignInGroupAssignment {
     $state = $script:State
     Write-Log 'Step 2/4: NCE user group assignment to the sign-in application' -Level Info
     if (-not $state.SignInAppClientId -or -not $state.NceUserGroupId) {
-        Write-Log '  sign-in app id or NCE user group id not available - SKIPPED. On pre-v5-onboarded environments supply both (the migration email lists them).' -Level Warning
+        Write-Log '  sign-in app id or NCE user group id not available - SKIPPED. Supply both: Neologik gives the values with the command.' -Level Warning
         Add-Summary 'NCE group assignment' 'SKIPPED - ids not supplied'
         return
     }
@@ -2317,10 +2193,9 @@ function Test-NeologikSharePointConsent {
     $graphSp = $state.GraphSp
     Write-Log '  SharePoint ingestion is part of the solution - checking the Sites.Selected consent' -Level Info
     try {
-        # The tenant may host several environments (the Neologik dev tenant
-        # holds eight): resolve THIS environment's app by its exact name
-        # first, and fall back to the prefix search only when it is the
-        # single match (dev03 finding 2026-09-06, project#2213).
+        # A tenant may hold several environments. The application of this environment is
+        # found by its exact name first, and by the beginning of its name only when one
+        # application matches.
         $spApp = $null
         $ambiguous = $false
         if ($state.ShortName) {
@@ -2396,16 +2271,15 @@ function Test-NeologikPreWindowSharePointConsent {
 
 function Set-NeologikPlatformAppOwnership {
     <#
-    Step 3b of the pre-window run (project#1012): every app registration the
-    platform manages in this tenant is owned by the deployment identity
-    (application and service principal) and carries the uniqueName the
-    deployment finds it by. Adoption in place - the same three Graph calls
-    the blueprint adoption makes; nothing else on the app changes.
+    Step 3b of the first run: every application registration the platform manages
+    in this tenant is owned by the deployment identity (application and service
+    principal) and carries the unique name by which the deployment finds it.
+    Nothing else on the registration changes.
     #>
     $state = $script:State
     $deploySp = $state.DeploySp
     $graph = $script:GraphV1
-    Write-Log 'Step 3b/4: platform app registrations owned by the deployment identity (project#1012)' -Level Info
+    Write-Log 'Step 3b/4: platform app registrations owned by the deployment identity' -Level Info
     $shortName = $state.ShortName
     if (-not $shortName) {
         Write-Log '  no solution short name - the platform app registrations cannot be identified' -Level Warning
@@ -2416,9 +2290,9 @@ function Set-NeologikPlatformAppOwnership {
     $targets = @()
     $listed = @{}
 
-    # Every registration is named by its client id (project#2355): the
-    # sign-in app, the SharePoint app when the environment has one, and the
-    # bot app registrations. Nothing is chosen by display name.
+    # Every registration is named by its client id: the sign-in application, the
+    # SharePoint application where the environment has one, and the agent
+    # registrations. None is chosen by display name.
     $entries = @(@{ AppId = $state.SignInAppClientId; Kind = 'sign-in'; Item = 'Platform app: sign-in registration'
             ExpectedUniqueName = "sp-admin-$($state.SolutionName)"; OwnSecret = 'auth'; RemovesAll = $true })
     if ($state.SharePointAppClientId) {
@@ -2570,8 +2444,8 @@ function Set-NeologikDirectoryObjectOwner {
 }
 
 function Set-NeologikAgentUserGrant {
-    # Step 5 (post-window run): the exported agent-user grants, component
-    # roles and the SharePoint consent check.
+    # Step 5 (later run): the grants to agent users, the application permissions and
+    # the SharePoint consent check.
     $state = $script:State
     $grantsFile = $state.AgentGrants
     Write-Log 'Step 5/6: agent-user delegated grants from the exported grants file' -Level Info
@@ -2618,10 +2492,9 @@ function Set-NeologikAgentUserGrant {
 
 function Set-NeologikMailboxGrant {
     <#
-    Step 6 (post-window run): Exchange Online mailbox grants for email
-    channels and the removal of retired identities' assignments. An
-    identity the file lists under adoptedIdentityAppIds (a v4 email
-    monitor identity the v5 email channel adopted) keeps its assignment.
+    Step 6 (later run): the Exchange Online mailbox grants of the email channels,
+    and the removal of the assignments of identities that are no longer used. An
+    identity the file lists under adoptedIdentityAppIds keeps its assignment.
     #>
     $state = $script:State
     Write-Log 'Step 6/6: Exchange Online mailbox grants for email channels' -Level Info
@@ -2690,7 +2563,7 @@ function Set-NeologikMailboxGrant {
     }
 }
 
-# ----- pre-window step 4: permission reduction ----------------------------------
+# ----- first run, step 4: permission reduction ----------------------------------
 
 function Get-NeologikTokenAccountId {
     # The signed-in account named by an access token (upn, unique_name or
@@ -2744,9 +2617,9 @@ function Connect-NeologikAzure {
         Write-Log '  the CLI token carries no MFA claims challenge - a role write refused with a claims error means run again without -UseAzureCliToken' -Level Info
     }
     else {
-        # project#2306: the script's own device code first (with the MFA
-        # claims the role writes need), then the Azure CLI session on this
-        # machine if there is one, then the Az PowerShell device-code prompt.
+        # The script's own device code first, with the claim the role writes need, then
+        # the Azure CLI session of the workstation if there is one, then the device code
+        # prompt of Az PowerShell.
         $connected = $false
         Write-Log 'Signing in to Azure - the same administrator account' -Level Info
         $token = Get-NeologikDeviceCodeToken -ClientId $script:AzurePublicClientId -Label 'Azure' -Claims $script:AzureMfaClaims `
@@ -2780,9 +2653,9 @@ function Connect-NeologikAzure {
             Write-Log 'Trying the Az PowerShell device-code prompt...' -Level Info
             try {
                 $connectParams = @{ Tenant = $state.TenantId; Subscription = $state.SubscriptionId; UseDeviceAuthentication = $true }
-                # Azure mandatory MFA (ARM-layer): request the 'p1' authentication-context claim so the
-                # role-assignment writes below are not rejected with a claims-challenge error.
-                # Decodes to {"access_token":{"acrs":{"essential":true,"values":["p1"]}}}; needs Az.Accounts >= 5.2.0.
+                # Azure requires multi-factor authentication for every write. The sign-in requests
+                # the 'p1' authentication-context claim, so that the role assignments are not refused.
+                # The value decodes to {"access_token":{"acrs":{"essential":true,"values":["p1"]}}}. Requires Az.Accounts 5.2.0 or later.
                 if ((Get-Command Connect-AzAccount -ErrorAction Stop).Parameters.ContainsKey('ClaimsChallenge')) {
                     $connectParams['ClaimsChallenge'] = 'eyJhY2Nlc3NfdG9rZW4iOnsiYWNycyI6eyJlc3NlbnRpYWwiOnRydWUsInZhbHVlcyI6WyJwMSJdfX19'
                 }
@@ -2812,12 +2685,11 @@ function Connect-NeologikAzure {
 
 function Test-NeologikSubscriptionAdministrator {
     <#
-    Rights preflight (project#2306): the signed-in account must hold Owner
-    or User Access Administrator on the subscription (directly or inherited)
-    before the role assignments are written. A real run stops with the one
-    instruction; a verify-only run warns and carries on. Skipped with a
-    warning when the account's object id is not known (an Azure CLI token
-    for another account) or the read fails.
+    Check of the signed-in account: it must hold Owner or User Access Administrator
+    on the subscription, directly or inherited, before the role assignments are
+    written. A run that writes stops with the one instruction. A run with -Verify
+    warns and carries on. The check is passed over, with a warning, when the object
+    id of the account is not known or the read fails.
     #>
     $state = $script:State
     $objectId = [string](Get-NeologikProperty $state 'SignedInObjectId' '')
@@ -2922,12 +2794,11 @@ function Remove-NeologikAzureRoleAssignment {
 }
 
 function Get-NeologikDirectoryRoleHeld {
-    # The directory roles the deployment identity holds, read from its own
-    # memberOf list. A role's member list (directoryRoles/{id}/members) omits
-    # service principals, so a check through it reports "not held" for a
-    # role the identity does hold (the Agent ID Administrator role on dev03,
-    # 2026-09-08, project#2297). Returns Id, RoleTemplateId and DisplayName
-    # per role; a read failure throws so it is never taken as "not held".
+    # The directory roles the deployment identity holds, read from its own list of
+    # memberships. The list of members of a role omits service principals, so a check
+    # through it would report a role as not held when it is. Returns Id,
+    # RoleTemplateId and DisplayName for each role. A read that fails throws, so that
+    # it is never taken to mean that no role is held.
     $deploySp = $script:State.DeploySp
     return @(Get-MgServicePrincipalMemberOf -ServicePrincipalId $deploySp.Id -All -ErrorAction Stop | ForEach-Object {
             $extra = Get-NeologikProperty $_ 'AdditionalProperties' @{}
@@ -2965,10 +2836,9 @@ function Remove-NeologikAppAdminRole {
 }
 
 function Test-NeologikSqlAdministratorIsDeployIdentity {
-    # project#2269: every SQL server in the resource group must name the
-    # deployment identity as its Microsoft Entra administrator before the
-    # Admin User Group membership can go. Returns $true, or $false with the
-    # reason logged. Az.Sql reads only.
+    # Every SQL server in the resource group must name the deployment identity as its
+    # Microsoft Entra administrator before the membership of the Admin User Group can
+    # be removed. Returns $true, or $false with the reason logged. Reads only.
     $state = $script:State
     $deploySp = $state.DeploySp
     $servers = @(Get-AzSqlServer -ResourceGroupName $state.ResourceGroupName -ErrorAction Stop)
@@ -2990,10 +2860,9 @@ function Test-NeologikSqlAdministratorIsDeployIdentity {
 }
 
 function Remove-NeologikAdminGroupMembership {
-    # 4d. The deployment identity's membership of the Admin User Group
-    # (project#2269): removed only once the SQL server administrator is the
-    # deployment identity, because until then the membership is its only
-    # SQL access.
+    # 4d. The membership of the Admin User Group: removed only once the SQL server
+    # administrator is the deployment identity, because until then the membership is
+    # its only access to SQL.
     $state = $script:State
     $deploySp = $state.DeploySp
     $label = 'Admin User Group membership'
@@ -3052,10 +2921,10 @@ function Test-NeologikDeclaredAzureRole {
 }
 
 function Remove-NeologikUndeclaredAzureRole {
-    # 4e. Declared set or nothing (project#2297): every Azure role assignment
-    # the deployment identity holds in the subscription outside the declared
-    # set is removed - the narrow set at resource-group scope, the two retained
-    # subscription roles and the declared resource-scoped roles are the set.
+    # 4e. The declared set: every Azure role assignment the deployment identity holds
+    # in the subscription outside the declared set is removed. The set is the seven
+    # roles on the resource group, the two on the subscription and the declared role
+    # below the resource group.
     $state = $script:State
     $deploySp = $state.DeploySp
     $rgScope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)"
@@ -3099,10 +2968,9 @@ function Remove-NeologikUndeclaredAzureRole {
 }
 
 function Remove-NeologikUndeclaredDirectoryRole {
-    # 4f. Declared set or nothing (project#2297): the deployment identity
-    # holds no directory role at all. Application Administrator keeps its own
-    # step (4c); this removes every other one held (Agent ID Administrator on
-    # dev03 was one), read from the identity's own memberOf list.
+    # 4f. The declared set: the deployment identity holds no directory role.
+    # Application Administrator has its own step (4c). This step removes every other
+    # directory role, read from the identity's own list of memberships.
     $deploySp = $script:State.DeploySp
     try {
         $held = @(Get-NeologikDirectoryRoleHeld | Where-Object { $_.RoleTemplateId -ne $script:AppAdminRoleTemplateId })
@@ -3133,9 +3001,8 @@ function Remove-NeologikUndeclaredDirectoryRole {
 }
 
 function Remove-NeologikUndeclaredGroupMembership {
-    # 4g. Declared set or nothing (project#2297): the deployment identity is a
-    # member of no group. The Admin User Group keeps its guarded step (4d);
-    # this removes every other membership (Neologik Dev Team on dev03 was one).
+    # 4g. The declared set: the deployment identity is a member of no group. The Admin
+    # User Group has its own step (4d). This step removes every other membership.
     $state = $script:State
     $deploySp = $state.DeploySp
     try {
@@ -3171,12 +3038,9 @@ function Remove-NeologikUndeclaredGroupMembership {
 }
 
 function Set-NeologikKitVersionTag {
-    # 4h. The kit version this environment is kept with (project#2922,
-    # decision 13): the tag NeologikOnboardingKit on the resource group. The
-    # platform's full-environment deployment reads it before an upgrade and
-    # refuses an environment whose kit is older than the release names, so
-    # it is written last, once every step above is in place. Merged with
-    # the existing tags; written only when it differs.
+    # 4h. The version of the kit: the tag NeologikOnboardingKit on the resource group.
+    # The platform reads it before an upgrade. It is written last, merged with the
+    # existing tags, and only when it differs.
     param([Parameter(Mandatory)][string]$ResourceId)
     $label = 'Kit version tag'
     try {
@@ -3207,10 +3071,10 @@ function Set-NeologikKitVersionTag {
 
 function Invoke-NeologikPermissionReduction {
     <#
-    Step 4 of the pre-window run: the deployment identity moves to the
-    resource-group-scoped model. Narrow before broad: the narrow role set
-    and the retained subscription roles are applied first, and nothing is
-    removed unless every one of them is confirmed in place.
+    Step 4 of the first run: the deployment identity is moved to roles on the
+    resource group. The seven roles on the resource group and the two on the
+    subscription are applied first, and nothing is removed unless every one of them
+    is confirmed in place.
     #>
     $state = $script:State
     Write-Log 'Step 4/4: permission reduction - the deployment identity moves to the resource-group-scoped model' -Level Info
@@ -3238,16 +3102,13 @@ function Invoke-NeologikPermissionReduction {
     $rgScope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)"
     $subScope = "/subscriptions/$($state.SubscriptionId)"
 
-    # 4a. narrow role set FIRST - pipelines must never lose access in between.
+    # 4a. The roles on the resource group first, so that the deployment never loses access.
     $narrowComplete = $true
     foreach ($roleName in $script:RequiredRgRoles) {
         if (-not (Set-NeologikAzureRoleAssignment -RoleName $roleName -Scope $rgScope -Label 'RG')) { $narrowComplete = $false }
     }
 
-    # 4a2. ensure the retained subscription-scoped roles (still before any
-    # removal - narrow before broad). 'Cost Management Contributor' is new at
-    # v5 (project#1215): on an already-hardened environment this is the one
-    # assignment this step creates.
+    # 4a2. The two roles on the subscription, still before any removal.
     foreach ($roleName in $script:RequiredSubRoles) {
         if (-not (Set-NeologikAzureRoleAssignment -RoleName $roleName -Scope $subScope -Label 'subscription')) { $narrowComplete = $false }
     }
@@ -3261,33 +3122,32 @@ function Invoke-NeologikPermissionReduction {
         return
     }
 
-    # 4b. remove legacy subscription-scoped assignments.
+    # 4b. Remove the roles on the subscription that are no longer needed.
     foreach ($roleName in $script:LegacySubRoles) {
         Remove-NeologikAzureRoleAssignment -RoleName $roleName -Scope $subScope -Label 'subscription'
     }
 
-    # 4c. remove the Application Administrator directory role membership.
+    # 4c. Remove the Application Administrator directory role.
     Remove-NeologikAppAdminRole
 
-    # 4d. remove the Admin User Group membership (project#2269) - only once
-    # the SQL server administrator is the deployment identity.
+    # 4d. Remove the membership of the Admin User Group, only once the SQL server
+    # administrator is the deployment identity.
     Remove-NeologikAdminGroupMembership
 
-    # 4e-4g. declared set or nothing (project#2297): every other Azure role
-    # assignment, directory role and group membership goes.
+    # 4e to 4g. The declared set: every other Azure role assignment, directory role
+    # and group membership is removed.
     Remove-NeologikUndeclaredAzureRole
     Remove-NeologikUndeclaredDirectoryRole
     Remove-NeologikUndeclaredGroupMembership
 
-    # 4h. the kit version, once everything above is in place (project#2922).
+    # 4h. The version of the kit, once everything above is in place.
     Set-NeologikKitVersionTag -ResourceId $rgScope
 }
 
 # ----- the two runs ---------------------------------------------------------------
 
 function Invoke-NeologikPreWindowRun {
-    # No grants file given: checks and grants, then the guarded permission
-    # reduction. Every customer has this run once before its window.
+    # No grants file given: the checks and grants, then the permission reduction.
     Set-NeologikAgentBlueprint
     Set-NeologikDeploymentGraphRole
     Set-NeologikSignInGroupAssignment
@@ -3331,9 +3191,9 @@ function Write-NeologikSummary {
     $attention = @($script:Summary | Where-Object { $_.Result -match $script:AttentionPattern })
     $pending = @($script:Summary | Where-Object { $_.Result -like 'WOULD *' })
     $runName = if ((Get-NeologikProperty $state 'Run' '') -eq 'PostWindow') { 'Post-window run' } else { 'Pre-window run' }
-    # Machine-readable summary beside the log (project#2213): the deployment
-    # identity's Graph roles as they stand and every consent state, for the
-    # migration ticket. Written next to the script; never contains a secret.
+    # The summary file in JSON: the Microsoft Graph application permissions of the
+    # deployment identity as they stand, and every item of the run. Written beside the
+    # script. It never contains a secret.
     try {
         $heldRoles = @()
         try { $heldRoles = @(Get-NeologikHeldGraphRole) }
@@ -3364,8 +3224,8 @@ function Write-NeologikSummary {
                 Write-Log "Could not write the JSON summary to $directory ($(Get-NeologikErrorText $_)) - trying the next location" -Level Warning
             }
         }
-        if ($written) { Write-Log "Summary written to $written - paste it on the migration ticket" -Level Info }
-        else { Write-Log 'Could not write the JSON summary anywhere - paste the summary table on the migration ticket instead' -Level Warning }
+        if ($written) { Write-Log "Summary written to $written - send it to Neologik" -Level Info }
+        else { Write-Log 'Could not write the JSON summary anywhere - send the summary table to Neologik instead' -Level Warning }
     }
     catch {
         Write-Log "Could not write the JSON summary: $(Get-NeologikErrorText $_)" -Level Warning
@@ -3458,7 +3318,7 @@ function Invoke-NeologikEnvironmentAccess {
 
     Write-NeologikHeader
 
-    # Preflight (project#2306): every endpoint answers before anything runs.
+    # Every address the run uses must answer before anything is changed.
     Write-Log 'Checking this machine can reach Microsoft...' -Level Info
     if (-not (Test-NeologikPreflightEndpoint)) { return 1 }
 
@@ -3481,7 +3341,7 @@ function Invoke-NeologikEnvironmentAccess {
     return (Write-NeologikSummary)
 }
 
-# Dot-sourcing (the test harness) defines the functions without running.
+# When the script is loaded with a dot, the functions are defined and nothing runs.
 if ($MyInvocation.InvocationName -ne '.') {
     $neologikExitCode = Invoke-NeologikEnvironmentAccess @PSBoundParameters
     exit ([int](@($neologikExitCode)[-1]))
