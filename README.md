@@ -2,118 +2,142 @@
 
 ## Overview
 
-This kit prepares your Azure subscription and your Microsoft Entra tenant for a Neologik Platform environment. It is written for the administrator who runs the onboarding and for the security team who reviews it beforehand.
+The Neologik onboarding kit is the set of scripts and documents in this folder. An administrator uses the onboarding kit to prepare your Azure subscription and your Microsoft Entra tenant for one Neologik Platform environment.
 
-Neologik deploys and operates the platform through one deployment identity. That identity can deploy Azure resources into one resource group. On the subscription it holds two roles only, Reader and Cost Management Contributor, which give no control of resources. In your directory it holds two Microsoft Graph application permissions, which let it manage only the application registrations it owns and the credentials of the environment's agent identity blueprint.
+This document is the place to start. This document has two readers.
 
-Every script in the kit is supplied in full, so that it can be reviewed before anything is run. [QUICK-REFERENCE.md](QUICK-REFERENCE.md) lists every change the onboarding script makes and every permission it grants.
+| Reader | Where to read |
+|---|---|
+| Administrators | [Before you start](#before-you-start) and the sections that follow |
+| Approvers | [QUICK-REFERENCE.md](QUICK-REFERENCE.md) and [secure-overview.md](secure-overview.md) |
+
+### The access of the deployment identity
+
+Neologik deploys and operates the Neologik Platform through one deployment identity.
+
+| Subject | Position |
+|---|---|
+| Azure resources | The deployment identity deploys Azure resources into one resource group |
+| Azure subscription | The deployment identity holds two roles on the subscription: Reader and Cost Management Contributor. Neither role allows a change to an Azure resource |
+| Microsoft Graph | The deployment identity holds two Microsoft Graph application permissions in your directory: `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
+| Application registrations | The permission `Application.ReadWrite.OwnedBy` lets the deployment identity manage only the application registrations that the deployment identity owns |
+| Agent identity blueprint | The permission `AgentIdentityBlueprint.AddRemoveCreds.All` lets the deployment identity add and remove credentials on the agent identity blueprint of the environment |
+
+The onboarding kit includes each script in full. Approvers can read each script before an administrator runs the script.
+
+[QUICK-REFERENCE.md](QUICK-REFERENCE.md) lists each change that the onboarding script makes and each permission that the onboarding script grants.
 
 ## Contents
 
-1. [Terms used in this kit](#terms-used-in-this-kit)
-2. [What the kit contains](#what-the-kit-contains)
+1. [Terms used in the onboarding kit](#terms-used-in-the-onboarding-kit)
+2. [What the onboarding kit contains](#what-the-onboarding-kit-contains)
 3. [Onboarding at a glance](#onboarding-at-a-glance)
 4. [Before you start](#before-you-start)
 5. [Run the onboarding script](#run-the-onboarding-script)
-6. [Questions the script asks](#questions-the-script-asks)
-7. [After the script completes](#after-the-script-completes)
+6. [Questions the onboarding script asks](#questions-the-onboarding-script-asks)
+7. [After the onboarding script completes](#after-the-onboarding-script-completes)
 8. [After Neologik deploys the environment](#after-neologik-deploys-the-environment)
 9. [Help](#help)
 
-## Terms used in this kit
+## Terms used in the onboarding kit
 
 | Term | Meaning |
 |---|---|
-| Neologik Context Engine (NCE) | The platform's administration web application, at `https://<your host name>/nce`, where your operators configure agents and Apps |
-| Agent | A conversational or autonomous assistant configured in the NCE. An agent may have channels such as Microsoft Teams |
-| App | A business application installed on the platform alongside the agents |
-| Deployment identity | The service principal that Neologik's deployment uses to create Azure resources in your resource group |
-| Platform Sign-in application | The application registration through which your users sign in to the NCE and to Apps |
-| Agent identity blueprint | The Microsoft Entra Agent ID object under which the platform's agent identities and agent user accounts are created |
-| Short name | The organisation code, the environment type and the environment index together, for example `abcprd01`. It forms part of the name of everything the onboarding script creates |
+| Neologik Context Engine | The administration web application of the Neologik Platform. Platform operators configure agents and Apps there. The address is `https://<your host name>/nce` |
+| Agent | An assistant that a platform operator configures in the Neologik Context Engine. An agent can answer users in a channel such as Microsoft Teams. An agent can also work unattended |
+| App | A business application that runs on the Neologik Platform beside the agents |
+| Deployment identity | The service principal that Neologik signs in with to deploy Azure resources into your resource group |
+| Platform operator | A person who works in the Neologik Context Engine. A platform operator is a member of the group `Neologik NCE Contributors - <short name>` or the group `Neologik NCE Admins - <short name>` |
+| Short name | The organisation code, the environment type and the environment index, joined together. An example is `abcprd01`. The short name is part of the name of each object that the onboarding script creates |
+| Onboarding script | `Install-NeologikEnvironment.ps1` |
+| Environment access script | `Update-NeologikEnvironmentAccess.ps1` |
+| Platform Sign-in application | The application registration that signs your users in to the Neologik Context Engine and to Apps |
+| Agent identity blueprint | The Microsoft Entra Agent ID object that is the parent of each agent identity and each agent user account. The onboarding script creates the agent identity blueprint |
 
-## What the kit contains
+## What the onboarding kit contains
 
 ### Scripts
 
-| Script | When it is run | Guide |
-|---|---|---|
-| `Install-NeologikEnvironment.ps1` | Once, before the environment is deployed. Creates the Azure resources, the security groups, the deployment identity, the Platform Sign-in application and the agent identity blueprint | This document, [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md) and [QUICK-REFERENCE.md](QUICK-REFERENCE.md) |
-| `Update-NeologikEnvironmentAccess.ps1` | When Neologik asks for it: before an environment moves to Neologik Platform version 5, and when an agent or App is to work unattended in Microsoft 365. Neologik sends the complete command | [ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md](ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md) |
-| `Export-NeologikCertificate.ps1` | When you prepare your TLS certificate as a PFX file. Runs on the workstation only | [PFX-CERT-GUIDE.md](PFX-CERT-GUIDE.md) |
-| `Register-NeologikResourceProviders.ps1` | When the onboarding script reports Azure resource provider registrations still pending | [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md#resource-provider-registration) |
-| `Upgrade-TeamsAppInstallations.ps1` | After Neologik supplies an updated Teams app package. Upgrades every user's installed Neologik Teams app to the latest version in your catalogue | [TEAMS-APP-UPGRADE-GUIDE.md](TEAMS-APP-UPGRADE-GUIDE.md) |
+| Script | When an administrator runs the script | What the script does | Guide |
+|---|---|---|---|
+| `Install-NeologikEnvironment.ps1` | Once, before Neologik deploys the environment | Creates the Azure resources, the security groups, the deployment identity, the Platform Sign-in application and the agent identity blueprint | This document, [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md) and [QUICK-REFERENCE.md](QUICK-REFERENCE.md) |
+| `Update-NeologikEnvironmentAccess.ps1` | When Neologik asks. Neologik sends the complete command. The first run comes before an environment moves to Neologik Platform version 5. The later run comes when an agent or App is to work unattended in Microsoft 365 | The first run confirms the directory objects of the environment and reduces the access of the deployment identity. The later run applies the grants in the files that Neologik sends | [ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md](ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md) |
+| `Export-NeologikCertificate.ps1` | When you prepare your TLS certificate | Builds a PFX file on the workstation. Contacts no service | [PFX-CERT-GUIDE.md](PFX-CERT-GUIDE.md) |
+| `Register-NeologikResourceProviders.ps1` | When the onboarding script reports that an Azure resource provider is still registering | Confirms the Azure resource provider registrations on the subscription | [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md#resource-provider-registration) |
+| `Upgrade-TeamsAppInstallations.ps1` | After Neologik sends you a new version of the Teams app package | Upgrades the Neologik Teams app that each user has installed, to the latest version in your Teams app catalogue | [TEAMS-APP-UPGRADE-GUIDE.md](TEAMS-APP-UPGRADE-GUIDE.md) |
 
 ### Documents
 
 | Document | Purpose |
 |---|---|
-| [PRE-ONBOARDING-INFO-GATHERING.md](PRE-ONBOARDING-INFO-GATHERING.md) | The values to collect before the onboarding run |
-| [QUICK-REFERENCE.md](QUICK-REFERENCE.md) | For your security team: every change the onboarding script makes and every permission it grants |
-| [secure-overview.md](secure-overview.md) | A one-page summary of the access the onboarding script grants |
-| [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md) | Optional: creating the deployment service principal yourself |
-| [PFX-CERT-GUIDE.md](PFX-CERT-GUIDE.md) | Preparing the TLS certificate |
-| [FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md) | The steps that follow Neologik's deployment |
-| [AGENT-ACCOUNT-ACCESS-GUIDE.md](AGENT-ACCOUNT-ACCESS-GUIDE.md) | Giving an agent account access to a mailbox, a site or a team |
-| [ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md](ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md) | What `Update-NeologikEnvironmentAccess.ps1` checks and changes |
-| [TEAMS-APP-UPGRADE-GUIDE.md](TEAMS-APP-UPGRADE-GUIDE.md) | Rolling out an updated Teams app |
-| [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md) | The onboarding script in detail: parameters, naming, steps and outputs |
-| [VERSION_HISTORY.md](VERSION_HISTORY.md) | The versions of this kit |
+| [README.md](README.md) | This document. The place to start |
+| [PRE-ONBOARDING-INFO-GATHERING.md](PRE-ONBOARDING-INFO-GATHERING.md) | The values to collect before an administrator runs the onboarding script |
+| [QUICK-REFERENCE.md](QUICK-REFERENCE.md) | For Approvers. Each change that the onboarding script makes and each permission that the onboarding script grants |
+| [secure-overview.md](secure-overview.md) | For Approvers. A summary on one page of the access that the onboarding script grants |
+| [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md) | How to create the deployment service principal yourself. This step is optional |
+| [PFX-CERT-GUIDE.md](PFX-CERT-GUIDE.md) | How to prepare the TLS certificate |
+| [FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md) | The steps that follow the deployment by Neologik |
+| [AGENT-ACCOUNT-ACCESS-GUIDE.md](AGENT-ACCOUNT-ACCESS-GUIDE.md) | How to give an agent account access to a mailbox, a site or a team |
+| [ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md](ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md) | What the environment access script, `Update-NeologikEnvironmentAccess.ps1`, checks and changes |
+| [TEAMS-APP-UPGRADE-GUIDE.md](TEAMS-APP-UPGRADE-GUIDE.md) | How to upgrade the Teams app for your users |
+| [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md) | The onboarding script in detail: parameters, names, steps and output files |
+| [VERSION_HISTORY.md](VERSION_HISTORY.md) | The versions of the onboarding kit |
 
 ### Supporting files
 
 | File | Purpose |
 |---|---|
-| `NeologikGuestUsers.txt` | The Neologik support accounts the onboarding script offers to invite as guests. Review it before the run |
-| `resource-providers.txt` | The Azure resource providers and preview features the platform requires |
-| `inputs-example.json` | A template for the optional answer file, `inputs.json` |
-| `cert\` | The folder in which `Export-NeologikCertificate.ps1` looks for your certificate files |
-| `tests\` | The automated tests of the scripts |
-| `LICENSE` | The licence under which the kit is supplied |
+| `NeologikGuestUsers.txt` | The list of Neologik support accounts. The onboarding script asks whether to invite these accounts as guests. Read the list before you run the onboarding script |
+| `resource-providers.txt` | The list of Azure resource providers and preview features that the Neologik Platform requires |
+| `inputs-example.json` | A template for the answer file, `inputs.json`. The answer file is optional |
+| `cert\` | The folder where `Export-NeologikCertificate.ps1` looks for your certificate files |
+| `LICENSE` | The licence for the onboarding kit |
 
 ## Onboarding at a glance
 
-| Stage | Who | What happens |
+| Stage | Who acts | What happens |
 |---|---|---|
-| 1. Onboarding | Your Global Administrator, who is also Owner of the subscription, runs `Install-NeologikEnvironment.ps1` | The Azure resources, the security groups, the deployment identity, the Platform Sign-in application and the agent identity blueprint are created |
-| 2. Certificate | Your administrator | The TLS certificate for the environment's host name is imported into the Key Vault |
-| 3. Deployment | Neologik | Every platform service is deployed to your resource group |
-| 4. DNS | Your DNS administrator | The environment's host name is pointed at the deployment |
-| 5. Consent | Your Global Administrator | Administrator consent is given for the sign-in applications, from the links Neologik supplies |
-| 6. Teams and user access | Your Teams administrator and your Microsoft Entra administrator | The Teams app is published and users are added to the access groups |
+| 1. Onboarding | A Global Administrator who is also Owner of the subscription | The Global Administrator runs the onboarding script. The onboarding script creates the Azure resources, the security groups, the deployment identity, the Platform Sign-in application and the agent identity blueprint |
+| 2. Certificate | An administrator | The administrator imports the TLS certificate for the host name of the environment into the Key Vault |
+| 3. Deployment | Neologik | Neologik deploys each service of the Neologik Platform to your resource group |
+| 4. DNS | The person who manages your DNS | The person creates the DNS record for the host name of the environment |
+| 5. Consent | A Global Administrator | Neologik sends a consent link for each sign-in application. The Global Administrator opens each consent link and gives administrator consent |
+| 6. Teams and user access | A Teams Administrator, and a Groups Administrator or Global Administrator | The Teams Administrator publishes the Teams app. The Groups Administrator or Global Administrator adds users to the security groups |
 
 ## Before you start
 
 | Requirement | Detail |
 |---|---|
-| Azure role | **Owner** on the subscription. Contributor is not sufficient, because the script assigns Azure roles |
-| Microsoft Entra role | **Global Administrator**. The script creates the application registrations and the agent identity blueprint, grants Microsoft Graph application permissions, assigns groups to the Platform Sign-in application and adds the SQL managed identity to the Directory Readers role |
+| Azure role | **Owner** on the subscription. The Contributor role is not enough, because the onboarding script assigns Azure roles |
+| Microsoft Entra role | **Global Administrator**. The onboarding script creates the application registrations and the agent identity blueprint. The onboarding script grants Microsoft Graph application permissions and assigns security groups to the Platform Sign-in application. The onboarding script also adds the SQL managed identity to the Directory Readers role |
 | Workstation | Windows 10 or Windows 11, with an internet connection |
-| PowerShell | PowerShell 7.4 or later. Windows PowerShell 5.1 cannot run the script |
-| Host name | The fully qualified host name of the environment, for example `neologik.contoso.com`, agreed with Neologik and with whoever manages your DNS |
+| PowerShell | PowerShell 7.4 or later. Windows PowerShell 5.1 cannot run the onboarding script |
+| Host name | The fully qualified host name of the environment. An example is `neologik.contoso.com`. Agree the host name with Neologik and with the person who manages your DNS |
 | Values | The values listed in [PRE-ONBOARDING-INFO-GATHERING.md](PRE-ONBOARDING-INFO-GATHERING.md) |
 
-The script checks both roles before it creates anything and stops if either is missing.
+The onboarding script checks both roles before the onboarding script creates anything. The onboarding script stops if either role is missing.
 
 ## Run the onboarding script
 
-### 1. Extract the kit
+### 1. Extract the onboarding kit
 
-Extract the kit to a folder of your choice, for example `C:\Neologik`. Keep the files together: the onboarding script reads `NeologikGuestUsers.txt`, `resource-providers.txt` and, if you create one, `inputs.json` from its own folder.
+Extract the onboarding kit to a folder, for example `C:\Neologik`.
+
+Keep the files together. The onboarding script reads `NeologikGuestUsers.txt` and `resource-providers.txt` from the folder of the onboarding script. The onboarding script also reads `inputs.json` from that folder, if you create the answer file.
 
 ### 2. Open PowerShell 7
 
 1. Open the **Start** menu and type `PowerShell`.
-2. Select **PowerShell 7**. Do not choose Windows PowerShell.
+2. Select **PowerShell 7**. Do not select Windows PowerShell.
 3. Confirm the version:
 
 ```powershell
 $PSVersionTable.PSVersion
 ```
 
-The version must be 7.4 or later. If PowerShell 7 is not installed, install it from https://aka.ms/powershell.
+The version must be 7.4 or later. If PowerShell 7 is not installed, install PowerShell 7 from https://aka.ms/powershell.
 
-### 3. Go to the kit folder
+### 3. Go to the folder of the onboarding kit
 
 ```powershell
 cd C:\Neologik
@@ -126,9 +150,9 @@ Get-ChildItem .\*.ps1 | Unblock-File
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 ```
 
-The first command marks the scripts of the kit as trusted on this workstation. The second applies to the current PowerShell window only and is not kept.
+The first command marks the scripts in the folder as trusted on this workstation. The second command applies to the current PowerShell window only. Windows does not keep the setting after you close the window.
 
-### 5. Start the script
+### 5. Start the onboarding script
 
 ```powershell
 .\Install-NeologikEnvironment.ps1
@@ -136,64 +160,82 @@ The first command marks the scripts of the kit as trusted on this workstation. T
 
 ### 6. Follow the prompts
 
-The script proceeds in this order:
+The onboarding script works through these stages, from the first stage to the last stage.
 
 | Stage | What you do |
 |---|---|
-| Terms | Read the Neologik Terms of Use and Privacy Policy, then type `I ACCEPT` |
-| Modules | If the script offers to install the Azure and Microsoft Graph modules, press Enter to accept. They are installed for your user account only |
-| Sign-in | If you are already signed in to Azure, the script shows the account and asks whether to sign in again. Press Enter to continue with that account, or type `Y` to change it. Otherwise a browser window opens for you to sign in |
-| Subscription and permissions | The script shows the subscription it will use and verifies the two roles |
+| Terms | Read the Neologik Terms of Use and the Privacy Policy. Then type `I ACCEPT` |
+| Modules | The onboarding script asks to install the Azure modules and the Microsoft Graph modules when the modules are missing. Press Enter to accept. The onboarding script installs the modules for your user account only |
+| Sign-in | When you are already signed in to Azure, the onboarding script shows the account. Press Enter to continue with that account, or type `Y` to sign in with another account. When you are not signed in, a browser window opens for the sign-in |
+| Subscription and permissions | The onboarding script shows the subscription and checks the two roles |
 | Configuration | Answer the questions described in the next section |
-| Summary | Review the configuration summary and confirm |
-| Creation | The script creates the resources. Leave the window open until the completion summary appears |
+| Summary | Read the configuration summary and confirm |
+| Creation | The onboarding script creates the resources. Leave the window open until the completion summary appears |
 
 ### 7. If the run is interrupted
 
-The script records its progress in `NeologikCheckpoint.json`, beside the script. Run the script again and accept the offer to resume: your answers are restored, and each step reuses what it has already created. The checkpoint never holds a secret and is deleted when the script completes.
+The onboarding script records progress in the file `NeologikCheckpoint.json`, in the folder of the onboarding script.
 
-## Questions the script asks
+1. Run the onboarding script again.
+2. The onboarding script asks "Resume from this checkpoint?". Press Enter to resume.
 
-Each question shows a default or an example. Press Enter to accept a default, or type a value. The script repeats a question until the value is valid.
+The onboarding script restores your answers. Each step uses the resources that the earlier run created. The file `NeologikCheckpoint.json` contains no secret. The onboarding script deletes the file when the run completes.
+
+## Questions the onboarding script asks
+
+Each question shows a default value or an example. Press Enter to accept a default value, or type a value. The onboarding script repeats a question until the value is valid.
 
 | Question on screen | What to enter | Default |
 |---|---|---|
-| Organization Code | Your three-character organisation code: letters and digits only, converted to lower case | None |
+| Organization Code | Your organisation code of three characters. Use letters and digits only. The onboarding script converts the code to lower case | None |
 | Environment Type | `dev` for development or `prd` for production | `dev` |
-| Organization Name | Your organisation's full name | None |
-| Bot Hostname (full FQDN) | The environment's fully qualified host name, for example `neologik.contoso.com`. Any `https://` prefix or path is removed | None |
-| Azure Region | The Azure region for the resources, for example `uksouth`. Type `list` to see every region available to the subscription | `uksouth` |
-| Environment Index Number | A number from 01 to 99 that distinguishes environments of the same type | `01` |
-| Resource Group Name, Key Vault Name, Deployment Storage Account Name, Script Runner Managed Identity Name, SQL Managed Identity Name | Press Enter to accept each standard name. Type a different name only if your organisation has its own naming convention | The standard name, shown on screen |
-| Budget Cost-Report Email Recipient(s) | One or more addresses, separated by commas, to receive the daily Azure cost report, or `none` to disable the report | Neologik's cost-report address, shown on screen |
-| Apply Azure resource tags to created resources? | `true` to tag every resource the script creates with Vendor, ApplicationName, ManagedBy, Environment, Solution and DeploymentDate. Choose `true` if your Azure Policies refuse untagged resources | `true` |
-| Custom resource tags | Optional additional tags as comma-separated `key=value` pairs. A custom tag replaces a standard tag of the same name | None |
-| Invite Neologik guest users into this tenant? | `Y` to invite the accounts in `NeologikGuestUsers.txt`, which are listed on screen first. You may then add further addresses, one per line. `N` if you provide accounts for the Neologik team in your own tenant | `Y` |
-| Add existing accounts to the security groups? | Asked only when you decline the invitations. `Y` to add accounts you have already created, from the file or typed at the prompt. No invitation is sent. An address with no matching account is reported and passed over | `N` |
-| Use a service principal you have already created for deployment? | `Y` if you created the deployment service principal yourself, as described in [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md). Have its enterprise application object ID to hand | `N` |
+| Organization Name, the full name of the organisation | The full name of your organisation | None |
+| Host name of the environment, fully qualified | The fully qualified host name of the environment, for example `neologik.contoso.com`. The onboarding script removes an `https://` prefix and a path | None |
+| Azure Region | The Azure region for the resources, for example `uksouth`. Type `list` to see each region that the subscription can use | `uksouth` |
+| Environment Index Number | A number from 01 to 99. The number separates two environments of the same type | `01` |
+| Resource Group Name, Key Vault Name, Deployment Storage Account Name, Script Runner Managed Identity Name, SQL Managed Identity Name | Press Enter to accept each standard name. Type another name when you prefer a name of your choice | The standard name, shown on screen |
+| Budget Cost-Report Email Recipient(s) | One or more email addresses, separated by commas. Each address receives the daily Azure cost report. Type `none` to turn the report off | The cost report address of Neologik, shown on screen |
+| Apply Azure resource tags to created resources? | `true` to tag each resource that the onboarding script creates. The tags are Vendor, ApplicationName, ManagedBy, Environment, Solution and DeploymentDate. Choose `true` when an Azure Policy in your subscription refuses a resource without tags | `true` |
+| Custom resource tags, optional | Further tags, written as `key=value` pairs separated by commas. This answer is optional. A custom tag replaces a standard tag of the same name | None |
+| Invite Neologik guest users into this tenant? | `Y` to invite the accounts in `NeologikGuestUsers.txt`. The onboarding script shows the accounts first. You can then add further addresses, one on each line. `N` when you create accounts for Neologik support staff in your own tenant | `Y` |
+| Add existing accounts to the security groups? | The onboarding script asks this question only after the answer `N` to the invitation question. `Y` to add accounts that you have already created. The onboarding script takes the accounts from `NeologikGuestUsers.txt` or from the prompt, and sends no invitation. The onboarding script reports an address that matches no account and continues | `N` |
+| Use a service principal you have already created for deployment? | `Y` when you created the deployment service principal yourself, as described in [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md). Have the object ID of the enterprise application ready | `N` |
 
-You are not asked about agents. Agents and their channels are created in the NCE after the environment is deployed.
+The onboarding script asks no question about agents. A platform operator creates agents and channels in the Neologik Context Engine after Neologik deploys the environment.
 
-**Accounts added to the security groups.** Every account invited or added through these questions joins all four Neologik security groups, including the Admin User Group, which carries Azure administration rights on the resource group. List only the accounts that should hold Neologik administration and support access. Your own users are added to the group they need after deployment, as described in [FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md).
+### Accounts added to the security groups
 
-**Answer file.** Every answer can be prepared in advance. Copy `inputs-example.json` to `inputs.json` in the kit folder and complete it; each value then appears as the default for its question. See [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md#answer-file).
+Each account that you invite or add through these questions joins all four Neologik security groups. One of the four is the group `Neologik Admin User Group - <short name>`, which holds Azure administration roles on the resource group.
 
-## After the script completes
+List only the accounts that need Neologik administration and support access. Add your own users after the deployment, as described in [FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md).
 
-The completion summary lists everything that was created. Two files are written to the kit folder:
+### Answer file
+
+You can prepare every answer before the run.
+
+1. Copy `inputs-example.json` to `inputs.json` in the folder of the onboarding kit.
+2. Enter your values in `inputs.json`.
+
+Each value then appears as the default value of the matching question. [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md#answer-file) describes each field.
+
+## After the onboarding script completes
+
+The completion summary lists each object that the onboarding script created. The onboarding script writes two files to the folder of the onboarding kit.
 
 | File | Content |
 |---|---|
-| `Neologik_<org><index>_Configuration_<timestamp>.json` | The configuration Neologik needs for the deployment: names, ids and the addresses of the accounts invited or added. It contains no secret |
+| `Neologik_<org><index>_Configuration_<timestamp>.json` | The configuration that Neologik needs for the deployment: names, ids and the addresses of the accounts invited or added. The configuration file contains no secret |
 | `NeologikOnboarding_<timestamp>.log` | The log of the run |
 
 ### 1. Confirm that Neologik has the configuration file
 
-The script uploads the configuration file to the deployment storage account, where Neologik reads it. If the completion summary reports that the upload failed, send the file to support@neologik.ai. Keep the log file with your change records.
+The onboarding script uploads the configuration file to the deployment storage account. Neologik reads the configuration file from the deployment storage account.
 
-### 2. Confirm any pending resource provider registrations
+When the completion summary reports that the upload failed, send the configuration file to support@neologik.ai. Keep the log file as the record of the run.
 
-If the completion summary lists resource providers that are still registering, confirm them before the deployment:
+### 2. Confirm the resource provider registrations
+
+The onboarding script reports each resource provider registration that is not yet complete. The report appears before the completion summary. When the onboarding script reports a registration, run this command before the deployment:
 
 ```powershell
 .\Register-NeologikResourceProviders.ps1
@@ -201,30 +243,40 @@ If the completion summary lists resource providers that are still registering, c
 
 ### 3. Import your TLS certificate
 
-1. Prepare a `.pfx` file for the environment's host name, as described in [PFX-CERT-GUIDE.md](PFX-CERT-GUIDE.md).
-2. In the Azure portal, open the Key Vault named in the completion summary.
+1. Prepare a `.pfx` file for the host name of the environment, as described in [PFX-CERT-GUIDE.md](PFX-CERT-GUIDE.md).
+2. In the Azure portal, open the Key Vault that the completion summary names.
 3. Select **Certificates**, then **Generate/Import**.
-4. Choose **Import**, name the certificate `keyvault-neo-ingress`, select the `.pfx` file and enter its password.
-5. Select **Create**.
+4. Select **Import**.
+5. Name the certificate `keyvault-neo-ingress`.
+6. Select the `.pfx` file and enter the password of the `.pfx` file.
+7. Select **Create**.
 
-The password is used at import only and is not stored. Do not send the `.pfx` file or its password to Neologik.
+The Key Vault uses the password for the import only and does not store the password. Do not send the `.pfx` file or the password to Neologik.
 
-If you cannot produce a `.pfx` file, upload the private key, the server certificate and the certificate authority bundle to the `certificate` container of the deployment storage account named in the completion summary, and tell Neologik. The deployment then assembles the certificate from those files. See [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md#the-tls-certificate).
+When you cannot produce a `.pfx` file, upload three files to the container `certificate` of the deployment storage account:
+
+- the private key
+- the server certificate
+- the certificate authority bundle
+
+The completion summary names the deployment storage account. Tell Neologik after the upload. The deployment then builds the TLS certificate from the three files.
+
+[The TLS certificate](TECHNICAL-REFERENCE.md#the-tls-certificate) in the technical reference describes the upload.
 
 ### 4. Tell Neologik that the environment is ready
 
-Neologik deploys the platform to your resource group and confirms when the deployment is complete.
+Neologik deploys the Neologik Platform to your resource group. Neologik tells you when the deployment is complete.
 
 ## After Neologik deploys the environment
 
-[FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md) describes the remaining steps:
+[FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md) describes the five steps that remain.
 
 1. Create the DNS record for the host name.
 2. Give administrator consent for the sign-in applications.
 3. Publish the Teams app.
 4. Give your users access.
-5. Give an agent account access to your resources, where an agent works unattended.
+5. Give agent accounts access to your resources. This step applies only where an agent works unattended.
 
 ## Help
 
-Email support@neologik.ai and attach the log file of the run. The log contains no secret.
+Email support@neologik.ai and attach the log file of the run. The log file contains no secret.

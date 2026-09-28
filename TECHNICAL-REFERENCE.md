@@ -2,16 +2,24 @@
 
 ## Overview
 
-This document describes the onboarding script in detail: what it requires, the parameters and answer file it accepts, the names it gives to what it creates, what it creates, and the files it writes. It is for the administrator who runs the script and wants more than the step-by-step instructions in [README.md](README.md).
+This document describes the onboarding script, `Install-NeologikEnvironment.ps1`, in detail. The reader is the administrator who runs the onboarding script and needs more detail than [README.md](README.md) gives.
 
-The security description of the script, with every change it makes and every permission it grants, is [QUICK-REFERENCE.md](QUICK-REFERENCE.md).
+| Subject | Section |
+|---|---|
+| What the onboarding script requires | [Requirements](#requirements) |
+| The parameters and the answer file | [Parameters](#parameters) and [Answer file](#answer-file) |
+| The names of the objects that the onboarding script creates | [Naming](#naming) |
+| The objects that the onboarding script creates | [What the onboarding script creates](#what-the-onboarding-script-creates) |
+| The files that the onboarding script writes | [Output files](#output-files) |
+
+[QUICK-REFERENCE.md](QUICK-REFERENCE.md) is the security description of the onboarding script. `QUICK-REFERENCE.md` lists each change that the onboarding script makes and each permission that the onboarding script grants.
 
 | Item | Value |
 |---|---|
-| Script version | v5.0.1 |
-| Kit version | v5.0.3 |
+| Version of the onboarding script | v5.0.2 |
+| Version of the onboarding kit | v5.0.6 |
 
-The kit and each script carry their own version. The kit version follows the Neologik Platform version the kit is issued for; a script version changes when that script changes.
+The onboarding kit has a version, and each script has a separate version. The version of the onboarding kit follows the version of the Neologik Platform. The version of a script changes when the script changes.
 
 ## Contents
 
@@ -22,7 +30,7 @@ The kit and each script carry their own version. The kit version follows the Neo
 5. [Examples](#examples)
 6. [Naming](#naming)
 7. [Input validation](#input-validation)
-8. [What the script creates](#what-the-script-creates)
+8. [What the onboarding script creates](#what-the-onboarding-script-creates)
 9. [Resource provider registration](#resource-provider-registration)
 10. [Output files](#output-files)
 11. [The TLS certificate](#the-tls-certificate)
@@ -33,77 +41,104 @@ The kit and each script carry their own version. The kit version follows the Neo
 
 | Requirement | Detail |
 |---|---|
-| Azure role | Owner on the subscription. Contributor is not sufficient, because the script assigns Azure roles |
-| Microsoft Entra role | Global Administrator, to create the application registrations and the agent identity blueprint, grant the Microsoft Graph application permissions, assign the groups to the Platform Sign-in application and add the SQL managed identity to the Directory Readers role |
+| Azure role | Owner on the subscription. The Contributor role is not enough, because the onboarding script assigns Azure roles |
+| Microsoft Entra role | Global Administrator. See [Actions that need the Global Administrator role](#actions-that-need-the-global-administrator-role) |
 | Workstation | Windows 10 or Windows 11 |
-| PowerShell | 7.4 or later. The script offers to update an older version |
-| PowerShell modules | Installed for the current user if missing, with your agreement: `Az.Accounts` 5.2.0, `Az.Resources` 7.0.0, `Az.Compute` 7.0.0, `Az.KeyVault` 5.0.0, `Az.Storage` 6.0.0, `Az.ManagedServiceIdentity` 1.0.0 and `Microsoft.Graph` 2.0.0, or later versions |
-| Network | Access to Azure, Microsoft Graph and the PowerShell Gallery |
-| Files | `NeologikGuestUsers.txt` and `resource-providers.txt`, beside the script |
+| PowerShell | PowerShell 7.4 or later. When the version is older, the onboarding script asks whether to update PowerShell |
+| PowerShell modules | The modules listed under [PowerShell modules](#powershell-modules). When a module is missing, the onboarding script asks whether to install the module for the current user |
+| Network | The workstation must reach Azure, Microsoft Graph and the PowerShell Gallery |
+| Files | `NeologikGuestUsers.txt` and `resource-providers.txt`, in the folder of the onboarding script |
+
+### Actions that need the Global Administrator role
+
+| Action of the onboarding script |
+|---|
+| The onboarding script creates the application registrations |
+| The onboarding script creates the agent identity blueprint |
+| The onboarding script grants the Microsoft Graph application permissions |
+| The onboarding script assigns the security groups to the Platform Sign-in application |
+| The onboarding script adds the SQL managed identity to the Directory Readers role |
+
+### PowerShell modules
+
+| PowerShell module | Lowest version |
+|---|---|
+| `Az.Accounts` | 5.2.0 |
+| `Az.Resources` | 7.0.0 |
+| `Az.Compute` | 7.0.0 |
+| `Az.KeyVault` | 5.0.0 |
+| `Az.Storage` | 6.0.0 |
+| `Az.ManagedServiceIdentity` | 1.0.0 |
+| `Microsoft.Graph` | 2.0.0 |
 
 ## Parameters
 
-Every parameter is optional. A value that is not given is asked for at a prompt or taken from the answer file.
+Every parameter is optional. When you give no value for a parameter, the onboarding script takes the value from the answer file or asks a question.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `-OrganizationCode` | String | Asked | The three-character organisation code |
-| `-EnvironmentType` | String | `dev` | `dev` or `prd` |
+| `-OrganizationCode` | String | The onboarding script asks | The organisation code of three characters |
+| `-EnvironmentType` | String | `dev` | The environment type: `dev` or `prd` |
 | `-AzureRegion` | String | `uksouth` | The Azure region for the resources |
 | `-TenantId` | String | The tenant of the sign-in | The tenant to sign in to |
-| `-SubscriptionName` | String | The subscription of the sign-in | The name of the subscription to use. The script selects it after sign-in and stops if the account cannot see it. On a resumed run the subscription held in the checkpoint is used |
-| `-KeyVaultName` | String | `kv<short name>` | A Key Vault name of your own |
-| `-ExistingServicePrincipalObjectId` | String | None | The enterprise application object ID of a deployment service principal you created. The script assigns the Azure roles and the Microsoft Graph application permissions to it and creates none of its own |
-| `-ExistingServicePrincipalSecret` | String | None | The client secret of that service principal, to be stored in the Key Vault. If omitted, add the secret to the Key Vault yourself before the first deployment |
-| `-AnswerFile` | String | `inputs.json` beside the script | The path of the answer file |
-| `-SkipGuestInvitation` | Switch | Off | Invites no guest. The security groups are still created, with the signed-in user as their member |
-| `-SkipPowerShellUpdate` | Switch | Off | Omits the PowerShell version check |
-| `-SkipModuleInstall` | Switch | Off | Omits the module check |
-| `-NonInteractive` | Switch | Off | Runs unattended. See [Unattended runs](#unattended-runs) |
-| `-AcceptTerms` | Switch | Off | Accepts the Terms of Use and Privacy Policy. Required with `-NonInteractive` |
-| `-FreshRun` | Switch | Off | Discards the checkpoint of an earlier run without asking |
+| `-SubscriptionName` | String | The subscription of the sign-in | The name of the subscription to use. The onboarding script selects the subscription after the sign-in. The onboarding script stops when the account cannot see the subscription. A resumed run uses the subscription from the checkpoint |
+| `-KeyVaultName` | String | `kv<short name>` | A name of your choice for the Key Vault |
+| `-ExistingServicePrincipalObjectId` | String | None | The object ID of the enterprise application of a deployment service principal that you created. The onboarding script assigns the Azure roles and the Microsoft Graph application permissions to that deployment service principal. The onboarding script creates no deployment service principal |
+| `-ExistingServicePrincipalSecret` | String | None | The client secret of the deployment service principal that you created. The onboarding script stores the client secret in the Key Vault. Without this parameter, add the client secret to the Key Vault yourself before the first deployment |
+| `-AnswerFile` | String | `inputs.json` in the folder of the onboarding script | The path of the answer file |
+| `-SkipGuestInvitation` | Switch | Off | The onboarding script invites no guest. The onboarding script still creates the security groups, with the signed-in user as a member |
+| `-SkipPowerShellUpdate` | Switch | Off | The onboarding script does not check the PowerShell version |
+| `-SkipModuleInstall` | Switch | Off | The onboarding script does not check the PowerShell modules |
+| `-NonInteractive` | Switch | Off | The onboarding script runs without questions. See [Unattended runs](#unattended-runs) |
+| `-AcceptTerms` | Switch | Off | Accepts the Terms of Use and the Privacy Policy. Required with `-NonInteractive` |
+| `-FreshRun` | Switch | Off | The onboarding script deletes the checkpoint of an earlier run without a question |
 
 ## Answer file
 
-Every answer can be prepared in advance. Copy `inputs-example.json` to `inputs.json` beside the script, or name another file with `-AnswerFile`, and complete it. Each value then appears as the default of its question: press Enter to accept it, or type another value.
+You can prepare every answer before the run.
 
-When the file supplies the organisation code, the organisation name and the host name, the script goes straight to the configuration summary. Type `N` at the summary to review the questions one by one.
+1. Copy `inputs-example.json` to `inputs.json` in the folder of the onboarding script. To use another file name, name the file with the parameter `-AnswerFile`.
+2. Enter your values in the answer file.
+
+Each value then appears as the default value of the matching question. Press Enter to accept the value, or type another value.
+
+When the answer file holds the organisation code, the organisation name and the host name, the onboarding script shows the configuration summary first. Type `N` at the configuration summary to go through the questions one at a time.
 
 | Key | Value |
 |---|---|
-| `organizationCode` | The three-character organisation code. Required for a complete file |
-| `organizationName` | The organisation's full name. Required for a complete file |
-| `fqdn` | The environment's fully qualified host name. Required for a complete file |
+| `organizationCode` | The organisation code of three characters. A complete answer file holds this key |
+| `organizationName` | The full name of the organisation. A complete answer file holds this key |
+| `fqdn` | The fully qualified host name of the environment. A complete answer file holds this key |
 | `environmentType` | `dev` or `prd` |
 | `azureRegion` | The Azure region |
 | `environmentIndex` | `01` to `99` |
-| `budgetCostReportEmailRecipients` | A list of addresses for the daily cost report, or `none` to disable the report |
+| `budgetCostReportEmailRecipients` | A list of email addresses for the daily cost report. The value `none` turns the report off |
 | `applyResourceTags` | `true` or `false` |
-| `resourceTagsCustom` | Additional tags, as an object or as a string of `key=value` pairs |
-| `solutionName`, `solutionShortName` | The two naming tokens. See [Naming](#naming) |
-| `resourceGroupName`, `keyVaultName`, `storageAccountName`, `scriptRunnerIdentityName`, `sqlIdentityName` | Names of your own for the resources |
+| `resourceTagsCustom` | Further tags, written as an object or as a string of `key=value` pairs |
+| `solutionName`, `solutionShortName` | The solution name and the short name. See [Naming](#naming) |
+| `resourceGroupName`<br>`keyVaultName`<br>`storageAccountName`<br>`scriptRunnerIdentityName`<br>`sqlIdentityName` | Names of your choice for the five resources |
 | `skipGuestInvitation` | `true` to invite no guest |
-| `addExistingAccountsToGroups` | `true` to add existing accounts to the security groups. Read only when `skipGuestInvitation` is `true` |
-| `existingAccountEmails` | The addresses of those accounts. When omitted, the addresses in `NeologikGuestUsers.txt` are used |
-| `useExistingServicePrincipal` | `true` to reuse a deployment service principal you created |
-| `existingServicePrincipalObjectId` | Its enterprise application object ID |
-| `existingServicePrincipalSecret` | Its client secret. The command-line parameter is preferable, because it keeps the secret out of the file |
+| `addExistingAccountsToGroups` | `true` to add existing accounts to the security groups. The onboarding script reads this key only when `skipGuestInvitation` is `true` |
+| `existingAccountEmails` | The email addresses of the existing accounts. Without this key, the onboarding script uses the addresses in `NeologikGuestUsers.txt` |
+| `useExistingServicePrincipal` | `true` to use a deployment service principal that you created |
+| `existingServicePrincipalObjectId` | The object ID of the enterprise application of that deployment service principal |
+| `existingServicePrincipalSecret` | The client secret of that deployment service principal. Prefer the parameter `-ExistingServicePrincipalSecret`, which keeps the client secret out of the answer file |
 
-Acceptance of the terms, module installation and sign-in are always asked at the prompt and are never read from the file.
+The onboarding script never reads three answers from the answer file. The onboarding script always asks you to accept the terms, to agree to the installation of modules and to sign in.
 
 ## Unattended runs
 
-`-NonInteractive` runs the script without prompts, for automation.
+The parameter `-NonInteractive` runs the onboarding script without questions. Use an unattended run for automation.
 
 | Condition | Detail |
 |---|---|
-| Answer file | Must supply `organizationCode`, `organizationName` and `fqdn`. The script checks this before it does anything else |
-| Terms | Accepted with `-AcceptTerms`. The acceptance is logged |
-| Sign-in | The caller signs in to Azure and to Microsoft Graph before it starts the script. The script reuses both sessions. Access tokens last about an hour and cannot be renewed during the run |
-| Checkpoint | A checkpoint left by an earlier run is an error unless `-FreshRun` is given |
-| Switches | Give `-SkipPowerShellUpdate` and `-SkipModuleInstall`, and state the service principal decision in the answer file, so that no prompt can arise |
-| Checks | A check that would ask a question in an interactive run stops the script instead |
-| Upload | The upload of the configuration file and the log is attempted once |
+| Answer file | The answer file must hold `organizationCode`, `organizationName` and `fqdn`. The onboarding script checks the three keys before any other action |
+| Terms | Give the parameter `-AcceptTerms`. The onboarding script writes the acceptance to the log |
+| Sign-in | The caller signs in to Azure and to Microsoft Graph before the caller starts the onboarding script. The onboarding script uses both sessions. An access token lasts about one hour. The onboarding script cannot renew an access token during the run |
+| Checkpoint | When an earlier run left a checkpoint, the onboarding script stops with an error. Give the parameter `-FreshRun` to delete the checkpoint |
+| Switches | Give `-SkipPowerShellUpdate` and `-SkipModuleInstall`. State in the answer file whether you created the deployment service principal. The onboarding script then has no question to ask |
+| Checks | When a check would ask a question in an interactive run, the onboarding script stops |
+| Upload | The onboarding script tries the upload of the configuration file and the log once |
 
 ```powershell
 Connect-AzAccount -AccessToken $armToken -AccountId $accountName -TenantId $tenantId -SubscriptionId $subscriptionId
@@ -113,25 +148,25 @@ Connect-MgGraph -AccessToken (ConvertTo-SecureString $graphToken -AsPlainText -F
     -AnswerFile .\inputs.json -SkipPowerShellUpdate -SkipModuleInstall
 ```
 
-Run the three commands in the same PowerShell session, so that the script finds both sign-ins.
+Run the three commands in the same PowerShell session. The onboarding script then finds both sign-ins.
 
-The account signed in must hold Owner on the subscription and Global Administrator, as for an interactive run.
+The signed-in account must hold Owner on the subscription and Global Administrator, as for an interactive run.
 
 ## Examples
 
-Interactive run, the usual form:
+An interactive run:
 
 ```powershell
 .\Install-NeologikEnvironment.ps1
 ```
 
-Production environment in UK West:
+A production environment in the Azure region UK West:
 
 ```powershell
 .\Install-NeologikEnvironment.ps1 -OrganizationCode "abc" -EnvironmentType "prd" -AzureRegion "ukwest"
 ```
 
-A deployment service principal you created yourself (see [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md)):
+A deployment service principal that you created, as described in [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md):
 
 ```powershell
 .\Install-NeologikEnvironment.ps1 `
@@ -139,7 +174,7 @@ A deployment service principal you created yourself (see [CREATE-SP-GUIDE.md](CR
     -ExistingServicePrincipalSecret $env:SP_CLIENT_SECRET
 ```
 
-A Key Vault name of your own:
+A Key Vault name of your choice:
 
 ```powershell
 .\Install-NeologikEnvironment.ps1 -KeyVaultName "kv-abc-neologik"
@@ -147,152 +182,217 @@ A Key Vault name of your own:
 
 ## Naming
 
-Two naming tokens determine every standard name. The examples are for organisation code `abc`, environment type `prd`, region UK South and index `01`.
+The onboarding script builds every standard name from two values: the solution name and the short name. The examples use the organisation code `abc`, the environment type `prd`, the Azure region UK South and the environment index `01`.
 
-| Token | Pattern | Example |
+| Value | Pattern | Example |
 |---|---|---|
 | Solution name | `neo-<org><env>-<region>-<index>` | `neo-abcprd-uks-01` |
 | Short name | `<org><env><index>` | `abcprd01` |
 
-`<region>` is the short form of the region, which the script shows on screen when the region is chosen.
+`<region>` stands for the short form of the Azure region. The onboarding script shows the short form on screen when you choose the Azure region.
 
 | Object | Standard name | Example |
 |---|---|---|
 | Resource group | `rg-<solution name>` | `rg-neo-abcprd-uks-01` |
 | Key Vault | `kv<short name>` | `kvabcprd01` |
-| Deployment storage account | `stneodeploy<org><env><region><index>`, shortened to 24 characters | `stneodeployabcprduks01` |
+| Deployment storage account | `stneodeploy<org><env><region><index>`, cut to 24 characters | `stneodeployabcprduks01` |
 | Script runner managed identity | `neologik-script-runner-service-connection-<short name>` | `neologik-script-runner-service-connection-abcprd01` |
 | SQL managed identity | `neologik-sql-managed-identity-<short name>` | `neologik-sql-managed-identity-abcprd01` |
-| Security groups | `Neologik User Group - <short name>`, `Neologik NCE Contributors - <short name>`, `Neologik NCE Admins - <short name>`, `Neologik Admin User Group - <short name>` | `Neologik User Group - abcprd01` |
+| Security groups | `Neologik User Group - <short name>`<br>`Neologik NCE Contributors - <short name>`<br>`Neologik NCE Admins - <short name>`<br>`Neologik Admin User Group - <short name>` | `Neologik User Group - abcprd01` |
 | Deployment identity | `Neologik GitHub Service Connection - <short name>` | `Neologik GitHub Service Connection - abcprd01` |
 | Platform Sign-in application | `Neologik Platform Sign-in - <short name>` | `Neologik Platform Sign-in - abcprd01` |
+| Agent identity blueprint | `Neologik Agent Blueprint - default - <short name>` | `Neologik Agent Blueprint - default - abcprd01` |
 
-### Your own naming convention
+### Names of your choice
 
-The five resource names are offered as defaults at the prompts and can be replaced there or in the answer file. The two tokens can be replaced in the answer file only; the short name also forms the suffix of the group, application and identity names.
+| Name | Where you can change the name |
+|---|---|
+| The names of the resource group, the Key Vault, the deployment storage account and the two managed identities | At the question on screen, or in the answer file |
+| The solution name and the short name | In the answer file only |
 
-Tell Neologik about your convention as well, so that the deployment applies it to the resources it creates inside the resource group.
+The short name is also the last part of the name of each security group, each application and each managed identity.
+
+When you have a naming standard, send the naming standard to Neologik. The deployment then names the resources that the deployment creates inside the resource group to the same naming standard.
 
 ## Input validation
 
-The script repeats a question until the value is valid.
+The onboarding script repeats a question until the value is valid.
 
 | Value | Rule |
 |---|---|
-| Organisation code | Exactly three letters or digits; converted to lower case |
+| Organisation code | Exactly three letters or digits. The onboarding script converts the code to lower case |
 | Organisation name | Required |
-| Host name | A fully qualified host name. A scheme and a path are removed; converted to lower case |
-| Environment type | `dev` or `prd`. The script also accepts `dmo`, `test` and `stg`, which are reserved for environments operated by Neologik |
-| Azure region | A region available to the subscription |
+| Host name | A fully qualified host name. The onboarding script removes a prefix such as `https://` and removes a path. The onboarding script converts the host name to lower case |
+| Environment type | `dev` or `prd`. The onboarding script also accepts `dmo`, `test` and `stg`. Neologik reserves those three values for environments that Neologik operates |
+| Azure region | An Azure region that the subscription can use |
 | Environment index | 01 to 99 |
-| Resource group name | 1 to 90 characters; letters, digits, underscores, hyphens, full stops and parentheses; no full stop at the end |
-| Key Vault name | 3 to 24 characters; letters, digits and hyphens; begins with a letter; ends with a letter or digit; no two hyphens together |
-| Storage account name | 3 to 24 characters; lower-case letters and digits |
-| Managed identity names | 3 to 128 characters; letters, digits, hyphens and underscores; begins with a letter or digit |
-| Email addresses | A valid address form |
-| Custom tags | Keys of letters, digits, full stops, underscores and hyphens; values without commas or equals signs |
+| Resource group name | 1 to 90 characters. Letters, digits, underscores, hyphens, full stops and round brackets. No full stop at the end |
+| Key Vault name | 3 to 24 characters. Letters, digits and hyphens. The first character is a letter. The last character is a letter or a digit. No two hyphens together |
+| Storage account name | 3 to 24 characters. Lower-case letters and digits |
+| Managed identity name | 3 to 128 characters. Letters, digits, hyphens and underscores. The first character is a letter or a digit |
+| Email address | The form of a valid email address |
+| Custom tag | The key holds letters, digits, full stops, underscores and hyphens. The value holds no comma and no equals sign |
 
-The two naming tokens in the answer file are converted to lower case and are not otherwise checked. Make sure they suit every name they form.
+The onboarding script converts the solution name and the short name from the answer file to lower case. The onboarding script makes no other check on those two values. Check that each name built from the two values is valid.
 
-## What the script creates
+## What the onboarding script creates
 
 ### Resource group
 
-The resource group is created in the chosen region. When tagging is chosen, it and every other resource the script creates carry the tags Vendor, ApplicationName, ManagedBy, Environment, Solution and DeploymentDate, together with any tags of your own.
+The onboarding script creates the resource group in the Azure region that you chose.
 
-The resource group also carries the tag `NeologikOnboardingKit`, which records the version of the kit, `v5.0.3`. The platform reads it before an upgrade.
+When you choose tags, the onboarding script tags the resource group and each other resource that the onboarding script creates. The table lists the standard tags. The onboarding script adds your custom tags to the standard tags. A custom tag replaces a standard tag of the same name.
+
+| Tag | Value |
+|---|---|
+| `Vendor` | `Neologik` |
+| `ApplicationName` | `NeologikPlatform` |
+| `ManagedBy` | `NeologikOnboarding` |
+| `Environment` | The organisation code and the environment type, for example `abcprd` |
+| `Solution` | The short name, for example `abcprd01` |
+| `DeploymentDate` | The date of the run |
+
+The onboarding script also adds the tag `NeologikOnboardingKit` to the resource group. The tag records the version of the onboarding kit, `v5.0.6`. The onboarding script adds the tag `NeologikOnboardingKit` even when you choose no tags. The Neologik Platform reads the tag before an upgrade.
 
 ### Guest users
 
-When invitation is chosen, the script invites each address in `NeologikGuestUsers.txt`, and each address you add at the prompt, for which no account exists in the tenant. An account that already exists, as a guest or as a member, is used as it is.
+When you choose invitation, the onboarding script invites each address in `NeologikGuestUsers.txt` and each address that you add at the question. The onboarding script sends no invitation to an address that already has an account in the tenant. The onboarding script uses the existing account, whether the account is a guest or a member.
 
-| Format of `NeologikGuestUsers.txt` |
+`NeologikGuestUsers.txt` has this format:
+
+| Rule |
 |---|
 | One address on each line |
-| Blank lines are ignored |
+| The onboarding script ignores a blank line |
 | A line that begins with `#` is a comment |
 
-When invitation is declined, the script offers to add existing accounts to the security groups instead, with no invitation sent. Each address must match the account's mail address or user principal name exactly. An address with no matching account is reported and passed over.
+When you decline invitation, the onboarding script asks whether to add existing accounts to the security groups. The onboarding script sends no invitation. Each address must match the mail address or the user principal name of an account exactly. The onboarding script reports an address that matches no account and continues.
 
-Every account invited or added joins all four security groups, including the Admin User Group. List only the accounts that should hold Neologik administration and support access.
+Each account that you invite or add joins all four security groups. One of the four is the group `Neologik Admin User Group - <short name>`. List only the accounts that need Neologik administration and support access.
 
 ### Security groups
 
 | Group | Purpose |
 |---|---|
-| `Neologik User Group - <short name>` | The default access group for agents. Its members can use the agents it is attached to |
-| `Neologik NCE Contributors - <short name>` | Its members configure agents and Apps in the Neologik Context Engine (NCE) |
-| `Neologik NCE Admins - <short name>` | Its members administer the NCE, including the installation of use cases |
-| `Neologik Admin User Group - <short name>` | Its members administer the Azure resources in the resource group |
+| `Neologik User Group - <short name>` | The standard security group for access to agents. A member can use each agent that uses this security group |
+| `Neologik NCE Contributors - <short name>` | A member configures agents and Apps in the Neologik Context Engine |
+| `Neologik NCE Admins - <short name>` | A member administers the Neologik Context Engine and installs use cases |
+| `Neologik Admin User Group - <short name>` | A member administers the Azure resources in the resource group |
 
-The signed-in user, and every account invited or added, is made a member of each group. The NCE Contributors group and the NCE Admins group are assigned to the Platform Sign-in application, so that their members' sign-ins carry the groups claim from which the NCE authorises. The platform does not create groups.
+The onboarding script makes the signed-in user a member of each security group. The onboarding script also makes each invited account and each added account a member of each security group.
+
+The onboarding script assigns two security groups to the Platform Sign-in application. The two security groups are `Neologik NCE Contributors - <short name>` and `Neologik NCE Admins - <short name>`. The sign-in token of a member then names the security groups of the member. The Neologik Context Engine reads the security groups from the sign-in token to decide what the member can do.
+
+The Neologik Platform creates no security group.
 
 ### Deployment identity
 
-The script creates the application `Neologik GitHub Service Connection - <short name>` with its service principal and a client secret valid for 365 days, or reuses the service principal you name. The secret is stored in the Key Vault as `neologik-deployment-service-principle-secret`.
+The onboarding script creates the application `Neologik GitHub Service Connection - <short name>`, with a service principal and a client secret. The client secret is valid for 365 days. Alternatively, the onboarding script uses the deployment service principal that you name.
 
-| Scope | Roles |
+The onboarding script stores the client secret in the Key Vault, as the secret `neologik-deployment-service-principle-secret`.
+
+| Scope | What the deployment identity holds |
 |---|---|
-| Subscription | Reader, Cost Management Contributor |
-| Resource group | Contributor, Key Vault Certificates Officer, Key Vault Secrets Officer, Storage Blob Data Contributor, Azure Kubernetes Service RBAC Cluster Admin, Monitoring Contributor, Role Based Access Control Administrator |
-| Microsoft Graph application permissions | `Application.ReadWrite.OwnedBy`, which lets the identity manage only the application registrations it owns, and `AgentIdentityBlueprint.AddRemoveCreds.All`, which lets it add and remove credentials on the agent identity blueprint |
-| Group membership | None |
+| Subscription | Reader and Cost Management Contributor |
+| Resource group | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator |
+| Microsoft Graph application permissions | `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
+| Security groups | No membership |
+
+| Microsoft Graph application permission | What the permission allows |
+|---|---|
+| `Application.ReadWrite.OwnedBy` | The deployment identity manages only the application registrations that the deployment identity owns |
+| `AgentIdentityBlueprint.AddRemoveCreds.All` | The deployment identity adds and removes credentials on the agent identity blueprint |
 
 ### Key Vault
 
-The Key Vault is created with Azure role-based access control. The Admin User Group receives Key Vault Secrets Officer and Key Vault Certificates Officer on the resource group.
+The onboarding script creates the Key Vault with Azure role-based access control. The group `Neologik Admin User Group - <short name>` receives two roles on the resource group: Key Vault Secrets Officer and Key Vault Certificates Officer.
 
 ### Platform Sign-in application
 
-The script creates the application `Neologik Platform Sign-in - <short name>`, through which users sign in to the NCE and to Apps. It makes the deployment identity an owner of the application and of its service principal, and assigns the NCE Contributors group and the NCE Admins group to it.
+The onboarding script creates the application `Neologik Platform Sign-in - <short name>`. The Platform Sign-in application signs users in to the Neologik Context Engine and to Apps.
 
-| Property | Value |
+| Subject | Detail |
 |---|---|
+| Owner | The onboarding script makes the deployment identity an owner of the Platform Sign-in application and of the service principal of the Platform Sign-in application |
+| Security groups | The onboarding script assigns the groups `Neologik NCE Contributors - <short name>` and `Neologik NCE Admins - <short name>` to the Platform Sign-in application |
 | Sign-in audience | Multi-tenant |
 | Redirect address | `https://<host>/nce` |
-| Group claims | Groups assigned to the application |
-| Client secret | Created when the Key Vault holds none; valid for 365 days; stored in the Key Vault as `sp-admin-<solution name>-auth-secret` |
+| Group claims | The security groups assigned to the Platform Sign-in application |
+| Client secret | The onboarding script creates a client secret when the Key Vault holds no client secret for the Platform Sign-in application. The client secret is valid for 365 days. The onboarding script stores the client secret in the Key Vault, as the secret `sp-admin-<solution name>-auth-secret` |
 
-The script declares no permission on the application and gives no consent. Your Global Administrator gives the consent after deployment, as described in [FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md). The platform deployment maintains the registration thereafter.
+The onboarding script declares no permission on the Platform Sign-in application and gives no consent. A Global Administrator gives the consent after the deployment, as described in [FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md).
+
+After onboarding, the deployment by Neologik maintains the application registration of the Platform Sign-in application.
 
 ### Agent identity blueprint
 
-The script creates the agent identity blueprint of the environment, `Neologik Agent Blueprint - default - <short name>`, and its principal, under the Global Administrator's sign-in. The platform creates the agent identities and agent user accounts of the environment under it.
+The onboarding script creates the agent identity blueprint of the environment, `Neologik Agent Blueprint - default - <short name>`. The onboarding script also creates the service principal of the agent identity blueprint. The onboarding script creates both objects under the sign-in of the Global Administrator.
+
+The Neologik Platform creates the agent identities and the agent user accounts of the environment under the agent identity blueprint.
 
 | Item | Value |
 |---|---|
-| Sponsor | The signed-in administrator. The sponsor can be changed in the Microsoft Entra admin centre |
-| Owner | The deployment identity, of the blueprint and of its principal |
-| Microsoft Graph application permission of the principal | `AgentIdUser.ReadWrite.IdentityParentedBy`, which is limited to the agent users of this blueprint |
-| Federated credentials | Three, named `github-oidc-neo-infrastructure`, `github-oidc-neo-bot-service` and `github-oidc-neo-env-config`. Each trusts one repository of the Neologik deployment, named by its repository id, and is issued by `https://token.actions.githubusercontent.com`. No secret is stored |
+| Sponsor | The signed-in administrator. A Global Administrator can change the sponsor in the Microsoft Entra admin centre |
+| Owner | The deployment identity owns the agent identity blueprint and the service principal of the agent identity blueprint |
+| Microsoft Graph application permission of the principal | `AgentIdUser.ReadWrite.IdentityParentedBy`. The permission applies only to the agent users of this agent identity blueprint |
+| Federated credentials | Three. The next table lists the three federated credentials |
+
+| Federated credential |
+|---|
+| `github-oidc-neo-infrastructure` |
+| `github-oidc-neo-bot-service` |
+| `github-oidc-neo-env-config` |
+
+Each federated credential trusts one repository of the Neologik deployment. Each federated credential names the repository by the repository id. The issuer of each federated credential is `https://token.actions.githubusercontent.com`. The onboarding script stores no secret for the agent identity blueprint.
 
 ### Storage account
 
 | Property | Value |
 |---|---|
-| Authentication | Microsoft Entra ID only. Shared key access is disabled |
-| Public blob access | Disabled |
+| Authentication | Microsoft Entra ID only. Shared key access is turned off |
+| Public blob access | Turned off |
 | Containers | `certificate`, `json` and `logs` |
-| Role | The Admin User Group receives Storage Blob Data Contributor on the resource group |
+| Role | The group `Neologik Admin User Group - <short name>` receives Storage Blob Data Contributor on the resource group |
 
 ### Managed identities
 
-| Identity | Roles |
-|---|---|
-| `neologik-script-runner-service-connection-<short name>`, which the deployment uses to run its scripts within Azure | Reader, Key Vault Secrets Officer and Azure Bot Service Contributor Role on the resource group. No role on the subscription |
-| `neologik-sql-managed-identity-<short name>` | Directory Readers in Microsoft Entra ID, which Azure SQL requires in order to resolve Microsoft Entra sign-ins |
+| Managed identity | Purpose | Roles |
+|---|---|---|
+| `neologik-script-runner-service-connection-<short name>` | The deployment runs scripts inside Azure as this managed identity | Reader, Key Vault Secrets Officer and Azure Bot Service Contributor Role on the resource group. No role on the subscription |
+| `neologik-sql-managed-identity-<short name>` | Azure SQL uses this managed identity to look up Microsoft Entra accounts at sign-in | Directory Readers in Microsoft Entra ID |
 
 ### Roles of the Admin User Group
 
-The Admin User Group holds thirteen roles on the resource group and none on the subscription: Contributor, Azure Kubernetes Service Cluster Admin Role, Azure Kubernetes Service RBAC Cluster Admin, Key Vault Administrator, Key Vault Secrets Officer, Key Vault Certificates Officer, Storage Blob Data Owner, Storage Blob Data Contributor, Storage Table Data Contributor, Cognitive Services Data Reader, Cognitive Services OpenAI Contributor, Search Index Data Reader and Azure AI Developer.
+The group `Neologik Admin User Group - <short name>` holds thirteen roles on the resource group and no role on the subscription.
+
+| Roles on the resource group |
+|---|
+| Contributor |
+| Azure Kubernetes Service Cluster Admin Role |
+| Azure Kubernetes Service RBAC Cluster Admin |
+| Key Vault Administrator |
+| Key Vault Secrets Officer |
+| Key Vault Certificates Officer |
+| Storage Blob Data Owner |
+| Storage Blob Data Contributor |
+| Storage Table Data Contributor |
+| Cognitive Services Data Reader |
+| Cognitive Services OpenAI Contributor |
+| Search Index Data Reader |
+| Azure AI Developer |
 
 ## Resource provider registration
 
-The platform requires the Azure resource providers and preview features listed in `resource-providers.txt`. The deployment identity cannot register a provider, so the registrations are made at onboarding, under your sign-in.
+The Neologik Platform requires the Azure resource providers and the preview features in `resource-providers.txt`. The deployment identity cannot register a resource provider. The onboarding script registers the resource providers, under your sign-in.
 
-Registration takes Azure some minutes. The script submits every registration as soon as the permissions have been checked and carries on. It confirms the provider of each resource before it creates that resource, and confirms the whole list before it writes the configuration file.
+Azure takes some minutes to register a resource provider. The onboarding script works in this order:
 
-A registration that is still in progress when the script ends is listed in the completion summary and in the configuration file, as `ResourceProvidersPending`. Confirm it before the deployment:
+1. The onboarding script checks your roles.
+2. The onboarding script submits every registration and continues with the other steps.
+3. Before the onboarding script creates a resource, the onboarding script confirms the resource provider of that resource.
+4. Before the onboarding script writes the configuration file, the onboarding script confirms every registration.
+
+When a registration is still in progress at the end of the run, the completion summary lists the resource provider. The configuration file lists the resource provider under `ResourceProvidersPending`. Run this command before the deployment:
 
 ```powershell
 .\Register-NeologikResourceProviders.ps1
@@ -300,62 +400,81 @@ A registration that is still in progress when the script ends is listed in the c
 
 | Parameter | Purpose |
 |---|---|
-| `-SubscriptionId` | The subscription, when it is not the one of the current Azure session |
+| `-SubscriptionId` | The subscription, when the subscription differs from the subscription of the current Azure session |
 | `-TenantId` | The tenant to sign in to, when no Azure session exists |
-| `-TimeoutSeconds` | How long to wait for the registrations. The default is 900 |
-| `-ListOnly` | Prints the list and makes no contact with Azure |
+| `-TimeoutSeconds` | The number of seconds to wait for the registrations. The default is 900 |
+| `-ListOnly` | Prints the list of resource providers and contacts no Azure service |
 
-The script needs Contributor or Owner on the subscription. It exits with code 1 if a registration is still in progress at the end of the wait; Azure completes the registration in the background, and a later run confirms it.
+The account that runs `Register-NeologikResourceProviders.ps1` needs Contributor or Owner on the subscription.
+
+`Register-NeologikResourceProviders.ps1` ends with exit code 1 when a registration is still in progress at the end of the wait. Azure completes the registration without further action. Run `Register-NeologikResourceProviders.ps1` again later to confirm the registration.
 
 ## Output files
 
 | File | Content |
 |---|---|
-| `Neologik_<org><index>_Configuration_<timestamp>.json` | The configuration Neologik needs for the deployment |
+| `Neologik_<org><index>_Configuration_<timestamp>.json` | The configuration that Neologik needs for the deployment |
 | `NeologikOnboarding_<timestamp>.log` | The log of the run |
 
-Both files are written beside the script and uploaded to the `json` and `logs` containers of the storage account. If the upload of the configuration file fails, the completion summary says so; send the file to Neologik by email.
+The onboarding script writes both files to the folder of the onboarding script. The onboarding script then uploads the configuration file to the container `json` and the log to the container `logs` of the deployment storage account.
 
-The configuration file holds:
+When the upload of the configuration file fails, the completion summary reports the failure. Send the configuration file to Neologik by email.
+
+The configuration file holds these sections:
 
 | Section | Content |
 |---|---|
-| Environment | The tenant, subscription, resource group, region, organisation, host name and the two naming tokens |
-| `SecurityGroups` | The names and ids of the four groups |
-| `AppRegistration` | The deployment identity: its name, client id, roles, and whether the script created it |
-| `NceAuthApp` | The Platform Sign-in application: its name and client id |
-| `AgentBlueprint` | The agent identity blueprint: its name, ids and credentials |
-| `KeyVault`, `StorageAccount`, `ManagedIdentities` | The names and ids of the resources |
-| Accounts | The operator's sign-in name, the addresses of the accounts invited or added, and the cost report recipients |
-| `ResourceProvidersPending` | The registrations still in progress, if any |
+| Environment | The tenant, the subscription, the resource group, the Azure region, the organisation, the host name, the solution name and the short name |
+| `SecurityGroups` | The name and the id of each of the four security groups |
+| `AppRegistration` | The deployment identity: the name, the client id and the roles. The section also records whether the onboarding script created the deployment identity |
+| `NceAuthApp` | The Platform Sign-in application: the name and the client id |
+| `AgentBlueprint` | The agent identity blueprint: the name, the ids and the names of the federated credentials |
+| `KeyVault`, `StorageAccount`, `ManagedIdentities` | The name and the id of each resource |
+| Accounts | The sign-in name of the administrator who ran the onboarding script, the addresses of the accounts invited or added, and the cost report recipients |
+| `ResourceProvidersPending` | Each registration that is still in progress |
 
-Neither file contains a secret. Both contain sign-in names and email addresses.
+Neither file contains a secret. Both files contain sign-in names and email addresses.
 
 ## The TLS certificate
 
-Provide the certificate for the environment's host name in one of two ways. [PFX-CERT-GUIDE.md](PFX-CERT-GUIDE.md) explains how to prepare the file.
+Provide the TLS certificate for the host name of the environment by one of two methods. [PFX-CERT-GUIDE.md](PFX-CERT-GUIDE.md) explains how to prepare the PFX file.
 
-| Method | Steps |
-|---|---|
-| Import into the Key Vault. Recommended | In the Azure portal, open the Key Vault, select **Certificates**, then **Generate/Import**. Choose **Import**, name the certificate `keyvault-neo-ingress`, select the `.pfx` file and enter its password. The password is used at import only |
-| Upload to the storage account | Upload the `.pfx` file, or the private key, server certificate and certificate authority bundle, to the `certificate` container, signing in with Microsoft Entra ID. If you upload a `.pfx` file, store its password in the Key Vault as a secret named `neologik-deployment-certificate-pfx-secret`. Tell Neologik which you have uploaded |
+The TLS certificate must contain the server certificate, the intermediate certificates and the private key.
 
-The certificate must contain the server certificate, the intermediate certificates and the private key.
+### Method 1: Import the PFX file into the Key Vault
+
+Neologik recommends this method.
+
+1. In the Azure portal, open the Key Vault of the environment.
+2. Select **Certificates**, then **Generate/Import**.
+3. Select **Import**.
+4. Name the certificate `keyvault-neo-ingress`.
+5. Select the `.pfx` file and enter the password of the `.pfx` file.
+6. Select **Create**.
+
+The Key Vault uses the password for the import only. Do not send the password to Neologik.
+
+### Method 2: Upload the files to the deployment storage account
+
+1. Sign in with Microsoft Entra ID.
+2. Upload the files to the container `certificate` of the deployment storage account. Upload either the `.pfx` file, or the private key, the server certificate and the certificate authority bundle.
+3. When you upload a `.pfx` file, store the password of the `.pfx` file in the Key Vault. Name the secret `neologik-deployment-certificate-pfx-secret`.
+4. Tell Neologik which files you uploaded.
 
 ## Troubleshooting
 
 | Symptom | Cause | Action |
 |---|---|---|
-| The script reports the PowerShell version | PowerShell is older than 7.4, or Windows PowerShell was opened | Install PowerShell 7 from https://aka.ms/powershell and open PowerShell 7 |
-| The modules cannot be installed | The PowerShell Gallery cannot be reached, or policy prevents installation | Install the modules listed under [Requirements](#requirements) with `Install-Module <name> -Scope CurrentUser`, then run the script with `-SkipModuleInstall` |
-| The sign-in fails | The wrong account or tenant, or a cached session | Run the script again and type `Y` when asked whether to sign in again |
-| "Insufficient permissions" | The account lacks Owner on the subscription or Global Administrator | Obtain the role, then run the script again |
-| A guest cannot be invited | External collaboration settings prevent invitations | Allow guest invitations in Microsoft Entra ID, or create the accounts yourself and choose to add existing accounts |
-| A role assignment reports "BadRequest" | A newly created principal has not yet replicated | None. The script retries |
-| The script reports that a resource already exists | An earlier run created it | None. The script reuses what exists |
-| The run stopped part way | An error, a closed window or a lost connection | Run the script again and accept the offer to resume. Your answers are restored and each step reuses what it has already created |
-| "Resource providers still registering" | Azure has not completed a registration | Wait a few minutes. If the run stopped, run it again and resume. If the registration is listed in the completion summary, run `Register-NeologikResourceProviders.ps1` |
-| "Resource provider list not found" | `resource-providers.txt` is not beside the script | Restore the file from the kit |
+| "The script requires PowerShell 7.4 or later." | The PowerShell version is older than 7.4, or you opened Windows PowerShell | Install PowerShell 7 from https://aka.ms/powershell and open PowerShell 7 |
+| The onboarding script cannot install the modules | The workstation cannot reach the PowerShell Gallery, or a policy prevents the installation | Install each module listed under [PowerShell modules](#powershell-modules) with `Install-Module <name> -Scope CurrentUser`. Then run the onboarding script with `-SkipModuleInstall` |
+| The sign-in fails | The account or the tenant is wrong, or the workstation holds an old session | Run the onboarding script again. Type `Y` at the question `Sign in to Azure again? (default: N)` |
+| "Insufficient permissions" | The account lacks Owner on the subscription or lacks Global Administrator | Obtain the role. Then run the onboarding script again |
+| The onboarding script cannot invite a guest | The external collaboration settings of your tenant prevent invitations | Allow guest invitations in Microsoft Entra ID. Alternatively, create the accounts yourself and choose to add existing accounts |
+| A role assignment reports "BadRequest" | Microsoft Entra ID has not yet copied a new service principal or managed identity to every server | No action. The onboarding script tries again |
+| The onboarding script reports that a resource already exists | An earlier run created the resource | No action. The onboarding script uses the existing resource |
+| The run stopped before the end | An error occurred, somebody closed the window, or the connection failed | Run the onboarding script again. Type `Y` at the question `Resume from this checkpoint? (Y/N, default: Y)`. The onboarding script restores your answers. Each step uses the resources that the earlier run created |
+| "Resource providers still registering" | Azure has not completed a registration | Wait a few minutes. When the run stopped, run the onboarding script again and resume. When the completion summary lists the resource provider, run `Register-NeologikResourceProviders.ps1` |
+| "Resource provider list not found" | `resource-providers.txt` is not in the folder of the onboarding script | Copy `resource-providers.txt` from the onboarding kit to the folder of the onboarding script |
 
 ## Help
 

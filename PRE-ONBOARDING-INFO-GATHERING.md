@@ -2,7 +2,15 @@
 
 ## Overview
 
-Collect the values and make the decisions below before you run `Install-NeologikEnvironment.ps1`. The script asks for the values in sections 2 to 5, except the subscription, which it takes from your sign-in. The items in section 1 are agreed with Neologik beforehand; of these, the script asks for the host name only.
+This document lists the values to collect and the decisions to make before you run the onboarding script, `Install-NeologikEnvironment.ps1`.
+
+| Section | Who provides the values | Does the onboarding script ask for the values? |
+|---|---|---|
+| [1. Agreed with Neologik](#1-agreed-with-neologik) | You and Neologik agree the values together | The onboarding script asks for the host name only |
+| [2. Organisation](#2-organisation) | You | Yes |
+| [3. Environment](#3-environment) | You | Yes |
+| [4. Azure](#4-azure) | You | The onboarding script asks for the Azure region. The onboarding script takes the subscription from your sign-in, or from the parameter `-SubscriptionName` |
+| [5. Decisions](#5-decisions) | You | Yes |
 
 ## Contents
 
@@ -11,49 +19,64 @@ Collect the values and make the decisions below before you run `Install-Neologik
 3. [Environment](#3-environment)
 4. [Azure](#4-azure)
 5. [Decisions](#5-decisions)
+6. [Answer file](#answer-file)
 
 ## 1. Agreed with Neologik
 
 | Item | Detail |
 |---|---|
-| Deployment type | `neo-small`: public endpoints, protected by Microsoft Entra ID authorisation. `neo-secure`: private endpoints and a private network. The deployment that follows onboarding applies the network settings of the chosen type |
-| Host name | The fully qualified host name users will use to reach the environment, for example `neologik.contoso.com`. Confirm it with whoever manages your DNS. Your TLS certificate must be issued for this name |
-| vCPU quota | The deployment needs sufficient vCPU quota in the target subscription and region. Ask Neologik for the number of cores your deployment type needs, then check it as described below |
+| Deployment type | `neo-small` or `neo-secure`. A `neo-small` environment has public endpoints, protected by Microsoft Entra ID authorisation. A `neo-secure` environment has private endpoints and a private network. The deployment by Neologik applies the network settings of the deployment type |
+| Host name | The fully qualified host name that your users enter to reach the environment, for example `neologik.contoso.com`. Confirm the host name with the person who manages your DNS. Your TLS certificate must be issued for the host name |
+| vCPU quota | The deployment needs enough vCPU quota in the subscription and the Azure region. Ask Neologik for the number of cores that your deployment type needs |
 
-**Checking the vCPU quota.** In the Azure portal, open **Subscriptions**, select the subscription and select **Usage + quotas**. Filter by the target region and search for **Dsv6** (the Standard Dsv6 Family vCPUs line) to see the usage against the limit. To raise the limit, select the quota line and select **New Quota Request**. The onboarding script does not check the quota.
+### Check the vCPU quota
+
+The onboarding script does not check the vCPU quota. Check the vCPU quota in the Azure portal.
+
+1. Open **Subscriptions** and select the subscription.
+2. Select **Usage + quotas**.
+3. Filter by the Azure region of the environment.
+4. Search for **Dsv6**. The line **Standard Dsv6 Family vCPUs** shows the usage and the limit.
+
+To raise the limit, select the quota line and select **New Quota Request**.
 
 ## 2. Organisation
 
 | Value | Detail | Default |
 |---|---|---|
-| Organisation name | Your organisation's full name, for example `Contoso Ltd` | None; required |
-| Organisation code | Exactly three characters, letters and digits only, for example `abc`. Converted to lower case. It forms part of every resource name | None; required |
+| Organisation name | The full name of your organisation, for example `Contoso Ltd` | None. The value is required |
+| Organisation code | Exactly three characters. Use letters and digits only, for example `abc`. The onboarding script converts the code to lower case. The organisation code is part of the name of each resource | None. The value is required |
 
 ## 3. Environment
 
 | Value | Detail | Default |
 |---|---|---|
 | Environment type | `dev` for development or `prd` for production | `dev` |
-| Environment index | A number from 01 to 99. Use `01` for the first environment of a type | `01` |
-| Host name | The name agreed in section 1. Any `https://` prefix or path is removed and the name is converted to lower case | None; required |
+| Environment index | A number from 01 to 99. Use `01` for the first environment of each environment type | `01` |
+| Host name | The host name agreed in section 1. The onboarding script removes an `https://` prefix and a path, and converts the host name to lower case | None. The value is required |
 
 ## 4. Azure
 
 | Value | Detail | Default |
 |---|---|---|
-| Subscription | The subscription that will hold the environment. The script uses the subscription of your sign-in, or the one you name with `-SubscriptionName` | The subscription of your sign-in |
-| Azure region | A valid Azure region name, for example `uksouth`, `ukwest`, `northeurope`, `westeurope`, `switzerlandnorth`, `eastus` or `westus`. Agree the region with Neologik: not every Azure service is available in every region | `uksouth` |
+| Subscription | The subscription that holds the environment. The onboarding script uses the subscription of your sign-in. To use another subscription, name the subscription with the parameter `-SubscriptionName` | The subscription of your sign-in |
+| Azure region | The name of an Azure region, for example `uksouth`, `ukwest`, `northeurope`, `westeurope`, `switzerlandnorth`, `eastus` or `westus`. Agree the Azure region with Neologik, because some Azure services are not available in every Azure region | `uksouth` |
 
 ## 5. Decisions
 
 | Decision | Detail | Default |
 |---|---|---|
-| Resource naming | The script computes a standard name for everything it creates (resource group, Key Vault, storage account, managed identities) and offers each as a default. If your organisation has its own Azure naming convention, prepare the names in advance and share the convention with Neologik, so that the deployment applies it to the resources it creates | The standard names |
-| Resource tags | Whether the script tags the resources it creates, and any tags of your own to add. Choose tagging if your Azure Policies refuse untagged resources | Tagged |
-| Cost report recipients | The addresses that receive the daily Azure cost report, or none | Neologik's cost-report address |
-| Neologik guest users | Whether the Neologik support accounts listed in `NeologikGuestUsers.txt` are invited as guests. If you provide accounts for the Neologik team in your own tenant instead, decline the invitations and have the exact addresses of those accounts to hand: each must match the account's mail address or user principal name | Invited |
-| Deployment service principal | Whether the script creates the deployment service principal or you create it yourself. If you create it, follow [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md) and have ready its enterprise application object ID and, optionally, its client secret | Created by the script |
+| Resource names | The onboarding script proposes a standard name for the resource group, the Key Vault, the storage account and the two managed identities. When you have a naming standard for Azure, prepare the five names before the run. Send the naming standard to Neologik, so that the deployment names the other resources to the same standard | The standard names |
+| Resource tags | Decide whether the onboarding script tags the resources that the onboarding script creates. Decide which further tags to add. Choose tags when an Azure Policy in your subscription refuses a resource without tags | The onboarding script tags the resources |
+| Cost report recipients | The email addresses that receive the daily Azure cost report. You can choose no recipient | The cost report address of Neologik |
+| Neologik guest users | Decide whether the onboarding script invites the Neologik support accounts in `NeologikGuestUsers.txt` as guests. The alternative is to create accounts for Neologik support staff in your own tenant. For the alternative, have the exact address of each account ready. Each address must match the mail address or the user principal name of the account | The onboarding script invites the accounts |
+| Deployment service principal | Decide whether the onboarding script creates the deployment service principal, or you create the deployment service principal. To create the deployment service principal yourself, follow [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md). Have the object ID of the enterprise application ready. The client secret is optional | The onboarding script creates the deployment service principal |
 
-The script does not ask about agents. Agents and their channels are created in the Neologik Context Engine after the environment is deployed.
+The onboarding script asks no question about agents. A platform operator creates agents and channels in the Neologik Context Engine after Neologik deploys the environment.
 
-Every value can be prepared in an answer file: copy `inputs-example.json` to `inputs.json` in the kit folder and complete it.
+## Answer file
+
+You can prepare every value in an answer file before the run.
+
+1. Copy `inputs-example.json` to `inputs.json` in the folder of the onboarding kit.
+2. Enter your values in `inputs.json`.
