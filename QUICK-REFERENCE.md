@@ -339,7 +339,7 @@ The onboarding script writes a checkpoint at these points:
 | Where the run stopped | What to do |
 |---|---|
 | After the administrator confirmed the configuration | Run the onboarding script again and resume. The onboarding script skips the terms and the questions. Each step runs again and uses the objects that the earlier run created |
-| Before the administrator confirmed the configuration | Run the onboarding script again with the parameter `-FreshRun`. The parameter deletes the checkpoint |
+| Before the administrator confirmed the configuration | Run the onboarding script again and resume. The checkpoint holds no configuration, so the onboarding script asks the questions again |
 
 ### Failure
 
@@ -352,6 +352,7 @@ The onboarding script writes a checkpoint at these points:
 |---|---|
 | 0 | The run completed, or the administrator declined the terms. The onboarding script also ends with exit code 0 after an update of PowerShell |
 | 1 | The run failed. The onboarding script shows the error and stops |
+| 2 | The run stopped because the account lacks a permission. The onboarding script names the permission and keeps the checkpoint. Obtain the permission, then run the onboarding script again and resume |
 
 ## Summary of permissions by scope
 

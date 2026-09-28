@@ -145,7 +145,7 @@
         -AnswerFile .\inputs.json -SkipPowerShellUpdate -SkipModuleInstall
 
 .NOTES
-    Version: v5.0.3
+    Version: v5.0.4
     Requires: PowerShell 7.4 or later
     Requires: Owner on the subscription and Global Administrator in the tenant
 #>
@@ -216,7 +216,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v5.0.3'
+$script:Version = 'v5.0.4'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
 $script:KitVersion = 'v5.0.7'
@@ -314,11 +314,13 @@ function Write-Log {
         Write-Warning "The script could not write to the log file: $_"
     }
 
-    # Write to console
+    # Write to console. An error message goes to the console in red and throws nothing.
+    # Write-Error would throw, because $ErrorActionPreference is 'Stop', and the messages that
+    # follow an error message would never print. Each caller stops explicitly.
     switch ($Level) {
         'Info' { Write-Information $Message }
         'Warning' { Write-Warning $Message }
-        'Error' { Write-Error $Message }
+        'Error' { Write-Host $Message -ForegroundColor Red }
         'Success' { Write-Host $Message -ForegroundColor Green }
     }
 }
@@ -696,10 +698,17 @@ function Install-PowerShellLatest {
         else {
             # Without winget, download the installer
             Write-Log "winget is not available. Downloading the PowerShell installer..." -Level Info
-            $installerUrl = "https://github.com/PowerShell/PowerShell/releases/latest/download/PowerShell-7.4.6-win-x64.msi"
+            # The name of the installer holds the version number of the release. The script reads the
+            # name from the latest release, so that the address never names a version that Microsoft removed.
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/PowerShell/PowerShell/releases/latest"
+            $installer = @($release.assets | Where-Object { $_.name -like 'PowerShell-*-win-x64.msi' }) | Select-Object -First 1
+            if (-not $installer) {
+                throw "The latest PowerShell release holds no installer for Windows x64. Install PowerShell 7 from https://aka.ms/powershell and run the script again."
+            }
             $installerPath = Join-Path $env:TEMP "PowerShell-Setup.msi"
 
-            Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
+            Write-Log "Downloading $($installer.name)..." -Level Info
+            Invoke-WebRequest -Uri $installer.browser_download_url -OutFile $installerPath -UseBasicParsing
             
             Write-Log "Installing PowerShell from the installer file..." -Level Info
             Start-Process msiexec.exe -ArgumentList "/i `"$installerPath`" /qn /norestart" -Wait -NoNewWindow
@@ -1980,7 +1989,7 @@ function New-NeologikAppRegistration {
             ObjectId = $app.Id
             ServicePrincipalId = $sp.Id
             SecretExpiry = $secretEndDate.ToString('yyyy-MM-dd')
-            SubscriptionRoles = @('Reader')
+            SubscriptionRoles = @('Reader', 'Cost Management Contributor')
             RGRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
             GraphAppRoles = @('Application.ReadWrite.OwnedBy', 'AgentIdentityBlueprint.AddRemoveCreds.All')
         }
@@ -2048,7 +2057,7 @@ function Get-NeologikExistingAppRegistration {
             ServicePrincipalId = $sp.Id
             SecretExpiry = 'client-managed'
             Source = 'client-provided'
-            SubscriptionRoles = @('Reader')
+            SubscriptionRoles = @('Reader', 'Cost Management Contributor')
             RGRoles = $requiredRgRoles
             GraphAppRoles = @('Application.ReadWrite.OwnedBy', 'AgentIdentityBlueprint.AddRemoveCreds.All')
         }
@@ -4786,8 +4795,11 @@ function Start-NeologikOnboarding {
         # The script confirms each resource provider before the creation of the resource, and the whole list before the export.
         Start-ResourceProviderRegistration -ProviderList $script:ProviderList
 
-        # Step 6: Collect the configuration. A resumed run skips this step
-        if (-not $resuming) {
+        # Step 6: Collect the configuration. A resumed run skips this step when the checkpoint
+        # holds the configuration. The first checkpoint is written before the questions, so a run
+        # resumed from the first checkpoint asks the questions.
+        $configurationRestored = $resuming -and ($script:CompletedSteps.Contains('ConfigGathered') -or -not [string]::IsNullOrWhiteSpace([string]$script:OrganizationCode))
+        if (-not $configurationRestored) {
 
         Write-Host "`n+===============================================================+" -ForegroundColor Magenta
         Write-Host "|                                                               |" -ForegroundColor Magenta
@@ -5713,6 +5725,12 @@ function Start-NeologikOnboarding {
             Write-Host "     Org: $($script:OrganizationCode)  |  Env: $($script:EnvironmentType)  |  Region: $($script:AzureRegion)" -ForegroundColor Cyan
             Write-Host "     Resource Group: $($script:ResourceGroupName)" -ForegroundColor Cyan
             Write-Host ""
+
+            # A resumed run honours -SkipGuestInvitation from this command line. Without the
+            # parameter, the answer of the earlier run stands.
+            if ($script:SkipGuestInvitationFromCli) {
+                $script:ConfigData['SkipGuestInvitation'] = [bool]$SkipGuestInvitation
+            }
         }
 
         # Step 7: Create the resource group
@@ -5849,7 +5867,8 @@ function Start-NeologikOnboarding {
     }
     catch {
         Write-Log "Onboarding failed: $_" -Level Error
-        Write-Log "Stack Trace: $($_.ScriptStackTrace)" -Level Error
+        # The stack trace goes to the log file only.
+        Write-Log "Stack Trace: $($_.ScriptStackTrace)" -Level Info
 
         if ($_.Exception.Message -match "Insufficient permissions:|ERROR: Insufficient permissions") {
             Write-Host "`n[X] The onboarding script stopped: a permission is missing." -ForegroundColor Red
