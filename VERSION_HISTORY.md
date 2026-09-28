@@ -27,7 +27,7 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.0.4 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Install-NeologikEnvironment.ps1` | v5.0.5 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
 | `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.7 | Reduces the access of the deployment identity of an existing environment to the access that version 5 of the Neologik Platform needs. Applies the grants for agents and Apps that work unattended |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
@@ -44,6 +44,8 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | `Install-NeologikEnvironment.ps1` | The configuration file records both roles of the deployment identity on the subscription: Reader and Cost Management Contributor |
 | `Install-NeologikEnvironment.ps1` | A run resumed from the first checkpoint asks the questions, because the first checkpoint holds no configuration. A resumed run honours `-SkipGuestInvitation` from the command line |
 | `QUICK-REFERENCE.md` | The document describes the resume from the first checkpoint and exit code 2 |
+| `Install-NeologikEnvironment.ps1` | Version v5.0.5. The onboarding script creates the application registration of the deployment identity for a single tenant. The deployment signs in to your tenant only |
+| Documents | The documents state why the Platform Sign-in application accepts accounts of more than one tenant: Neologik support staff can sign in with an account of the Neologik tenant, when you allow that tenant |
 
 ## Version 5.0.7
 

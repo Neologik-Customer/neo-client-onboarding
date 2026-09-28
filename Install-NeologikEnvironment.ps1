@@ -145,7 +145,7 @@
         -AnswerFile .\inputs.json -SkipPowerShellUpdate -SkipModuleInstall
 
 .NOTES
-    Version: v5.0.4
+    Version: v5.0.5
     Requires: PowerShell 7.4 or later
     Requires: Owner on the subscription and Global Administrator in the tenant
 #>
@@ -216,7 +216,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v5.0.4'
+$script:Version = 'v5.0.5'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
 $script:KitVersion = 'v5.0.7'
@@ -1945,8 +1945,10 @@ function New-NeologikAppRegistration {
         else {
             Write-Log "Creating the application registration $appName..." -Level Info
 
+            # Single tenant: the deployment signs in to this tenant only, with the client secret.
+            # No account of another directory uses the registration.
             $app = New-MgApplication -DisplayName $appName `
-                -SignInAudience "AzureADMultipleOrgs" `
+                -SignInAudience "AzureADMyOrg" `
                 -ErrorAction Stop
 
             Write-Log "Application registration created, client id $($app.AppId)" -Level Success
