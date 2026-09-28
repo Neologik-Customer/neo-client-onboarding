@@ -1,59 +1,61 @@
 <#
 .SYNOPSIS
-    Upgrades every user's installed copy of the Neologik Teams apps to the latest
-    version published in your organisation's Teams app catalogue.
+    Upgrades the Neologik Teams app that each user has installed to the latest
+    version in the Teams app catalogue of the tenant.
 
 .DESCRIPTION
-    The script calls Microsoft Graph, as the signed-in administrator, to:
-    1. Read the apps your organisation has uploaded to its Teams app catalogue and
-       select the Neologik apps, by the Neologik name or Neologik's Microsoft partner
-       number in the name or description of the app.
-    2. Find, for each app selected, the users who have it installed.
-    3. Upgrade each installation that is not at the latest version in the catalogue.
-       The user sees no update prompt.
+    The script calls Microsoft Graph as the signed-in administrator. The script works
+    in three steps:
+    1. The script reads the Teams apps that were uploaded to the Teams app catalogue
+       of the tenant. The script selects each Teams app whose name or description
+       holds the name Neologik or the Microsoft partner number of Neologik.
+    2. For each selected Teams app, the script finds each user who has the Teams app
+       installed.
+    3. The script upgrades each installed Teams app that is older than the latest
+       version in the Teams app catalogue. The user sees no question.
 
-    It writes a log and a report beside itself. It creates no directory object and no
-    credential, and removes nothing.
+    The script writes a log and a report to the folder of the script. The script
+    creates no directory object and no credential. The script removes nothing.
 
 .PARAMETER AppId
-    One or more Teams app manifest ids to upgrade. When given, the script upgrades the
-    catalogue apps with those ids and does not search for the Neologik apps.
+    One or more manifest ids of Teams apps. With this parameter, the script upgrades
+    only the Teams apps with those manifest ids. The script then makes no search for
+    the Neologik Teams apps.
 
 .PARAMETER TenantId
-    The tenant to sign in to. When omitted, the administrator chooses the tenant at
-    sign-in.
+    The tenant to sign in to. Without this parameter, the administrator chooses the
+    tenant at the sign-in.
 
 .PARAMETER UseDeviceAuthentication
-    Signs in with a device code instead of the browser, for a workstation on which a
-    browser sign-in is not possible.
+    The script signs in with a device code. Use this parameter on a workstation where
+    a browser sign-in is not possible.
 
 .PARAMETER Force
-    Omits the confirmation before the upgrade.
+    The script starts the upgrade without the question that asks for confirmation.
 
 .PARAMETER WhatIf
-    A dry run. Shows on screen what would be upgraded and upgrades nothing. No log and
-    no report is written.
+    The script shows on screen what a run would upgrade. The script upgrades nothing
+    and writes no log and no report.
 
 .EXAMPLE
     .\Upgrade-TeamsAppInstallations.ps1
-    # Upgrades every Neologik app in the catalogue.
+    # Upgrades every Neologik Teams app in the Teams app catalogue.
 
 .EXAMPLE
     .\Upgrade-TeamsAppInstallations.ps1 -AppId "00000000-0000-0000-0000-000000000000"
-    # Upgrades one app, named by its manifest id.
+    # Upgrades one Teams app, named by the manifest id.
 
 .EXAMPLE
     .\Upgrade-TeamsAppInstallations.ps1 -WhatIf
-    # A dry run.
+    # Shows what a run would upgrade and upgrades nothing.
 
 .NOTES
-    Version: v0.2.0
+    Version: v0.2.1
     Requires: PowerShell 7.4 or later
-    Requires: the Microsoft Graph PowerShell modules, installed for the current user
-    if they are missing
-    Requires: a Global Administrator at the first run, to consent on behalf of your
-    organisation
-    Delegated Microsoft Graph permissions requested at sign-in:
+    Requires: the Microsoft Graph PowerShell modules. The script installs the modules
+    for the current user when the modules are missing
+    Requires: a Global Administrator at the first run, to give consent for the tenant
+    Delegated Microsoft Graph permissions requested at the sign-in:
         - AppCatalog.Read.All
         - TeamsAppInstallation.ReadWriteAndConsentForUser
         - User.Read.All
@@ -78,7 +80,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $InformationPreference = 'Continue'
 
-$script:Version = 'v0.2.0'
+$script:Version = 'v0.2.1'
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $script:LogFile = Join-Path $PSScriptRoot "TeamsAppUpgrade_$($script:FileTimestamp).log"
 $script:ReportFile = Join-Path $PSScriptRoot "TeamsAppUpgrade_$($script:FileTimestamp).csv"
@@ -104,7 +106,7 @@ function Write-Log {
 }
 
 function Write-Header {
-    $target = if ($AppId) { "AppIds: $($AppId -join ', ')" } else { "All Neologik apps" }
+    $target = if ($AppId) { "AppIds: $($AppId -join ', ')" } else { "All Neologik Teams apps" }
     $header = @"
 
 ===============================================================
@@ -115,7 +117,7 @@ function Write-Header {
 
 "@
     Write-Host $header -ForegroundColor Cyan
-    Write-Log "Starting bulk upgrade ($target)" -Level Info
+    Write-Log "Starting the upgrade. Scope: $target" -Level Info
 }
 
 #endregion
@@ -124,8 +126,8 @@ function Write-Header {
 
 function Test-PowerShellVersion {
     if ($PSVersionTable.PSVersion -lt [Version]'7.4.0') {
-        Write-Log "PowerShell 7.4+ required. Current: $($PSVersionTable.PSVersion)" -Level Error
-        Write-Host "Install or update from: https://learn.microsoft.com/powershell/" -ForegroundColor Yellow
+        Write-Log "PowerShell 7.4 or later is required. Current version: $($PSVersionTable.PSVersion)" -Level Error
+        Write-Host "Install or update PowerShell from: https://learn.microsoft.com/powershell/" -ForegroundColor Yellow
         exit 1
     }
     Write-Log "PowerShell $($PSVersionTable.PSVersion) OK" -Level Success
@@ -142,7 +144,7 @@ function Install-GraphModule {
             Set-PSRepository -Name 'PSGallery' -InstallationPolicy Trusted
         }
         foreach ($module in $missing) {
-            Write-Log "Installing $module (current user scope)..." -Level Info
+            Write-Log "Installing $module for the current user..." -Level Info
             Install-Module -Name $module -Scope CurrentUser -Force -AllowClobber
         }
     }
@@ -150,7 +152,7 @@ function Install-GraphModule {
     foreach ($module in $required) {
         Import-Module $module -ErrorAction Stop
     }
-    Write-Log "Microsoft.Graph modules ready" -Level Success
+    Write-Log "The Microsoft Graph modules are ready" -Level Success
 }
 
 #endregion
@@ -167,10 +169,10 @@ $script:GraphPowerShellAppId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
 $script:MicrosoftGraphAppId  = '00000003-0000-0000-c000-000000000000'
 
 function Grant-AdminConsent {
-    # This function is not called by the script. It would grant the three permissions
-    # to Microsoft Graph PowerShell for the whole tenant. Consent is given by the
-    # administrator at sign-in instead.
-    Write-Log "Granting org-wide admin consent for required scopes..." -Level Info
+    # The script never calls this function. The function would grant the three
+    # permissions to Microsoft Graph PowerShell for the whole tenant. The administrator
+    # gives the consent at the sign-in.
+    Write-Log "Giving administrator consent for the whole tenant..." -Level Info
 
     $graphPsSp = (Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '$($script:GraphPowerShellAppId)'").value | Select-Object -First 1
     if (-not $graphPsSp) {
@@ -186,13 +188,13 @@ function Grant-AdminConsent {
         $existingScopes = $existing.scope -split ' '
         $missing = $script:RequiredScopes | Where-Object { $existingScopes -notcontains $_ }
         if (-not $missing) {
-            Write-Log "  Admin consent already in place - no changes needed" -Level Success
+            Write-Log "  Administrator consent is already given. No change is needed" -Level Success
             return
         }
         $merged = (($existingScopes + $script:RequiredScopes) | Sort-Object -Unique) -join ' '
         $body = @{ scope = $merged } | ConvertTo-Json
         Invoke-MgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/oauth2PermissionGrants/$($existing.id)" -Body $body -ContentType 'application/json' | Out-Null
-        Write-Log "  Existing grant updated with missing scopes" -Level Success
+        Write-Log "  The script added the missing permissions to the existing grant" -Level Success
     } else {
         $body = @{
             clientId    = $graphPsSp.id
@@ -202,7 +204,7 @@ function Grant-AdminConsent {
             scope       = ($script:RequiredScopes -join ' ')
         } | ConvertTo-Json
         Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/oauth2PermissionGrants' -Body $body -ContentType 'application/json' | Out-Null
-        Write-Log "  Admin consent granted org-wide" -Level Success
+        Write-Log "  Administrator consent is given for the whole tenant" -Level Success
     }
 }
 
@@ -211,11 +213,11 @@ function Invoke-GraphConnect {
 
     if ($UseDeviceAuthentication) {
         $Params['UseDeviceAuthentication'] = $true
-        Write-Host "Device-code sign-in: code will appear below - open the URL, paste, sign in." -ForegroundColor Cyan
-        Write-Host "If a consent screen appears, tick 'Consent on behalf of your organization' before Accept." -ForegroundColor Yellow
+        Write-Host "Device code sign-in: a code appears below. Open the address, enter the code and sign in." -ForegroundColor Cyan
+        Write-Host "If a consent page appears, select 'Consent on behalf of your organization', then Accept." -ForegroundColor Yellow
     } else {
-        Write-Host "A sign-in window will open. Sign in as a Global Administrator." -ForegroundColor Cyan
-        Write-Host "If a consent screen appears, tick 'Consent on behalf of your organization' before Accept." -ForegroundColor Yellow
+        Write-Host "A sign-in window opens. Sign in as a Global Administrator." -ForegroundColor Cyan
+        Write-Host "If a consent page appears, select 'Consent on behalf of your organization', then Accept." -ForegroundColor Yellow
     }
     Write-Host ""
 
@@ -224,7 +226,7 @@ function Invoke-GraphConnect {
     }
     catch {
         if (-not $Params['UseDeviceAuthentication']) {
-            Write-Log "Browser sign-in failed: $($_.Exception.Message). Retrying with device code..." -Level Warning
+            Write-Log "The browser sign-in failed: $($_.Exception.Message). The script now signs in with a device code..." -Level Warning
             $Params['UseDeviceAuthentication'] = $true
             Connect-MgGraph @Params -ErrorAction Stop
         } else {
@@ -245,7 +247,7 @@ function Initialize-GraphSession {
 
     $ctx = Get-MgContext
     if (-not $ctx) {
-        Write-Log "Sign-in did not complete" -Level Error
+        Write-Log "The sign-in did not complete" -Level Error
         exit 1
     }
     Write-Log "Signed in as $($ctx.Account) on tenant $($ctx.TenantId)" -Level Success
@@ -253,13 +255,13 @@ function Initialize-GraphSession {
 
 function Show-AdminConsentRequired {
     Write-Host ""
-    Write-Host "Administrator consent has not been given for the permissions this script requests." -ForegroundColor Red
+    Write-Host "Administrator consent has not been given for the permissions that this script requests." -ForegroundColor Red
     Write-Host "Run the script again, sign in as a Global Administrator and select 'Consent on behalf of your organization'." -ForegroundColor Yellow
     Write-Host ""
 }
 
 function Find-NeologikApps {
-    Write-Log "Searching org catalog for Neologik apps..." -Level Info
+    Write-Log "Searching the Teams app catalogue for Neologik Teams apps..." -Level Info
 
     try {
         if ($AppId) {
@@ -268,31 +270,31 @@ function Find-NeologikApps {
             $uri = "https://graph.microsoft.com/v1.0/appCatalogs/teamsApps?`$filter=($orClause)&`$expand=appDefinitions"
             $candidates = (Invoke-MgGraphRequest -Method GET -Uri $uri).value
         } else {
-            # Read the apps the organisation has uploaded, with their published versions
+            # Read the Teams apps in the Teams app catalogue of the tenant, with the published versions
             $uri = "https://graph.microsoft.com/v1.0/appCatalogs/teamsApps?`$filter=distributionMethod eq 'organization'&`$expand=appDefinitions"
             $candidates = (Invoke-MgGraphRequest -Method GET -Uri $uri).value
         }
     }
     catch {
         if ($_.Exception.Message -match '403|Forbidden|insufficient privileges') {
-            Write-Log "Insufficient privileges: the signed-in account does not have permission to read the app catalog." -Level Error
-            Write-Host "The account you signed in with needs one of these Entra roles:" -ForegroundColor Yellow
+            Write-Log "Insufficient privileges: the signed-in account cannot read the Teams app catalogue." -Level Error
+            Write-Host "The signed-in account needs one of these Microsoft Entra roles:" -ForegroundColor Yellow
             Write-Host "  - Cloud Application Administrator" -ForegroundColor Yellow
             Write-Host "  - Application Administrator" -ForegroundColor Yellow
             Write-Host "  - Global Administrator" -ForegroundColor Yellow
-            Write-Host "Assign one of these roles to the signed-in account, then re-run." -ForegroundColor Yellow
+            Write-Host "Assign one of these roles to the signed-in account, then run the script again." -ForegroundColor Yellow
             exit 1
         }
         throw
     }
 
-    # Wrap in an array, so that one result behaves as several do
+    # Wrap the result in an array, so that one result and several results behave alike
     $candidates = @($candidates)
     if (-not $AppId) {
 
-        # Select the Neologik apps by text that remains when an app is renamed: the
-        # Neologik name and Neologik's Microsoft partner number, in the name and the
-        # descriptions of the app.
+        # Select the Neologik Teams apps by text that stays the same when a Teams app is
+        # renamed: the name Neologik and the Microsoft partner number of Neologik. The
+        # script looks in the name and in the descriptions of the Teams app.
         $signals = @('Neologik', 'neologik.ai', '6560934')
         $candidates = $candidates | Where-Object {
             $defs = @($_.appDefinitions)
@@ -308,7 +310,7 @@ function Find-NeologikApps {
 
     $candidates = @($candidates)
     if ($candidates.Count -eq 0) {
-        Write-Log "No Neologik apps found in org catalog" -Level Error
+        Write-Log "The Teams app catalogue holds no Neologik Teams app" -Level Error
         exit 1
     }
 
@@ -319,7 +321,7 @@ function Find-NeologikApps {
             Select-Object -First 1
 
         if (-not $latestDef) {
-            Write-Log "Skipping '$($app.displayName)' - no published appDefinition" -Level Warning
+            Write-Log "Skipping '$($app.displayName)': the Teams app has no published version" -Level Warning
             continue
         }
 
@@ -332,9 +334,9 @@ function Find-NeologikApps {
         }
     }
 
-    Write-Log "Matched $($catalog.Count) Neologik app(s) in catalog:" -Level Success
+    Write-Log "Neologik Teams apps found in the Teams app catalogue: $($catalog.Count)" -Level Success
     $catalog | ForEach-Object {
-        Write-Log "  - $($_.DisplayName)  v$($_.LatestVersion)  (externalId $($_.ExternalId))" -Level Info
+        Write-Log "  - $($_.DisplayName), version $($_.LatestVersion), manifest id $($_.ExternalId)" -Level Info
     }
     return $catalog
 }
@@ -342,7 +344,7 @@ function Find-NeologikApps {
 function Get-UsersWithInstallation {
     param([string]$CatalogAppId, [string]$DisplayName)
 
-    Write-Log "Enumerating tenant users for '$DisplayName'..." -Level Info
+    Write-Log "Listing the users of the tenant for '$DisplayName'..." -Level Info
     $users = Get-MgUser -All -Property Id, UserPrincipalName, DisplayName, AccountEnabled |
         Where-Object { $_.AccountEnabled }
 
@@ -351,7 +353,7 @@ function Get-UsersWithInstallation {
     foreach ($user in $users) {
         $idx++
         if ($idx % 50 -eq 0) {
-            Write-Host "    Checked $idx / $($users.Count)..." -ForegroundColor DarkGray
+            Write-Host "    Users checked: $idx of $($users.Count)..." -ForegroundColor DarkGray
         }
         try {
             $uri = "https://graph.microsoft.com/v1.0/users/$($user.Id)/teamwork/installedApps?`$filter=teamsApp/id eq '$CatalogAppId'&`$expand=teamsApp,teamsAppDefinition"
@@ -372,13 +374,13 @@ function Get-UsersWithInstallation {
         catch {
             if ($_.Exception.Message -match '403|Forbidden|insufficient privileges') {
                 Show-AdminConsentRequired
-                throw "Aborted: admin consent not granted."
+                throw "Stopped: administrator consent is not given."
             }
             Write-Log "    Skipped $($user.UserPrincipalName): $($_.Exception.Message)" -Level Warning
         }
     }
 
-    Write-Log "  Found $($installs.Count) installation(s) of '$DisplayName'" -Level Success
+    Write-Log "  Installed copies of '$DisplayName' found: $($installs.Count)" -Level Success
     return $installs
 }
 
@@ -405,11 +407,11 @@ function Invoke-UserUpgrade {
     }
     catch {
         if ($_.Exception.Message -match '403|Forbidden|insufficient privileges') {
-            Write-Log "Insufficient privileges on the upgrade call." -Level Error
-            Write-Host "The signed-in account can read the catalog but cannot upgrade installations." -ForegroundColor Yellow
-            Write-Host "It is missing the TeamsAppInstallation.ReadWriteAndConsentForUser scope or an Entra role" -ForegroundColor Yellow
-            Write-Host "with that consent. Assign Cloud Application Administrator (or higher) to the signed-in account." -ForegroundColor Yellow
-            throw "Aborting - insufficient privileges on upgrade endpoint."
+            Write-Log "Insufficient privileges for the upgrade." -Level Error
+            Write-Host "The signed-in account can read the Teams app catalogue but cannot upgrade an installed Teams app." -ForegroundColor Yellow
+            Write-Host "The signed-in account lacks the permission TeamsAppInstallation.ReadWriteAndConsentForUser," -ForegroundColor Yellow
+            Write-Host "or lacks a Microsoft Entra role. Assign the role Cloud Application Administrator, or a higher role, to the signed-in account." -ForegroundColor Yellow
+            throw "Stopping: insufficient privileges for the upgrade."
         }
         Write-Log "    Upgrade failed for $($Installation.Upn): $($_.Exception.Message)" -Level Warning
         return "Failed: $($_.Exception.Message)"
@@ -429,9 +431,9 @@ function Invoke-Main {
     $catalogApps = Find-NeologikApps
 
     if (-not $Force -and -not $WhatIfPreference) {
-        Write-Host "`nAbout to upgrade installations for the apps listed above." -ForegroundColor Yellow
-        Write-Host "This will silently update every user's installed version - no prompt is shown to them." -ForegroundColor Yellow
-        Write-Host "Type " -NoNewline; Write-Host "YES" -ForegroundColor Green -NoNewline; Write-Host " to proceed, or anything else to abort: " -NoNewline
+        Write-Host "`nThe script is ready to upgrade the Teams apps listed above." -ForegroundColor Yellow
+        Write-Host "The upgrade changes the installed version of each user. Microsoft Teams asks the user nothing." -ForegroundColor Yellow
+        Write-Host "Type " -NoNewline; Write-Host "YES" -ForegroundColor Green -NoNewline; Write-Host " to continue, or any other text to stop: " -NoNewline
         $reply = Read-Host
         if ($reply -ne 'YES') {
             Write-Log "Stopped by the administrator at the confirmation" -Level Warning
@@ -464,7 +466,7 @@ function Invoke-Main {
     }
 
     if ($report.Count -eq 0) {
-        Write-Log "No installations found across $($catalogApps.Count) app(s) - nothing to do" -Level Warning
+        Write-Log "No user has an installed copy of the selected Teams apps. The script has nothing to upgrade" -Level Warning
         return
     }
 

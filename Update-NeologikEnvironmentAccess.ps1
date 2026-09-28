@@ -2,223 +2,320 @@
 
 <#
 .SYNOPSIS
-    Brings the access of the Neologik deployment identity to the least-privilege model
-    of Neologik Platform version 5. Run by your Global Administrator, under their own
-    sign-in.
+    Reduces the access of the Neologik deployment identity to the access that Neologik
+    Platform version 5 needs. A Global Administrator runs the script.
 
 .DESCRIPTION
-    The script checks before it writes. Every action reads the current state first,
-    so on an environment that is already in order it changes nothing, and it can be
-    run as often as needed. With -Verify it reports what it would change and writes
-    nothing.
-
-    The script does not stop at the first problem. Every item is checked or applied
-    on its own, and an item that fails is recorded in the summary with its reason.
-    The run ends with a summary table and a summary file in JSON. The exit code is 0
-    when everything is in the expected state, and 1 when an item needs attention or,
-    with -Verify, when a change is pending.
-
-    The files given select the run.
-
-    THE FIRST RUN (no -AgentGrantsFile and no -MailboxGrantsFile)
-      1. Agent identity blueprint. Confirms that 'Neologik Agent Blueprint - <key> -
-         <short name>' and its principal exist, that the deployment identity owns
-         both, that the principal holds AgentIdUser.ReadWrite.IdentityParentedBy, and
-         that the three federated credentials are present through which the Neologik
-         deployment acts as the blueprint. Each is created only if it is absent.
-         Then the Microsoft Graph application permissions of the deployment identity:
-         the two it keeps (Application.ReadWrite.OwnedBy,
-         AgentIdentityBlueprint.AddRemoveCreds.All) are confirmed first, and the
-         seven it no longer needs are then removed (Application.Read.All,
-         AgentIdentityBlueprint.Create, AgentIdentityBlueprint.UpdateAuthProperties.All,
-         AgentIdentityBlueprintPrincipal.Create, AgentIdentity.Create.All,
-         AgentIdUser.ReadWrite.All, Group.Create).
-      2. Sign-in group assignment. Assigns your Neologik NCE user group to the
-         'Neologik Platform Sign-in' enterprise application. The Neologik Context
-         Engine authorises from the groups claim of the sign-in token, and that
-         claim carries only the groups assigned to the application.
-      3. Administrator consent. Confirms that the sign-in application has consent
-         for the whole tenant. If it has not, the script prints the consent address
-         for you to open: consent stays with you, so that you see what you approve.
-      3a. SharePoint consent. Checked when the configuration file records that
-         SharePoint ingestion is part of the solution.
-      3b. Ownership of the application registrations. The deployment identity may
-         manage only the registrations it owns. The step takes exactly the
-         registrations named by client id: the sign-in application
-         (-SignInAppClientId), the SharePoint application (-SharePointAppClientId)
-         and the agent registrations (-BotAppClientIds). For each it adds the
-         deployment identity as an owner where it is missing, and sets the unique
-         name of the sign-in and SharePoint applications where it is empty. Every
-         other registration whose name begins 'Neologik' is reported for review
-         and is not changed.
-      4. Permission reduction. Confirms first that the deployment identity holds its
-         seven roles on the resource group and its two roles on the subscription
-         (Reader, and Cost Management Contributor for the daily cost report). Only
-         then does it remove the wider access: Contributor and User Access
-         Administrator on the subscription, the Application Administrator directory
-         role, membership of the Admin User Group, and any other role or membership
-         outside the declared set. If any of the nine roles could not be applied,
-         nothing is removed. Last, the version of the kit is recorded on the
-         resource group as the tag NeologikOnboardingKit.
-
-    THE LATER RUN (-AgentGrantsFile or -MailboxGrantsFile given)
-    Needed only when an agent or App works unattended in Microsoft 365 on behalf of
-    your organisation. It applies what the files list and nothing else.
-      5. Grants to agent users (-AgentGrantsFile). For each agent and App in the
-         file, the delegated permission grant that lets its agent identity act as
-         its own agent user, with exactly the permissions the file lists. The file
-         may also list Microsoft Graph application permissions for named workload
-         identities, which are granted here, and records whether SharePoint
-         ingestion is part of the solution, in which case the SharePoint consent is
-         checked.
-      6. Mailbox grants (-MailboxGrantsFile). For each email channel in the file,
-         grants the identity of the channel the Exchange Online roles Application
-         Mail.Read, Application Mail.ReadWrite and Application Mail.Send, limited
-         to that one mailbox. With -RemoveLegacyGrantAppIds it also removes the
-         Exchange Online assignments of an identity that is no longer used. Needs an
-         Exchange Administrator or Global Administrator sign-in.
-
-    Permissions requested at the Microsoft Graph sign-in, all delegated, under your
-    own account: Application.ReadWrite.All, AppRoleAssignment.ReadWrite.All,
-    Directory.Read.All, User.Read, DelegatedPermissionGrant.Read.All,
-    AgentIdentityBlueprint.Create, AgentIdentityBlueprint.AddRemoveCreds.All and
-    AgentIdentityBlueprintPrincipal.Create. The first run adds
-    RoleManagement.ReadWrite.Directory and GroupMember.ReadWrite.All. A run with
-    -AgentGrantsFile adds DelegatedPermissionGrant.ReadWrite.All.
-
-    Output: a summary table, and the file
-    Neologik_EnvironmentAccess_<PreWindow|PostWindow>_<time stamp>.json, written
-    beside the script, or in the current folder or the temporary folder when that
-    location cannot be written.
-
     ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md describes the script in full.
 
+    The script reads the current state before each change. On an environment that
+    already holds the correct access, the script changes nothing. A Global
+    Administrator can run the script again at any time.
+
+    With -Verify the script reports each change that a run would make. The script
+    then writes nothing.
+
+    The script does not stop at the first problem. The script checks each item
+    separately. When an item fails, the script records the item and the reason in
+    the summary.
+
+    The run ends with a summary table and a summary file in JSON.
+
+      Exit code  Meaning
+      0          Every item is in the expected state.
+      1          An item needs attention. With -Verify, a change is pending.
+
+    The command selects the run.
+
+      Command                                        Run
+      No -AgentGrantsFile and no -MailboxGrantsFile  The first run
+      -AgentGrantsFile or -MailboxGrantsFile         The later run
+
+    THE FIRST RUN
+
+    Step 1. The agent identity blueprint and the permissions of the deployment
+    identity.
+      The script confirms each object in this list. The script creates an object
+      only when the object is absent.
+        - The agent identity blueprint
+          'Neologik Agent Blueprint - <key> - <short name>'.
+        - The service principal of the agent identity blueprint.
+        - The deployment identity as an owner of both objects.
+        - The permission AgentIdUser.ReadWrite.IdentityParentedBy on the service
+          principal of the agent identity blueprint.
+        - Three federated credentials. The Neologik deployment signs in as the
+          agent identity blueprint through a federated credential.
+      The script then confirms the two Microsoft Graph application permissions
+      that the deployment identity keeps.
+        - Application.ReadWrite.OwnedBy
+        - AgentIdentityBlueprint.AddRemoveCreds.All
+      When the deployment identity holds both permissions, the script removes
+      seven Microsoft Graph application permissions from the deployment identity.
+        - Application.Read.All
+        - AgentIdentityBlueprint.Create
+        - AgentIdentityBlueprint.UpdateAuthProperties.All
+        - AgentIdentityBlueprintPrincipal.Create
+        - AgentIdentity.Create.All
+        - AgentIdUser.ReadWrite.All
+        - Group.Create
+
+    Step 2. The user group of the Neologik Context Engine.
+      The script assigns the security group that -NceUserGroupId names to the
+      enterprise application 'Neologik Platform Sign-in'. The Neologik Context
+      Engine reads the groups claim of the sign-in token to authorise a user. The
+      groups claim lists only the groups that are assigned to the enterprise
+      application.
+
+    Step 3. Administrator consent.
+      The script confirms that the Platform Sign-in application has administrator
+      consent for the whole tenant. When the consent is absent, the script prints
+      the consent address. A Global Administrator opens the consent address, reads
+      the permissions and gives the consent. The script never gives consent.
+
+    Step 3a. SharePoint consent.
+      The script checks the consent of the SharePoint application when the
+      configuration file records that the solution uses SharePoint ingestion.
+
+    Step 3b. Ownership of the application registrations.
+      The deployment identity can manage only an application registration that the
+      deployment identity owns. The script changes only the application
+      registrations that the command names by client id.
+
+        Parameter               Application registration
+        -SignInAppClientId      The Platform Sign-in application
+        -SharePointAppClientId  The SharePoint application
+        -BotAppClientIds        The application registration of each agent
+
+      For each application registration, the script adds the deployment identity
+      as an owner when the deployment identity is not an owner. The script sets the
+      unique name of the Platform Sign-in application and of the SharePoint
+      application when the unique name is empty.
+
+      The summary lists every other application registration whose name begins
+      'Neologik'. The script does not change those application registrations.
+
+    Step 4. Permission reduction.
+      The script first confirms that the deployment identity holds nine Azure
+      roles: seven roles on the resource group and two roles on the subscription.
+      The two roles on the subscription are Reader and Cost Management Contributor.
+      The deployment uses Cost Management Contributor for the daily cost report.
+
+      When the deployment identity holds all nine roles, the script removes the
+      wider access from the deployment identity.
+        - Contributor on the subscription.
+        - User Access Administrator on the subscription.
+        - The directory role Application Administrator.
+        - The membership of the Admin User Group. The script removes the
+          membership only when each SQL server in the resource group names the
+          deployment identity as the Microsoft Entra administrator.
+        - Every other Azure role in the subscription. The script keeps the role
+          Cognitive Services Content Understanding Contributor on a resource in
+          the resource group.
+        - Every other directory role and every other group membership.
+      When the script cannot assign one of the nine roles, the script removes
+      nothing.
+
+      Last, the script records the version of the onboarding kit on the resource
+      group, in the tag NeologikOnboardingKit.
+
+    THE LATER RUN
+
+    The later run is needed only when an agent or an App works unattended in
+    Microsoft 365. The later run applies the grants that the files list. The later
+    run makes no other change.
+
+    Step 5. Grants to agent users, with -AgentGrantsFile.
+      For each agent and each App in the file, the script creates one delegated
+      permission grant. The grant lets the agent identity act as the agent user of
+      that agent identity. The grant holds exactly the permissions that the file
+      lists.
+
+      The file can also list Microsoft Graph application permissions for named
+      workload identities. The script grants those permissions.
+
+      The file records whether the solution uses SharePoint ingestion. When the
+      solution uses SharePoint ingestion, the script checks the consent of the
+      SharePoint application.
+
+    Step 6. Mailbox grants, with -MailboxGrantsFile.
+      For each email channel in the file, the script grants three Exchange Online
+      roles to the identity of the email channel.
+        - Application Mail.Read
+        - Application Mail.ReadWrite
+        - Application Mail.Send
+      Each role is limited to the one mailbox of the email channel.
+
+      With -RemoveLegacyGrantAppIds the script also removes the Exchange Online
+      role assignments of an identity that the environment has stopped using.
+
+      Step 6 needs the sign-in of an Exchange Administrator or of a Global
+      Administrator.
+
+    PERMISSIONS THAT THE SIGN-IN REQUESTS
+
+    The sign-in to Microsoft Graph requests delegated permissions only. The script
+    uses each permission with the account of the signed-in Global Administrator.
+
+      Run                          Delegated permission
+      Every run                    Application.ReadWrite.All
+      Every run                    AppRoleAssignment.ReadWrite.All
+      Every run                    Directory.Read.All
+      Every run                    User.Read
+      Every run                    DelegatedPermissionGrant.Read.All
+      Every run                    AgentIdentityBlueprint.Create
+      Every run                    AgentIdentityBlueprint.AddRemoveCreds.All
+      Every run                    AgentIdentityBlueprintPrincipal.Create
+      The first run                RoleManagement.ReadWrite.Directory
+      The first run                GroupMember.ReadWrite.All
+      A run with -AgentGrantsFile  DelegatedPermissionGrant.ReadWrite.All
+
+    OUTPUT
+
+    The script prints a summary table. The script also writes the summary file
+    Neologik_EnvironmentAccess_<PreWindow|PostWindow>_<time stamp>.json. The name
+    holds PreWindow for the first run and PostWindow for the later run.
+
+    The script writes the summary file to the folder of the script. When the script
+    cannot write to that folder, the script writes to the current folder. When the
+    script cannot write to the current folder, the script writes to the temporary
+    folder.
+
 .PARAMETER ConfigurationFile
-    The configuration file Install-NeologikEnvironment.ps1 wrote at onboarding.
-    Optional. It carries the tenant, the subscription, the resource group, the
-    deployment identity, the sign-in application, the group ids and the solution
-    names. Neologik sends the complete command with every value as a parameter, so
-    the file is not needed.
+    The configuration file that Install-NeologikEnvironment.ps1 wrote at onboarding.
+    The parameter is optional. The configuration file holds the tenant, the
+    subscription, the resource group, the deployment identity, the Platform Sign-in
+    application, the group ids and the solution names. The command from Neologik
+    gives each value as a parameter, so the command needs no configuration file.
 
 .PARAMETER Verify
-    Reports what the run would change, as 'WOULD ...' items in the summary, and
-    writes nothing. The sign-ins are the same as those of a run that writes. Exit
-    code 1 when a change is pending or an item needs attention, 0 otherwise.
+    The script reports each change that the run would make as a 'WOULD' item in the
+    summary. The script writes nothing. The sign-ins are the same as the sign-ins
+    of a run that writes. The exit code is 1 when a change is pending or an item
+    needs attention. Otherwise the exit code is 0.
 
 .PARAMETER TenantId
-    The id of your Microsoft Entra tenant. Required when no configuration file is
-    given.
+    The id of your Microsoft Entra tenant. Required when the command names no
+    configuration file.
 
 .PARAMETER DeploySpClientId
-    The application (client) id of the deployment identity, the application
-    'Neologik GitHub Service Connection'. Required when no configuration file is
-    given.
+    The client id of the deployment identity. The deployment identity is the
+    application 'Neologik GitHub Service Connection'. Required when the command
+    names no configuration file.
 
 .PARAMETER SolutionName
     The solution name of the environment, for example neo-abcprd-uks-01. Required
     for the first run.
 
 .PARAMETER SolutionShortName
-    The short name of the environment, for example abcprd01. The agent identity
-    blueprint is named by it. Required for the first run.
+    The short name of the environment, for example abcprd01. The name of the agent
+    identity blueprint holds the short name. Required for the first run.
 
 .PARAMETER SignInAppClientId
-    The application (client) id of the application 'Neologik Platform Sign-in'.
-    Required for the first run.
+    The client id of the application 'Neologik Platform Sign-in'. Required for the
+    first run.
 
 .PARAMETER SharePointAppClientId
-    The application (client) id of the application 'Neologik SharePoint Access -
-    <short name>'. Given when the environment ingests from SharePoint. Without it
-    no SharePoint registration is changed.
+    The client id of the application 'Neologik SharePoint Access - <short name>'.
+    Give the parameter when the environment uses SharePoint ingestion. Without the
+    parameter the script changes no SharePoint application registration.
 
 .PARAMETER BotAppClientIds
-    The application (client) ids of the agent registrations the platform manages in
-    this tenant. A registration that is not listed is not changed, whatever its name.
+    The client id of the application registration of each agent that the Neologik
+    Platform manages in this tenant. The script does not change an application
+    registration that the parameter does not list.
 
 .PARAMETER NceUserGroupId
-    The object id of your Neologik NCE user group. When it is absent, steps 2 and 3
-    are not carried out.
+    The object id of the security group whose members sign in to the Neologik
+    Context Engine. Without the parameter the script skips step 2 and step 3.
 
 .PARAMETER AdminGroupId
-    The object id of the Neologik Admin User Group. When it is absent and no
-    configuration file names the group, the membership check of the first run
-    reports "Not checked".
+    The object id of the Neologik Admin User Group. Without the parameter, and
+    without a configuration file that names the group, the first run does not check
+    the membership of the Admin User Group. The summary then reads 'Not checked'.
 
 .PARAMETER AgentGrantsFile
-    The JSON file of grants to agent users, which Neologik exports from the platform
-    and supplies. Giving it selects the later run. The tenant id in the file must be
-    that of the run.
+    The JSON file of grants to agent users. Neologik exports the file from the
+    Neologik Platform and sends the file to you. The parameter selects the later
+    run. The tenant id in the file must be the tenant id of the run.
 
 .PARAMETER MailboxGrantsFile
-    The JSON file of mailbox grants, which Neologik exports from the platform and
-    supplies. Giving it selects the later run.
+    The JSON file of mailbox grants. Neologik exports the file from the Neologik
+    Platform and sends the file to you. The parameter selects the later run.
 
 .PARAMETER RemoveLegacyGrantAppIds
-    The application ids of identities that are no longer used, whose Exchange Online
-    mailbox assignments are to be removed. Requires -MailboxGrantsFile. An identity
-    the file records as still in use keeps its assignment.
+    The application id of each identity that the environment has stopped using. The
+    script removes the Exchange Online role assignments of each identity. The
+    parameter requires -MailboxGrantsFile. The script keeps the role assignments of
+    an identity that the mailbox grants file records as still in use.
 
 .PARAMETER UseAzureCliToken
-    Signs in to Microsoft Graph and to Azure with the Azure CLI session of the
-    workstation, in place of the sign-in prompts. For use by Neologik. Use the
-    default sign-in.
+    The script signs in to Microsoft Graph and to Azure with the Azure CLI session
+    of the workstation. The script shows no sign-in prompt. Neologik uses the
+    parameter. Leave the parameter out of the command.
 
 .PARAMETER SubscriptionId
-    The id of the Azure subscription. Required for the first run when no
-    configuration file is given.
+    The id of the Azure subscription. Required for the first run when the command
+    names no configuration file.
 
 .PARAMETER ResourceGroupName
-    The name of the Neologik resource group. Required for the first run when no
-    configuration file is given.
+    The name of the Neologik resource group. Required for the first run when the
+    command names no configuration file.
 
 .PARAMETER BlueprintKey
-    The key in the name of the agent identity blueprint. 'default' unless Neologik
-    tells you otherwise.
+    The key in the name of the agent identity blueprint. The default is 'default'.
+    Change the value only when Neologik gives you another value.
 
 .EXAMPLE
     ./Update-NeologikEnvironmentAccess.ps1 -TenantId <tenant id> -DeploySpClientId <deployment identity client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <sign-in application client id> -SharePointAppClientId <SharePoint application client id> -BotAppClientIds <client id>,<client id> -NceUserGroupId <group object id> -AdminGroupId <group object id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01
 
-    The first run, as Neologik sends it.
+    The first run, with the command that Neologik sends.
 
 .EXAMPLE
     ./Update-NeologikEnvironmentAccess.ps1 -TenantId <tenant id> -DeploySpClientId <client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <client id> -BotAppClientIds <client id> -NceUserGroupId <group id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01 -Verify
 
-    The first run with -Verify: every pending change is reported and nothing is written.
+    The first run with -Verify. The script reports each pending change and writes nothing.
 
 .EXAMPLE
     ./Update-NeologikEnvironmentAccess.ps1 -ConfigurationFile ./Neologik_abc01_Configuration_20260101_120000.json -AgentGrantsFile ./agent-grants-abcprd01.json
 
-    The later run: the grants to agent users that the file lists.
+    The later run. The script applies the grants to agent users that the file lists.
 
 .EXAMPLE
     ./Update-NeologikEnvironmentAccess.ps1 -ConfigurationFile ./Neologik_abc01_Configuration_20260101_120000.json -MailboxGrantsFile ./mailbox-grants-abcprd01.json -RemoveLegacyGrantAppIds 11111111-2222-3333-4444-555555555555
 
-    The later run: the mailbox grants that the file lists, and the removal of the assignments of an identity that is no longer used.
+    The later run. The script applies the mailbox grants that the file lists. The script also removes the role assignments of one identity that the environment has stopped using.
 
 .NOTES
     Requires PowerShell 7.4 or later.
 
-    Sign-in. The script prints a web address and a code, waits for as long as the
-    code is valid (15 minutes at most) and reports every 30 seconds that it is
-    waiting. A browser on any device and a Global Administrator account are all that
-    is needed. If that sign-in does not complete, the script tries the Azure CLI
-    session of the workstation, if there is one, and then the device code prompt of
-    Microsoft Graph PowerShell.
+    Sign-in. The script prints a web address and a code. Open the web address in a
+    browser on any device, enter the code and sign in as a Global Administrator.
+    The script waits while the code is valid, for 15 minutes at most. The script
+    reports every 30 seconds that the script still waits.
 
-    Before it changes anything the script confirms that it can reach the Microsoft
-    addresses it uses, that its modules load, and that the signed-in account holds
-    Global Administrator, and Owner or User Access Administrator on the subscription.
+    When that sign-in does not complete, the script tries the Azure CLI session of
+    the workstation, when the workstation has an Azure CLI session. The script then
+    tries the device code prompt of Microsoft Graph PowerShell.
+
+    Checks. Before the script changes anything, the script confirms three facts.
+      1. The workstation can reach each Microsoft address that the script uses.
+      2. The PowerShell modules load.
+      3. The signed-in account holds an active Global Administrator role.
+    Before step 4 changes an Azure role, the script confirms that the signed-in
+    account holds Owner or User Access Administrator on the subscription.
 #>
 
-# The script writes to the console with Write-Host: the summary table and the consent
-# addresses are for the operator. The Azure CLI token is held as a secure string,
-# which Connect-MgGraph requires, and is written nowhere. ShouldProcess is not used:
-# every write follows a check of the same state.
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Interactive console script; the summary and consent URLs are for the operator.')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'Connect-MgGraph 2.x requires a SecureString; the token comes from the Azure CLI cache and is never persisted.')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'Write-Log matches the sibling onboarding script; no built-in Write-Log exists in PowerShell 7.')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPositionalParameters', 'Get-NeologikProperty', Justification = 'The property accessor reads as (object, name, default); named parameters would triple its length at 60 call sites.')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Verification-first and idempotent by design; every write follows a read of the same state.')]
+# The script writes to the console with Write-Host, because the person who runs the
+# script reads the summary table and the consent addresses on screen.
+# The script holds the Azure CLI token as a secure string, which Connect-MgGraph
+# requires. The script writes the token nowhere.
+# The script does not use ShouldProcess, because the script reads the current state
+# before each write.
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'The script runs in a console. The person who runs the script reads the summary table and the consent addresses on screen.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'Connect-MgGraph requires a secure string. The script takes the token from the Azure CLI session and writes the token nowhere.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'The onboarding script uses the same function name. PowerShell 7 has no built-in command named Write-Log.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPositionalParameters', 'Get-NeologikProperty', Justification = 'Get-NeologikProperty takes the object, the name and the default value in that order. Named parameters would make each of the 60 calls three times as long.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'The script reads the current state before each write. A second run changes nothing that the first run completed.')]
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
@@ -274,15 +371,17 @@ param(
     [switch]$UseAzureCliToken
 )
 
-# The two Microsoft Graph application permissions the deployment identity keeps.
-# They are matched by name against the service principal of Microsoft Graph, and are
-# the same two that Install-NeologikEnvironment.ps1 grants.
+# The two Microsoft Graph application permissions that the deployment identity keeps.
+# The script finds each permission by name on the service principal of Microsoft Graph.
+# Install-NeologikEnvironment.ps1 grants the same two permissions.
 $script:RequiredGraphRoles = @(
     'Application.ReadWrite.OwnedBy',
     'AgentIdentityBlueprint.AddRemoveCreds.All'
 )
-# The permissions for the whole tenant that the deployment identity no longer needs.
-# They are removed when the two it keeps are in place.
+# The Microsoft Graph application permissions that the script removes from the
+# deployment identity.
+# The script removes the permissions only when the deployment identity holds the two
+# permissions above.
 $script:RetiredGraphRoles = @(
     'Application.Read.All',
     'AgentIdentityBlueprint.Create',
@@ -290,22 +389,25 @@ $script:RetiredGraphRoles = @(
     'AgentIdentityBlueprintPrincipal.Create',
     'AgentIdentity.Create.All',
     'AgentIdUser.ReadWrite.All',
-    # The platform creates no group, so the permission to create groups is removed.
+    # The Neologik Platform creates no group. The script removes the permission to
+    # create groups.
     'Group.Create'
 )
-# The role of the blueprint principal: the agent users of that blueprint only.
+# The permission of the service principal of the agent identity blueprint. The
+# permission covers only the agent users of that agent identity blueprint.
 $script:BlueprintPrincipalGraphRoles = @('AgentIdUser.ReadWrite.IdentityParentedBy')
-# The repositories of the Neologik deployment that may obtain a token as the blueprint.
-# Each is named by its repository id, which does not change. The same three as in
-# Install-NeologikEnvironment.ps1.
+# The repositories of the Neologik deployment that can obtain a token as the agent
+# identity blueprint.
+# Each entry holds the repository id, which never changes.
+# Install-NeologikEnvironment.ps1 holds the same three repositories.
 $script:PipelineRepositories = @(
     @{ Name = 'neo-infrastructure'; Id = '995398788' },
     @{ Name = 'neo-bot-service';    Id = '995400343' },
     @{ Name = 'neo-env-config';     Id = '995441655' }
 )
 
-# The roles of the deployment identity on the resource group. The same seven as in
-# Install-NeologikEnvironment.ps1.
+# The seven roles of the deployment identity on the resource group.
+# Install-NeologikEnvironment.ps1 assigns the same seven roles.
 $script:RequiredRgRoles = @(
     'Contributor',
     'Key Vault Certificates Officer',
@@ -316,79 +418,81 @@ $script:RequiredRgRoles = @(
     'Role Based Access Control Administrator'
 )
 
-# The two roles the deployment identity keeps on the subscription. The same two as in
-# Install-NeologikEnvironment.ps1.
-# Reader: the deployment reads usage and quota, which are held for the subscription and
-# the region.
+# The two roles that the deployment identity keeps on the subscription.
+# Install-NeologikEnvironment.ps1 assigns the same two roles.
+# Reader: the deployment reads usage and quota. Azure holds usage and quota for the
+# subscription and the region.
 # Cost Management Contributor: the deployment maintains the daily cost report. The
-# role manages cost configuration only and gives no control of resources.
+# role manages cost configuration only. The role gives no control of a resource.
 $script:RequiredSubRoles = @(
     'Reader',
     'Cost Management Contributor'
 )
 
-# The roles on the subscription that the permission reduction (step 4) removes, once
-# the roles above are in place.
+# The roles on the subscription that step 4 removes.
+# Step 4 removes the roles only when the deployment identity holds the roles above.
 $script:LegacySubRoles = @('Contributor', 'User Access Administrator')
 
-# The deployment identity is not a member of the Admin User Group. Its access to SQL
-# comes from the Microsoft Entra administrator setting of the SQL server, which the
-# platform deployment declares. The first run removes an existing membership only
-# when every SQL server in the resource group names the deployment identity as its
-# administrator: until then the membership is its only access to SQL. The group is
-# found by name in the SecurityGroups of the configuration.
+# The deployment identity is not a member of the Admin User Group. The deployment
+# identity reaches SQL as the Microsoft Entra administrator of the SQL server. The
+# deployment by Neologik sets that administrator. The first run removes an existing
+# membership only when each SQL server in the resource group names the deployment
+# identity as the administrator.
+# Before that, the membership is the only access of the deployment identity to SQL.
+# The script finds the group by name in the SecurityGroups of the configuration file.
 $script:AdminGroupNamePattern = 'Neologik Admin User Group*'
 
-# The declared set. The deployment identity holds the roles above and nothing else.
-# One further role is declared, at any scope below the resource group: the platform
-# deployment grants it on the Content Understanding account. Everything else the
-# identity holds in the subscription, every directory role and every group membership
-# is removed by the first run.
+# The declared set. The deployment identity holds the roles above and one further
+# role. The deployment by Neologik grants the further role on the Content
+# Understanding account, at a scope below the resource group. The first run removes
+# every other Azure role that the deployment identity holds in the subscription. The
+# first run also removes every directory role and every group membership.
 $script:DeclaredResourceRoles = @('Cognitive Services Content Understanding Contributor')
 
 $script:GraphSpAppId = '00000003-0000-0000-c000-000000000000'
-# The role of the SharePoint application (Sites.Selected), checked when the
-# configuration file or the grants file says that SharePoint ingestion is part of
-# the solution.
+# The start of the name of the SharePoint application. The SharePoint application
+# holds the permission Sites.Selected. The script checks the consent when the
+# configuration file or the agent grants file records SharePoint ingestion.
 $script:SharePointAppDisplayNamePrefix = 'Neologik SharePoint Access - '
 $script:AppAdminRoleTemplateId = '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3'
 $script:GraphV1 = 'https://graph.microsoft.com/v1.0'
 $script:GraphBeta = 'https://graph.microsoft.com/beta'
 $script:OdataHeaders = @{ 'OData-Version' = '4.0' }
 $script:GuidPattern = '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
-# Summary results matching this pattern need the operator's attention and
-# make the exit code 1 - including every 'WOULD ...' change a verify-only
-# run reports instead of performing.
+# A summary result that matches this pattern needs attention and sets the exit code
+# to 1. The pattern includes each 'WOULD' change that a run with -Verify reports.
 $script:AttentionPattern = 'MISSING|SKIPPED|NOT FOUND|PENDING|FAILED|UNKNOWN|WOULD'
 
-# Sign-in. The script runs the device code sign-in itself, so that it prints the
-# address and the code, waits no longer than the code is valid, and tries the next
-# method when one fails. The sign-in uses the public client ids of two Microsoft
-# applications, so no Neologik application is involved: Microsoft Graph Command Line
-# Tools for Microsoft Graph, and Microsoft Azure PowerShell for Azure Resource Manager.
+# Sign-in. The script runs the device code sign-in. The script prints the
+# address and the code, waits while the code is valid, and tries the next method when
+# a method fails. The sign-in uses the public client ids of two Microsoft
+# applications: Microsoft Graph Command Line Tools for Microsoft Graph, and Microsoft
+# Azure PowerShell for Azure Resource Manager. The sign-in uses no Neologik application.
 $script:GraphPublicClientId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
 $script:AzurePublicClientId = '1950a258-227b-4e31-a9cf-717495945fc2'
 $script:LoginEndpoint = 'https://login.microsoftonline.com'
-# Azure requires multi-factor authentication for every write. The 'p1'
-# authentication-context claim is requested with the Azure device code.
+# Azure requires multi-factor authentication for each write. The script requests the
+# authentication context claim 'p1' with the device code for Azure.
 $script:AzureMfaClaims = '{"access_token":{"acrs":{"essential":true,"values":["p1"]}}}'
-# The longest the script waits on one device code, whatever lifetime the
-# identity platform grants it.
+# The longest time that the script waits for one device code, in seconds.
 $script:DeviceCodeMaximumWaitSeconds = 900
 $script:DeviceCodeReportEverySeconds = 30
-# The role template of Global Administrator, for the check of the signed-in account.
+# The role template of Global Administrator. The script checks the signed-in account
+# against the role template.
 $script:GlobalAdministratorTemplateId = '62e90394-69f5-4237-9190-012177145e10'
-# The subscription roles that let the signed-in account write role assignments.
+# The roles on the subscription that allow the signed-in account to write a role
+# assignment.
 $script:SubscriptionAdministratorRoles = @('Owner', 'User Access Administrator')
-# Every address the script uses. Each must answer before anything is changed.
+# Each address that the script uses. Each address must answer before the script
+# changes anything.
 $script:PreflightEndpoints = @(
     @{ Name = 'Microsoft Entra sign-in'; Uri = 'https://login.microsoftonline.com/' },
     @{ Name = 'Microsoft Graph'; Uri = 'https://graph.microsoft.com/' },
     @{ Name = 'Azure Resource Manager'; Uri = 'https://management.azure.com/' },
-    @{ Name = 'PowerShell Gallery (module installs)'; Uri = 'https://www.powershellgallery.com/' }
+    @{ Name = 'PowerShell Gallery, for the PowerShell modules'; Uri = 'https://www.powershellgallery.com/' }
 )
-# Microsoft Graph PowerShell 2.0 or later and ExchangeOnlineManagement 3.0 or later
-# are required.
+# The script requires Microsoft Graph PowerShell 2.0 or later and
+# ExchangeOnlineManagement 3.0 or later.
 $script:GraphModuleMinimumVersion = [version]'2.0.0'
 $script:ExchangeModuleMinimumVersion = [version]'3.0.0'
 $script:GraphModules = @(
@@ -398,13 +502,13 @@ $script:GraphModules = @(
     'Microsoft.Graph.Identity.DirectoryManagement'
 )
 $script:Summary = @()
-# The state of the run: the inputs and the principals found.
+# The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
-# The version of the kit, recorded on the resource group as the tag
-# NeologikOnboardingKit when the permission reduction is complete.
-$script:KitVersion = 'v5.0.3'
+# The version of the onboarding kit. The script records the version on the resource
+# group, in the tag NeologikOnboardingKit, when the permission reduction is complete.
+$script:KitVersion = 'v5.0.6'
 
-# ----- console + summary helpers ---------------------------------------------
+# ----- Console and summary -----------------------------------------------------
 
 function Write-Log {
     param(
@@ -423,7 +527,7 @@ function Write-Log {
 }
 
 function Write-ActionRequired {
-    # One instruction for the operator: what to do and why.
+    # Prints one instruction for the person who runs the script: what to do and why.
     param([string]$Message)
     Write-Host ''
     Write-Host 'ACTION REQUIRED' -ForegroundColor Yellow
@@ -440,9 +544,10 @@ function Add-Summary {
 
 function Get-NeologikProperty {
     <#
-    Safe property read for JSON objects (PSCustomObject) and Graph responses
-    (hashtables) alike: strict mode throws on a missing property or key, and
-    an exported file or a Graph reply may legitimately omit one.
+    Reads a property from a JSON object or from a Microsoft Graph response. A JSON
+    object is a PSCustomObject. A Microsoft Graph response is a hashtable. Strict
+    mode throws on a missing property or key. A file from Neologik or a Microsoft
+    Graph response can omit a property.
     #>
     param($Object, [string]$Name, $Default = $null)
     if ($null -eq $Object) { return $Default }
@@ -456,9 +561,8 @@ function Get-NeologikProperty {
 }
 
 function Test-NeologikProperty {
-    # Whether an object carries a property or key at all (an empty array
-    # value is still present - Get-NeologikProperty cannot tell that apart
-    # from an absent one).
+    # Returns whether an object holds a property or key. An empty array is still a
+    # value. Get-NeologikProperty cannot tell an empty array from an absent property.
     param($Object, [string]$Name)
     if ($null -eq $Object) { return $false }
     if ($Object -is [System.Collections.IDictionary]) { return [bool]$Object.Contains($Name) }
@@ -472,9 +576,10 @@ function Test-NeologikGuid {
 
 function Get-NeologikErrorText {
     <#
-    A one-line reason for the summary and the log: the exception message
-    (first line) plus the Graph error body when the SDK attached one. Never
-    a token or a stack trace.
+    Returns a reason on one line for the summary and the log. The reason is the
+    exception message. The reason includes the error body of Microsoft Graph when
+    the SDK attached the error body. The reason never holds a token or a stack
+    trace.
     #>
     param($ErrorRecord)
     if ($null -eq $ErrorRecord) { return 'unknown error' }
@@ -494,19 +599,20 @@ function Get-NeologikErrorText {
 }
 
 function Get-NeologikHttpStatus {
-    # Best-effort HTTP status of a failed Graph or SDK call (0 when unknown).
+    # Returns the HTTP status of a failed Microsoft Graph call or SDK call. Returns 0
+    # when the status is not known.
     param($ErrorRecord)
     $exception = Get-NeologikProperty $ErrorRecord 'Exception'
     while ($exception) {
         $status = Get-NeologikProperty $exception 'StatusCode'
         if ($null -ne $status -and "$status" -match '^\d+$') { return [int]$status }
         if ($null -ne $status) {
-            try { return [int][System.Net.HttpStatusCode]$status } catch { Write-Verbose "ignored: $($_.Exception.Message)" }
+            try { return [int][System.Net.HttpStatusCode]$status } catch { Write-Verbose "The script ignores the error. $($_.Exception.Message)" }
         }
         $response = Get-NeologikProperty $exception 'Response'
         if ($response) {
             $status = Get-NeologikProperty $response 'StatusCode'
-            if ($null -ne $status) { try { return [int]$status } catch { Write-Verbose "ignored: $($_.Exception.Message)" } }
+            if ($null -ne $status) { try { return [int]$status } catch { Write-Verbose "The script ignores the error. $($_.Exception.Message)" } }
         }
         $exception = Get-NeologikProperty $exception 'InnerException'
     }
@@ -527,46 +633,46 @@ function Get-NeologikScopeSet {
     @(($Value -split '\s+') | Where-Object { $_ } | Sort-Object -Unique) -join ' '
 }
 
-# ----- verify-only gate ---------------------------------------------------------
-# With -Verify every step reports what it would change and nothing is
-# written. The gate sits in the two write seams every write passes through
-# (Invoke-NeologikGraph for every non-GET request, Invoke-NeologikWrite for
-# every SDK write cmdlet), so no step can write in a verify-only run
-# whatever its own logic does; the steps record each pending change as a
-# 'WOULD ...' summary item, which counts as attention (exit code 1).
+# ----- Runs with -Verify --------------------------------------------------------
+# With -Verify each step reports each change that a run would make, and the script
+# writes nothing. Every write passes through one of two functions.
+# Invoke-NeologikGraph sends each Microsoft Graph request. Invoke-NeologikWrite calls
+# each SDK command that writes. Both functions refuse a write in a run with -Verify.
+# Each step records a pending change as a 'WOULD' item in the summary. A 'WOULD' item
+# needs attention and sets the exit code to 1.
 
 function Test-NeologikVerifyOnly {
     return [bool](Get-NeologikProperty $script:State 'Verify' $false)
 }
 
 function Add-NeologikPendingChange {
-    # One change a real run would make, recorded instead of performed.
+    # Records one change that a run without -Verify would make.
     param([string]$Item, [string]$Change)
-    Write-Log "  verify-only: $Item - WOULD $Change (nothing written)" -Level Warning
+    Write-Log "  ${Item}: WOULD $Change. A run with -Verify writes nothing" -Level Warning
     Add-Summary $Item "WOULD $Change"
 }
 
 function Assert-NeologikWriteAllowed {
     param([string]$Description)
     if (Test-NeologikVerifyOnly) {
-        throw [System.InvalidOperationException]::new("verify-only run: the write '$Description' was refused - report this to Neologik")
+        throw [System.InvalidOperationException]::new("The run with -Verify refused the write '$Description'. Report this message to Neologik")
     }
 }
 
 function Invoke-NeologikWrite {
     <#
-    The one seam for every SDK write cmdlet (Microsoft Graph, Az, Exchange
-    Online): refused in a verify-only run, otherwise the cmdlet is called
-    with -ErrorAction Stop and its output returned.
+    Calls one SDK command that writes to Microsoft Graph, to Azure or to Exchange
+    Online. The function refuses the call in a run with -Verify. Otherwise the
+    function calls the command with -ErrorAction Stop and returns the output.
     #>
     param([Parameter(Mandatory)][string]$Command, [hashtable]$Parameters = @{})
     Assert-NeologikWriteAllowed -Description $Command
     return (& $Command @Parameters -ErrorAction Stop)
 }
 
-# ----- module, sign-in and process seams ----------------------------------------
-# Wrappers around the commands that touch the workstation or the network. They hold
-# no logic.
+# ----- Modules, sign-in and processes -------------------------------------------
+# Each function wraps one command that uses the workstation or the network. The
+# functions hold no logic.
 
 function Get-NeologikAvailableModuleVersion {
     param([string]$Name)
@@ -602,9 +708,10 @@ function Test-NeologikCommand {
 
 function Invoke-NeologikAzureCli {
     <#
-    Runs az with the given arguments; returns the exit code and the stdout
-    lines. Local preferences keep a non-zero exit code or stderr chatter from
-    becoming a terminating error (PowerShell 7.4+ can promote either).
+    Runs az with the given arguments. Returns the exit code and the lines of the
+    standard output. PowerShell 7.4 can turn an exit code other than zero, or text
+    on the error stream, into a terminating error. The two local preferences
+    prevent that.
     #>
     param([string[]]$Arguments)
     $ErrorActionPreference = 'Continue'
@@ -617,9 +724,10 @@ function Invoke-NeologikAzureCli {
 
 function Invoke-NeologikTokenRequest {
     <#
-    One POST to the Microsoft identity platform (the device-code or the
-    token endpoint). Status code and parsed body are returned, never
-    thrown, so the device-code loop reads authorization_pending as data.
+    Sends one POST request to the Microsoft identity platform, to the device code
+    endpoint or to the token endpoint. Returns the status code and the parsed body.
+    The function never throws on an HTTP error, so the device code loop can read
+    the answer authorization_pending.
     #>
     param([string]$Uri, [hashtable]$Body)
     $statusCode = 0
@@ -629,9 +737,9 @@ function Invoke-NeologikTokenRequest {
 }
 
 function Test-NeologikEndpoint {
-    # True when this machine gets any HTTP answer from the address (a 4xx
-    # from a bare root is an answer); false on a DNS, proxy or firewall
-    # failure or no answer within 15 seconds.
+    # Returns true when the workstation receives any HTTP answer from the address. An
+    # answer with a 4xx status is still an answer. Returns false on a failure of DNS, of
+    # the proxy or of the firewall, and when no answer arrives within 15 seconds.
     param([string]$Uri)
     try {
         $null = Invoke-WebRequest -Method Head -Uri $Uri -TimeoutSec 15 -SkipHttpErrorCheck -ErrorAction Stop
@@ -641,22 +749,22 @@ function Test-NeologikEndpoint {
 }
 
 function Get-NeologikTokenError {
-    # The identity platform's reason, one line, for the log.
+    # Returns the reason that the Microsoft identity platform gives, on one line.
     param($Body)
     $description = [string](Get-NeologikProperty $Body 'error_description' '')
     $code = [string](Get-NeologikProperty $Body 'error' '')
     if ($description) { return (($description -split "`r?`n")[0]).Trim() }
     if ($code) { return $code }
-    return 'no answer from the identity platform'
+    return 'The Microsoft identity platform gave no answer'
 }
 
 function Get-NeologikDeviceCodeToken {
     <#
-    The device code sign-in, run by this script. The address and the code are
-    printed here, the wait is limited by the lifetime of the code (at most
-    DeviceCodeMaximumWaitSeconds), and the script reports every 30 seconds that it
-    is waiting. Returns the tokens, or $null after logging why the sign-in did not
-    complete; the caller then tries the next method.
+    Runs the device code sign-in. The function prints the address and the code. The
+    function waits while the code is valid, for DeviceCodeMaximumWaitSeconds at
+    most. The function reports every 30 seconds that the script still waits.
+    Returns the tokens. When the sign-in does not complete, the function logs the
+    reason and returns $null. The caller then tries the next method.
     #>
     param([string]$ClientId, [string[]]$Scopes, [string]$Label, [string]$Claims)
     $state = $script:State
@@ -666,19 +774,19 @@ function Get-NeologikDeviceCodeToken {
     try {
         $start = Invoke-NeologikTokenRequest -Uri "$base/devicecode" -Body $request
         if ($start.StatusCode -ne 200 -and $Claims) {
-            # A tenant that refuses the claims parameter on the device-code
-            # request: ask again without it (the writes then surface any
-            # claims challenge themselves).
+            # Some tenants refuse the claims parameter on the device code request. The script
+            # then sends the request again without the claims parameter. A later write can then
+            # return a claims challenge.
             $request.Remove('claims')
             $start = Invoke-NeologikTokenRequest -Uri "$base/devicecode" -Body $request
         }
     }
     catch {
-        Write-Log "$Label sign-in could not start: $(Get-NeologikErrorText $_)" -Level Warning
+        Write-Log "The sign-in to $Label did not start. $(Get-NeologikErrorText $_)" -Level Warning
         return $null
     }
     if ($start.StatusCode -ne 200) {
-        Write-Log "$Label sign-in could not start: $(Get-NeologikTokenError $start.Body)" -Level Warning
+        Write-Log "The sign-in to $Label did not start. $(Get-NeologikTokenError $start.Body)" -Level Warning
         return $null
     }
     $deviceCode = [string](Get-NeologikProperty $start.Body 'device_code' '')
@@ -687,7 +795,7 @@ function Get-NeologikDeviceCodeToken {
     $lifetime = [int](Get-NeologikProperty $start.Body 'expires_in' 900)
     $interval = [int](Get-NeologikProperty $start.Body 'interval' 5)
     if (-not $deviceCode -or -not $userCode) {
-        Write-Log "$Label sign-in could not start: the identity platform returned no device code" -Level Warning
+        Write-Log "The sign-in to $Label did not start. The Microsoft identity platform returned no device code" -Level Warning
         return $null
     }
     if ($lifetime -le 0) { $lifetime = 900 }
@@ -695,14 +803,14 @@ function Get-NeologikDeviceCodeToken {
     $lifetime = [Math]::Min($lifetime, $script:DeviceCodeMaximumWaitSeconds)
     $minutes = [int][Math]::Ceiling($lifetime / 60)
     Write-Host ''
-    Write-Host "  $Label sign-in" -ForegroundColor Cyan
-    Write-Host "  1. Open $verificationUri in a browser (this machine or your phone)."
+    Write-Host "  Sign-in to $Label" -ForegroundColor Cyan
+    Write-Host "  1. Open $verificationUri in a browser on any device."
     Write-Host "  2. Enter the code: $userCode" -ForegroundColor Yellow
-    Write-Host '  3. Sign in with your Global Administrator account and approve the permissions.'
-    Write-Host "  The code is valid for $minutes minutes. The script waits here and reports every $($script:DeviceCodeReportEverySeconds) seconds."
+    Write-Host '  3. Sign in as a Global Administrator. Approve the permissions when the browser lists permissions.'
+    Write-Host "  The code is valid for $minutes minutes. The script waits for the sign-in and reports every $($script:DeviceCodeReportEverySeconds) seconds."
     Write-Host ''
-    # Polled at once and then every interval until the code's lifetime is
-    # spent: the loop is bounded by the count of intervals, never by a clock.
+    # The loop asks at once and then after each interval, until the lifetime of the code
+    # ends. The count of intervals limits the loop. The loop reads no clock.
     $elapsed = 0
     $sinceReport = 0
     while ($true) {
@@ -714,14 +822,14 @@ function Get-NeologikDeviceCodeToken {
             }
         }
         catch {
-            Write-Log "$Label sign-in did not complete: $(Get-NeologikErrorText $_)" -Level Warning
+            Write-Log "The sign-in to $Label did not complete. $(Get-NeologikErrorText $_)" -Level Warning
             return $null
         }
         if ($poll.StatusCode -eq 200) {
             $accessToken = [string](Get-NeologikProperty $poll.Body 'access_token' '')
             if ($accessToken) {
                 $account = Get-NeologikTokenAccountId -Token $accessToken
-                Write-Log "$Label sign-in completed$(if ($account) { " ($account)" })" -Level Success
+                Write-Log "The sign-in to $Label completed$(if ($account) { ", account $account" })" -Level Success
                 return @{
                     AccessToken  = $accessToken
                     RefreshToken = [string](Get-NeologikProperty $poll.Body 'refresh_token' '')
@@ -733,7 +841,7 @@ function Get-NeologikDeviceCodeToken {
         if ($reason -eq 'authorization_pending') { }
         elseif ($reason -eq 'slow_down') { $interval += 5 }
         else {
-            Write-Log "$Label sign-in did not complete: $(Get-NeologikTokenError $poll.Body)" -Level Warning
+            Write-Log "The sign-in to $Label did not complete. $(Get-NeologikTokenError $poll.Body)" -Level Warning
             return $null
         }
         if ($elapsed -ge $lifetime) { break }
@@ -742,29 +850,30 @@ function Get-NeologikDeviceCodeToken {
         $sinceReport += $interval
         if ($sinceReport -ge $script:DeviceCodeReportEverySeconds) {
             $left = [int][Math]::Ceiling(($lifetime - $elapsed) / 60)
-            Write-Host "  ... still waiting for the $Label sign-in (code $userCode, about $left minute(s) left)"
+            Write-Host "  The script still waits for the sign-in to $Label. Code $userCode. About $left minute(s) remain."
             $sinceReport = 0
         }
     }
-    Write-Log "$Label sign-in did not complete: the code expired after $minutes minutes" -Level Warning
+    Write-Log "The sign-in to $Label did not complete. The code expired after $minutes minutes" -Level Warning
     return $null
 }
 
 function Test-NeologikPreflightEndpoint {
-    # Every address the run uses must answer before anything is changed.
-    # Returns $true, or $false after naming the address that did not answer.
+    # Each address that the run uses must answer before the script changes anything.
+    # Returns $true. Returns $false after the function names each address that did not
+    # answer.
     $unreachable = @()
     foreach ($endpoint in $script:PreflightEndpoints) {
         if (Test-NeologikEndpoint -Uri $endpoint.Uri) {
-            Write-Log "  $($endpoint.Name) - reachable" -Level Success
+            Write-Log "  $($endpoint.Name): reached" -Level Success
         }
         else {
-            Write-Log "  $($endpoint.Name) ($($endpoint.Uri)) - NOT reachable" -Level Error
+            Write-Log "  $($endpoint.Name): NOT reached. Address $($endpoint.Uri)" -Level Error
             $unreachable += "$($endpoint.Name): $($endpoint.Uri)"
         }
     }
     if ($unreachable.Count -gt 0) {
-        Write-ActionRequired "This machine cannot reach:`n  $($unreachable -join "`n  ")`nAllow these addresses through the proxy or firewall (or run the script from a machine that reaches them), then run it again. Nothing was changed."
+        Write-ActionRequired "This workstation cannot reach:`n  $($unreachable -join "`n  ")`nAllow each address through the proxy or the firewall, or use a workstation that can reach each address.`nThen run the script again. The script changed nothing."
         return $false
     }
     return $true
@@ -772,8 +881,9 @@ function Test-NeologikPreflightEndpoint {
 
 function Invoke-NeologikGraphRaw {
     <#
-    One Microsoft Graph request through the SDK with HTTP errors returned,
-    not thrown: status code, response headers and body for the caller.
+    Sends one Microsoft Graph request through the SDK. The function returns an HTTP
+    error and does not throw. Returns the status code, the response headers and the
+    body.
     #>
     param([string]$Method, [string]$Uri, $Body, [hashtable]$Headers, [string]$ContentType)
     $statusCode = $null
@@ -793,7 +903,7 @@ function Invoke-NeologikGraphRaw {
 }
 
 function Get-NeologikSummaryDirectory {
-    # Candidate folders for the JSON summary, in order of preference.
+    # Returns the folders for the summary file, in order of preference.
     $candidates = @()
     if ($PSCommandPath) { $candidates += (Split-Path -Parent $PSCommandPath) }
     $candidates += (Get-Location).Path
@@ -801,7 +911,7 @@ function Get-NeologikSummaryDirectory {
     return @($candidates | Where-Object { $_ } | Select-Object -Unique)
 }
 
-# ----- Microsoft Graph request helpers ------------------------------------------
+# ----- Microsoft Graph requests -------------------------------------------------
 
 function Get-NeologikRetryDelay {
     param($Headers, [int]$Attempt)
@@ -822,27 +932,28 @@ function Get-NeologikRetryDelay {
 function Get-NeologikGraphErrorMessage {
     param([int]$StatusCode, [string]$Method, [string]$Uri, $Body)
     $path = $Uri
-    try { $path = ([uri]$Uri).AbsolutePath } catch { Write-Verbose "ignored: $($_.Exception.Message)" }
+    try { $path = ([uri]$Uri).AbsolutePath } catch { Write-Verbose "The script ignores the error. $($_.Exception.Message)" }
     $detail = ''
     $graphError = Get-NeologikProperty $Body 'error'
     if ($graphError) {
         $code = [string](Get-NeologikProperty $graphError 'code' '')
         $message = [string](Get-NeologikProperty $graphError 'message' '')
-        $detail = (@($code, $message) | Where-Object { $_ }) -join ' - '
+        $detail = (@($code, $message) | Where-Object { $_ }) -join ': '
     }
-    $text = "Graph $Method $path returned HTTP $StatusCode"
-    if ($detail) { $text = "$text ($detail)" }
+    $text = "Microsoft Graph $Method $path returned HTTP $StatusCode"
+    if ($detail) { $text = "$text. $detail" }
     return $text
 }
 
 function Invoke-NeologikGraph {
     <#
-    A Microsoft Graph request that retries throttling (429) and transient
-    service errors (502/503/504) with the Retry-After header honoured, and
-    - with -RetryNotFound, used right after a create - a 404 caused by
-    replication delay. Any other failure is thrown as an
-    HttpRequestException carrying the status code and the Graph error text.
-    In a verify-only run every non-GET request is refused here.
+    Sends one Microsoft Graph request and tries again after a temporary error. The
+    temporary errors are HTTP 429, 502, 503 and 504. The function waits for the time
+    in the Retry-After header. With -RetryNotFound the function also tries again
+    after HTTP 404. A caller uses -RetryNotFound directly after a create, because a
+    new object takes time to replicate. The function throws every other failure as
+    an HttpRequestException with the status code and the error text of Microsoft
+    Graph. In a run with -Verify the function refuses every request other than GET.
     #>
     param(
         [string]$Method = 'GET',
@@ -861,7 +972,7 @@ function Invoke-NeologikGraph {
         $transient = ($status -in @(429, 502, 503, 504)) -or ($RetryNotFound -and $status -eq 404)
         if ($transient -and $attempt -lt $MaxAttempts) {
             $delay = Get-NeologikRetryDelay -Headers $result.Headers -Attempt $attempt
-            Write-Log "  Graph returned $status - retrying in $delay s ($attempt of $MaxAttempts)" -Level Warning
+            Write-Log "  Microsoft Graph returned HTTP $status. The script tries again in $delay seconds. Attempt $attempt of $MaxAttempts" -Level Warning
             Start-Sleep -Seconds $delay
             continue
         }
@@ -874,7 +985,7 @@ function Invoke-NeologikGraph {
 }
 
 function Get-NeologikGraphCollection {
-    # GET a collection, following @odata.nextLink until the last page.
+    # Reads a collection with GET. Follows @odata.nextLink to the last page.
     param([Parameter(Mandatory)][string]$Uri, [switch]$RetryNotFound, [int]$MaxPages = 200)
     $items = @()
     $next = $Uri
@@ -885,8 +996,8 @@ function Get-NeologikGraphCollection {
         $next = [string](Get-NeologikProperty $page '@odata.nextLink' '')
         $pages++
     }
-    # Emitted item by item: callers collect with @() (a comma-wrapped array
-    # would arrive nested inside that @()).
+    # The function returns the items one by one. The caller collects the items with @().
+    # An array wrapped with a comma would arrive nested inside that @().
     return $items
 }
 
@@ -895,34 +1006,33 @@ function Get-NeologikGraphAppRole {
     return @($script:State.GraphSp.AppRoles | Where-Object { $_.Value -eq $RoleName }) | Select-Object -First 1
 }
 
-# ----- input resolution -------------------------------------------------------
+# ----- Inputs -------------------------------------------------------------------
 
 function Read-NeologikJsonFile {
-    # Reads and parses a JSON input file; a missing, empty or malformed file
-    # is an input error with the file named.
+    # Reads and parses a JSON input file. Throws an input error that names the file
+    # when the file is absent, empty or not valid JSON.
     param([string]$Path, [string]$Label)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        throw [System.ArgumentException]::new("$Label not found: $Path")
+        throw [System.ArgumentException]::new("The $Label does not exist: $Path")
     }
     $raw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
     if ([string]::IsNullOrWhiteSpace($raw)) {
-        throw [System.ArgumentException]::new("$Label is empty: $Path")
+        throw [System.ArgumentException]::new("The $Label is empty: $Path")
     }
     try {
         $parsed = ConvertFrom-Json -InputObject $raw -NoEnumerate -ErrorAction Stop
         return , $parsed
     }
     catch {
-        throw [System.ArgumentException]::new("$Label is not valid JSON ($Path): $(Get-NeologikErrorText $_)")
+        throw [System.ArgumentException]::new("The $Label is not valid JSON: $Path. $(Get-NeologikErrorText $_)")
     }
 }
 
 function Resolve-NeologikInput {
     <#
-    Resolves every input from the configuration file and the explicit
-    parameters, validates ids and input files, and fills $script:State.
-    Every problem is reported as an ArgumentException with the exact
-    correction for the operator.
+    Reads each input from the configuration file and from the parameters. Checks
+    each id and each input file. Fills $script:State. Reports each problem as an
+    ArgumentException that states the exact correction.
     #>
     param([hashtable]$Parameters)
     $state = $script:State
@@ -930,20 +1040,21 @@ function Resolve-NeologikInput {
             'NceUserGroupId', 'AdminGroupId', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'AgentGrantsFile', 'MailboxGrantsFile')) {
         $state[$name] = ([string](Get-NeologikProperty $Parameters $name '')).Trim()
     }
-    # Agent registrations: one client id for each. A list separated by commas within
-    # one element is accepted.
+    # Agent registrations: one client id for each agent registration. One element can
+    # hold several client ids, separated by commas.
     $state.BotAppClientIds = @(@(Get-NeologikProperty $Parameters 'BotAppClientIds' @()) | ForEach-Object { "$_" -split ',' } |
         ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
     if (-not $state.BlueprintKey) { $state.BlueprintKey = 'default' }
     $state.RemoveLegacyGrantAppIds = @(Get-NeologikProperty $Parameters 'RemoveLegacyGrantAppIds' @() | Where-Object { $_ })
     $state.UseAzureCliToken = [bool](Get-NeologikProperty $Parameters 'UseAzureCliToken' $false)
     $state.Verify = [bool](Get-NeologikProperty $Parameters 'Verify' $false)
-    # The files given select the run: a grants file of either kind selects the later
-    # run; none selects the first run.
+    # The command selects the run. A grants file of either kind selects the later run.
+    # A command without a grants file selects the first run.
     $state.Run = if ($state.AgentGrantsFile -or $state.MailboxGrantsFile) { 'PostWindow' } else { 'PreWindow' }
     $state.Config = $null
-    # The short name names the agent identity blueprint. The parameter takes precedence,
-    # then the configuration file. It is never taken from a display name.
+    # The name of the agent identity blueprint holds the short name. The parameter comes
+    # first, then the configuration file. The script never reads the short name from a
+    # display name.
     $state.ShortName = $state.SolutionShortName.Trim()
     $state.ShortNameSource = if ($state.ShortName) { '-SolutionShortName' } else { '' }
     $state.AgentGrants = $null
@@ -951,9 +1062,9 @@ function Resolve-NeologikInput {
     $state.AdoptedIdentityAppIds = @()
 
     if ($state.ConfigurationFile) {
-        $config = Read-NeologikJsonFile -Path $state.ConfigurationFile -Label 'Configuration file'
+        $config = Read-NeologikJsonFile -Path $state.ConfigurationFile -Label 'configuration file'
         if ($config -is [System.Array] -or $null -eq $config) {
-            throw [System.ArgumentException]::new("Configuration file is not the onboarding configuration JSON (expected an object with TenantId and AppRegistration): $($state.ConfigurationFile)")
+            throw [System.ArgumentException]::new("The configuration file is not the file that the onboarding script wrote: $($state.ConfigurationFile). The file must hold TenantId and AppRegistration.")
         }
         $state.Config = $config
         if (-not $state.TenantId) { $state.TenantId = [string](Get-NeologikProperty $config 'TenantId' '') }
@@ -982,14 +1093,14 @@ function Resolve-NeologikInput {
             if ($state.ShortName) { $state.ShortNameSource = 'the configuration file' }
         }
         if (-not $state.SolutionName) { $state.SolutionName = ([string](Get-NeologikProperty $config 'SolutionName' '')).Trim() }
-        Write-Log "Configuration loaded: $(Get-NeologikProperty $config 'OrganizationName' '') ($($state.ShortName))" -Level Info
+        Write-Log "The script read the configuration file. Organisation: $(Get-NeologikProperty $config 'OrganizationName' ''). Short name: $($state.ShortName)" -Level Info
     }
 
     foreach ($required in @(
             @{ Name = 'TenantId'; Value = $state.TenantId },
             @{ Name = 'DeploySpClientId'; Value = $state.DeploySpClientId })) {
         if (-not $required.Value) {
-            throw [System.ArgumentException]::new("$($required.Name) could not be resolved - pass it explicitly or supply -ConfigurationFile.")
+            throw [System.ArgumentException]::new("The command does not give $($required.Name). Add -$($required.Name) to the command, or add -ConfigurationFile.")
         }
     }
     $idChecks = @(
@@ -1003,71 +1114,72 @@ function Resolve-NeologikInput {
     foreach ($botId in $state.BotAppClientIds) { $idChecks += @{ Name = 'BotAppClientIds'; Value = $botId } }
     foreach ($idCheck in $idChecks) {
         if ($idCheck.Value -and -not (Test-NeologikGuid $idCheck.Value)) {
-            throw [System.ArgumentException]::new("$($idCheck.Name) must be a GUID (got '$($idCheck.Value)').")
+            throw [System.ArgumentException]::new("$($idCheck.Name) must be a GUID. The value is '$($idCheck.Value)'.")
         }
     }
     if ($state.Run -eq 'PreWindow' -and (-not $state.SubscriptionId -or -not $state.ResourceGroupName)) {
-        throw [System.ArgumentException]::new('The pre-window run needs SubscriptionId and ResourceGroupName for the permission reduction - pass them explicitly or supply -ConfigurationFile.')
+        throw [System.ArgumentException]::new('The first run needs SubscriptionId and ResourceGroupName for the permission reduction. Add -SubscriptionId and -ResourceGroupName to the command, or add -ConfigurationFile.')
     }
     if ($state.Run -eq 'PreWindow' -and -not $state.ShortName) {
-        # The blueprint is named by the short name, which is never taken from a display
-        # name.
-        throw [System.ArgumentException]::new("The first run needs SolutionShortName (the short name of the environment, by which the agent identity blueprint is named, for example abcprd01) - pass -SolutionShortName or supply -ConfigurationFile. It is never taken from a display name.")
+        # The name of the agent identity blueprint holds the short name. The script never
+        # reads the short name from a display name.
+        throw [System.ArgumentException]::new("The first run needs SolutionShortName. SolutionShortName is the short name of the environment, for example abcprd01. The name of the agent identity blueprint holds the short name. Add -SolutionShortName to the command, or add -ConfigurationFile.")
     }
     if ($state.Run -eq 'PreWindow' -and -not $state.SignInAppClientId) {
-        # The sign-in application is named by its client id and is never found by display
-        # name.
-        throw [System.ArgumentException]::new("The first run needs SignInAppClientId (the client id of the 'Neologik Platform Sign-in' application registration) - pass -SignInAppClientId or supply -ConfigurationFile. The sign-in application is never found by name.")
+        # The client id names the Platform Sign-in application. The script never finds the
+        # Platform Sign-in application by display name.
+        throw [System.ArgumentException]::new("The first run needs SignInAppClientId. SignInAppClientId is the client id of the application registration 'Neologik Platform Sign-in'. Add -SignInAppClientId to the command, or add -ConfigurationFile.")
     }
     if ($state.Run -eq 'PreWindow' -and -not $state.SolutionName) {
-        throw [System.ArgumentException]::new("The first run needs SolutionName (the solution name of the environment, for example neo-abcprd-uks-01; the unique name of the sign-in application is sp-admin-<solution name>) - pass -SolutionName or supply -ConfigurationFile.")
+        throw [System.ArgumentException]::new("The first run needs SolutionName. SolutionName is the solution name of the environment, for example neo-abcprd-uks-01. The unique name of the Platform Sign-in application is sp-admin-<solution name>. Add -SolutionName to the command, or add -ConfigurationFile.")
     }
     foreach ($legacyAppId in $state.RemoveLegacyGrantAppIds) {
         if (-not (Test-NeologikGuid $legacyAppId)) {
-            throw [System.ArgumentException]::new("RemoveLegacyGrantAppIds must be application id GUIDs (got '$legacyAppId').")
+            throw [System.ArgumentException]::new("RemoveLegacyGrantAppIds must hold application ids, each a GUID. One value is '$legacyAppId'.")
         }
     }
     if ($state.RemoveLegacyGrantAppIds.Count -gt 0 -and -not $state.MailboxGrantsFile) {
-        throw [System.ArgumentException]::new('RemoveLegacyGrantAppIds belongs to the post-window run - supply -MailboxGrantsFile as well (the export that also lists the identities the v5 email channel adopted, which are never removed).')
+        throw [System.ArgumentException]::new('RemoveLegacyGrantAppIds belongs to the later run. Add -MailboxGrantsFile to the command. The mailbox grants file lists each identity that an email channel still uses. The script never removes the role assignments of those identities.')
     }
 
     if ($state.AgentGrantsFile) {
-        $grantsFile = Read-NeologikJsonFile -Path $state.AgentGrantsFile -Label 'Agent grants file'
+        $grantsFile = Read-NeologikJsonFile -Path $state.AgentGrantsFile -Label 'agent grants file'
         if ($grantsFile -is [System.Array] -or $null -eq $grantsFile -or -not (Test-NeologikProperty $grantsFile 'grants')) {
-            throw [System.ArgumentException]::new("Agent grants file is not the platform export (expected an object with 'grants', 'componentGraphRoles' and 'sharePointIngestion'): $($state.AgentGrantsFile)")
+            throw [System.ArgumentException]::new("The agent grants file is not the file that Neologik exports: $($state.AgentGrantsFile). The file must hold 'grants', 'componentGraphRoles' and 'sharePointIngestion'.")
         }
         $fileTenant = [string](Get-NeologikProperty $grantsFile 'tenantId' '')
         if ($fileTenant -and $fileTenant -ne $state.TenantId) {
-            throw [System.ArgumentException]::new("Agent grants file was exported from tenant $fileTenant but this run targets tenant $($state.TenantId) - export the file from the environment in this tenant.")
+            throw [System.ArgumentException]::new("The agent grants file belongs to tenant $fileTenant. This run is for tenant $($state.TenantId). Ask Neologik for the agent grants file of the environment in tenant $($state.TenantId).")
         }
         $entries = @(Get-NeologikProperty $grantsFile 'grants' @())
         foreach ($entry in $entries) {
-            $name = [string](Get-NeologikProperty $entry 'name' '(unnamed)')
+            $name = [string](Get-NeologikProperty $entry 'name' 'no name')
             if ([string](Get-NeologikProperty $entry 'status' '') -ne 'ready') { continue }
             $clientId = [string](Get-NeologikProperty $entry 'identityClientId' '')
             $userId = [string](Get-NeologikProperty $entry 'agentUserObjectId' '')
             if (-not (Test-NeologikGuid $clientId) -or -not (Test-NeologikGuid $userId)) {
-                throw [System.ArgumentException]::new("Agent grants file: identityClientId and agentUserObjectId must be GUIDs ($name).")
+                throw [System.ArgumentException]::new("The agent grants file: identityClientId and agentUserObjectId must be GUIDs. Entry: $name.")
             }
             $scopes = @(@(Get-NeologikProperty $entry 'scopes' @()) | ForEach-Object { [string]$_ } | Where-Object { $_.Trim() })
             if ($scopes.Count -eq 0) {
-                throw [System.ArgumentException]::new("Agent grants file: every ready entry needs scopes ($name).")
+                throw [System.ArgumentException]::new("The agent grants file: each entry with the status ready needs scopes. Entry: $name.")
             }
         }
         $state.AgentGrants = $grantsFile
         $componentRoles = @(Get-NeologikProperty $grantsFile 'componentGraphRoles' @())
         $sharePoint = [bool](Get-NeologikProperty $grantsFile 'sharePointIngestion' $false)
-        Write-Log "Agent grants loaded: $($entries.Count) agent/app entries, $($componentRoles.Count) component role(s), SharePoint ingestion: $sharePoint" -Level Info
+        Write-Log "The script read the agent grants file. Entries for agents and Apps: $($entries.Count). Application permissions for workload identities: $($componentRoles.Count). SharePoint ingestion: $sharePoint" -Level Info
         foreach ($warning in @(Get-NeologikProperty $grantsFile 'warnings' @() | Where-Object { $_ })) {
-            Write-Log "  export warning: $warning" -Level Warning
+            Write-Log "  Warning in the agent grants file: $warning" -Level Warning
         }
     }
 
     if ($state.MailboxGrantsFile) {
-        $mailboxFile = Read-NeologikJsonFile -Path $state.MailboxGrantsFile -Label 'Mailbox grants file'
-        # Two forms: a list of entries, or an object with 'grants' (the entries) and
-        # 'adoptedIdentityAppIds' (the client ids of identities that remain in use, which
-        # -RemoveLegacyGrantAppIds never removes).
+        $mailboxFile = Read-NeologikJsonFile -Path $state.MailboxGrantsFile -Label 'mailbox grants file'
+        # The file has one of two forms. The first form is a list of entries. The second
+        # form is an object with 'grants' and 'adoptedIdentityAppIds'. 'grants' holds the
+        # entries. 'adoptedIdentityAppIds' holds the client id of each identity that an email
+        # channel still uses. -RemoveLegacyGrantAppIds never removes those identities.
         $rawEntries = @()
         $adopted = @()
         if ($mailboxFile -is [System.Array]) {
@@ -1076,37 +1188,37 @@ function Resolve-NeologikInput {
         elseif ($null -ne $mailboxFile -and ((Test-NeologikProperty $mailboxFile 'grants') -or (Test-NeologikProperty $mailboxFile 'adoptedIdentityAppIds'))) {
             $fileTenant = [string](Get-NeologikProperty $mailboxFile 'tenantId' '')
             if ($fileTenant -and $fileTenant -ne $state.TenantId) {
-                throw [System.ArgumentException]::new("Mailbox grants file was exported from tenant $fileTenant but this run targets tenant $($state.TenantId) - export the file from the environment in this tenant.")
+                throw [System.ArgumentException]::new("The mailbox grants file belongs to tenant $fileTenant. This run is for tenant $($state.TenantId). Ask Neologik for the mailbox grants file of the environment in tenant $($state.TenantId).")
             }
             $rawEntries = @(Get-NeologikProperty $mailboxFile 'grants' @())
             $adopted = @(@(Get-NeologikProperty $mailboxFile 'adoptedIdentityAppIds' @()) | ForEach-Object { [string]$_ } | Where-Object { $_.Trim() })
         }
         else {
-            throw [System.ArgumentException]::new("Mailbox grants file is not the platform export (expected an array of entries, or an object with 'grants' and 'adoptedIdentityAppIds'): $($state.MailboxGrantsFile)")
+            throw [System.ArgumentException]::new("The mailbox grants file is not the file that Neologik exports: $($state.MailboxGrantsFile). The file must hold a list of entries, or 'grants' and 'adoptedIdentityAppIds'.")
         }
         foreach ($adoptedAppId in $adopted) {
             if (-not (Test-NeologikGuid $adoptedAppId)) {
-                throw [System.ArgumentException]::new("Mailbox grants file: adoptedIdentityAppIds must be application id GUIDs (got '$adoptedAppId').")
+                throw [System.ArgumentException]::new("The mailbox grants file: adoptedIdentityAppIds must hold application ids, each a GUID. One value is '$adoptedAppId'.")
             }
         }
         $mailboxEntries = @()
         foreach ($entry in $rawEntries) {
             foreach ($field in @('IdentityAppId', 'IdentityObjectId', 'Mailbox', 'DisplayName')) {
                 if (-not [string](Get-NeologikProperty $entry $field '')) {
-                    throw [System.ArgumentException]::new("Mailbox grants file: every entry needs $field.")
+                    throw [System.ArgumentException]::new("The mailbox grants file: each entry needs $field.")
                 }
             }
             $display = [string](Get-NeologikProperty $entry 'DisplayName')
             if (-not (Test-NeologikGuid ([string](Get-NeologikProperty $entry 'IdentityAppId'))) -or
                 -not (Test-NeologikGuid ([string](Get-NeologikProperty $entry 'IdentityObjectId')))) {
-                throw [System.ArgumentException]::new("Mailbox grants file: IdentityAppId and IdentityObjectId must be GUIDs ($display).")
+                throw [System.ArgumentException]::new("The mailbox grants file: IdentityAppId and IdentityObjectId must be GUIDs. Entry: $display.")
             }
             $mailbox = [string](Get-NeologikProperty $entry 'Mailbox')
             if ($mailbox -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
-                throw [System.ArgumentException]::new("Mailbox grants file: '$mailbox' is not a mailbox address.")
+                throw [System.ArgumentException]::new("The mailbox grants file: '$mailbox' is not a mailbox address.")
             }
             if ($display -match "[`"'`r`n]") {
-                throw [System.ArgumentException]::new("Mailbox grants file: DisplayName '$display' must not contain quotes.")
+                throw [System.ArgumentException]::new("The mailbox grants file: DisplayName '$display' must not contain a quotation mark.")
             }
             $mailboxEntries += [pscustomobject]@{
                 IdentityAppId    = [string](Get-NeologikProperty $entry 'IdentityAppId')
@@ -1117,14 +1229,14 @@ function Resolve-NeologikInput {
         }
         $state.MailboxGrants = $mailboxEntries
         $state.AdoptedIdentityAppIds = @($adopted)
-        Write-Log "Mailbox grants loaded: $($mailboxEntries.Count) email channel(s), $($adopted.Count) adopted identity(ies)" -Level Info
+        Write-Log "The script read the mailbox grants file. Email channels: $($mailboxEntries.Count). Identities that an email channel still uses: $($adopted.Count)" -Level Info
     }
 }
 
 function Test-NeologikPowerShellVersion {
     param([version]$Version = $PSVersionTable.PSVersion)
     if ($Version -lt [version]'7.4') {
-        Write-ActionRequired "PowerShell 7.4 or later is required (current: $Version).`nInstall it from https://aka.ms/powershell and run this script from 'pwsh', not 'powershell'."
+        Write-ActionRequired "The script needs PowerShell 7.4 or later. This session runs version $Version.`nInstall PowerShell 7 from https://aka.ms/powershell. Then run the script in PowerShell 7, not in Windows PowerShell."
         return $false
     }
     return $true
@@ -1132,56 +1244,56 @@ function Test-NeologikPowerShellVersion {
 
 function Write-NeologikHeader {
     $state = $script:State
-    $runTitle = if ($state.Run -eq 'PostWindow') { 'post-window run' } else { 'pre-window run' }
-    if ($state.Verify) { $runTitle = "$runTitle (verify-only)" }
+    $runTitle = if ($state.Run -eq 'PostWindow') { 'later run' } else { 'first run' }
+    if ($state.Verify) { $runTitle = "$runTitle with -Verify" }
     Write-Host ''
     Write-Host '=============================================================' -ForegroundColor Cyan
-    Write-Host " Neologik environment access - $runTitle" -ForegroundColor Cyan
+    Write-Host " Neologik environment access: $runTitle" -ForegroundColor Cyan
     Write-Host '=============================================================' -ForegroundColor Cyan
     if ($state.Run -eq 'PostWindow') {
-        Write-Host '  Applies only what the grants files list: agent-user grants and/or mailbox grants.'
+        Write-Host '  The later run applies the grants that the grants files list. The later run makes no other change.'
     }
     else {
-        Write-Host '  Checks and grants, then the guarded permission reduction (no grants file given).'
+        Write-Host '  The first run confirms the directory objects, then reduces the access of the deployment identity.'
     }
-    if ($state.Verify) { Write-Host '  Verify-only: every change is reported as WOULD ...; nothing is written.' -ForegroundColor Yellow }
-    Write-Host "  Tenant:              $($state.TenantId)"
-    Write-Host "  Deployment identity: $($state.DeploySpClientId)"
-    if ($state.SignInAppClientId) { Write-Host "  Sign-in app:         $($state.SignInAppClientId)" }
-    if ($state.SharePointAppClientId) { Write-Host "  SharePoint app:      $($state.SharePointAppClientId)" }
-    if ($state.BotAppClientIds.Count -gt 0) { Write-Host "  Bot apps:            $($state.BotAppClientIds -join ', ')" }
-    if ($state.NceUserGroupId) { Write-Host "  NCE user group:      $($state.NceUserGroupId)" }
-    if ($state.AdminGroupId) { Write-Host "  Admin User Group:    $($state.AdminGroupId)" }
-    if ($state.AgentGrants) { Write-Host "  Agent grants file:   $($state.AgentGrantsFile)" }
-    if ($state.MailboxGrantsFile) { Write-Host "  Mailbox grants:      $($state.MailboxGrants.Count) ($($state.MailboxGrantsFile))" }
-    if ($state.AdoptedIdentityAppIds.Count -gt 0) { Write-Host "  Adopted identities:  $($state.AdoptedIdentityAppIds -join ', ')" }
-    if ($state.RemoveLegacyGrantAppIds.Count -gt 0) { Write-Host "  Legacy grants to remove: $($state.RemoveLegacyGrantAppIds -join ', ')" }
+    if ($state.Verify) { Write-Host '  -Verify: the script reports each change as WOULD and writes nothing.' -ForegroundColor Yellow }
+    Write-Host "  Tenant:                                     $($state.TenantId)"
+    Write-Host "  Deployment identity:                        $($state.DeploySpClientId)"
+    if ($state.SignInAppClientId) { Write-Host "  Platform Sign-in application:               $($state.SignInAppClientId)" }
+    if ($state.SharePointAppClientId) { Write-Host "  SharePoint application:                     $($state.SharePointAppClientId)" }
+    if ($state.BotAppClientIds.Count -gt 0) { Write-Host "  Agent registrations:                        $($state.BotAppClientIds -join ', ')" }
+    if ($state.NceUserGroupId) { Write-Host "  User group of the Neologik Context Engine:  $($state.NceUserGroupId)" }
+    if ($state.AdminGroupId) { Write-Host "  Admin User Group:                           $($state.AdminGroupId)" }
+    if ($state.AgentGrants) { Write-Host "  Agent grants file:                          $($state.AgentGrantsFile)" }
+    if ($state.MailboxGrantsFile) { Write-Host "  Mailbox grants file:                        $($state.MailboxGrantsFile), $($state.MailboxGrants.Count) mailbox grant(s)" }
+    if ($state.AdoptedIdentityAppIds.Count -gt 0) { Write-Host "  Identities that an email channel uses:      $($state.AdoptedIdentityAppIds -join ', ')" }
+    if ($state.RemoveLegacyGrantAppIds.Count -gt 0) { Write-Host "  Mailbox grants to remove:                   $($state.RemoveLegacyGrantAppIds -join ', ')" }
     if ($state.Run -eq 'PreWindow') {
-        Write-Host "  Subscription:        $($state.SubscriptionId)"
-        Write-Host "  Resource group:      $($state.ResourceGroupName)"
+        Write-Host "  Subscription:                               $($state.SubscriptionId)"
+        Write-Host "  Resource group:                             $($state.ResourceGroupName)"
     }
     Write-Host ''
 }
 
-# ----- modules + sign-in ------------------------------------------------------
+# ----- Modules and sign-in ------------------------------------------------------
 
 function Import-NeologikModuleSet {
     <#
-    Ensures a set of modules is installed (at or above a minimum version)
-    and imports ONE consistent version of all of them: mixed Microsoft.Graph
-    module versions fail at import with an assembly conflict, the most
-    common cause of a broken run on an administrator's workstation.
-    Returns $true, or $false after printing what to do.
-    -Independent: the modules are versioned independently (the Az family:
-    Az.Accounts, Az.Resources and Az.Sql never share a version number) -
-    each is imported at its own highest available version, no common pin.
+    Installs each module of a set when the module is absent or older than the
+    minimum version. Imports one version that every module of the set has. Microsoft
+    Graph modules of different versions fail at import with an assembly conflict.
+    That conflict is the most common cause of a failed run on a workstation.
+    Returns $true. Returns $false after the function prints what to do.
+    -Independent: each module has a version number separate from the other modules.
+    The Az modules Az.Accounts, Az.Resources and Az.Sql never share a version
+    number. The function imports each module at the highest version available.
     #>
     param([string[]]$Names, [version]$MinimumVersion, [string]$InstallHint, [switch]$Independent)
     try {
         foreach ($name in $Names) {
             $versions = @(Get-NeologikAvailableModuleVersion -Name $name | Where-Object { $_ -ge $MinimumVersion })
             if ($versions.Count -eq 0) {
-                Write-Log "Installing module $name (first run only)..." -Level Info
+                Write-Log "The script installs the PowerShell module $name for your user account" -Level Info
                 Install-NeologikModule -Name $name -MinimumVersion $MinimumVersion
             }
         }
@@ -1189,8 +1301,8 @@ function Import-NeologikModuleSet {
             foreach ($name in $Names) { Import-NeologikModule -Name $name }
             return $true
         }
-        # A version already loaded in this session pins the choice; otherwise
-        # the highest version every module has in common.
+        # A version that this session has already loaded decides the version. Otherwise the
+        # function takes the highest version that every module of the set has.
         $target = $null
         foreach ($name in $Names) {
             $loaded = Get-NeologikLoadedModuleVersion -Name $name
@@ -1211,8 +1323,8 @@ function Import-NeologikModuleSet {
         return $true
     }
     catch {
-        Write-Log "PowerShell module set-up failed: $(Get-NeologikErrorText $_)" -Level Error
-        Write-ActionRequired "The PowerShell modules this script needs could not be installed or loaded.`nIn a new PowerShell 7 window run:`n  $InstallHint`nthen run this script again."
+        Write-Log "The script could not prepare the PowerShell modules. $(Get-NeologikErrorText $_)" -Level Error
+        Write-ActionRequired "The script could not install or load the PowerShell modules that the script needs.`nOpen a new PowerShell 7 window and run this command:`n  $InstallHint`nThen run the script again."
         return $false
     }
 }
@@ -1223,14 +1335,15 @@ function Get-NeologikGraphScope {
         'DelegatedPermissionGrant.Read.All', 'AgentIdentityBlueprint.Create', 'AgentIdentityBlueprint.AddRemoveCreds.All',
         'AgentIdentityBlueprintPrincipal.Create')
     if ($state.AgentGrants) {
-        # The agent-user grants are oAuth2PermissionGrants - a write scope only
-        # a Global Administrator holds (the deployment identity never does).
+        # A grant to an agent user is an oAuth2PermissionGrant. Only a Global Administrator
+        # can write an oAuth2PermissionGrant. The deployment identity cannot.
         $scopes += 'DelegatedPermissionGrant.ReadWrite.All'
     }
     if ($state.Run -eq 'PreWindow') {
-        # The permission reduction removes the Application Administrator directory role of
-        # the deployment identity and, once the SQL server administrator is the deployment
-        # identity, its membership of the Admin User Group.
+        # The permission reduction removes the directory role Application Administrator
+        # from the deployment identity. The permission reduction also removes the membership
+        # of the Admin User Group, when the SQL server administrator is the deployment
+        # identity.
         $scopes += 'RoleManagement.ReadWrite.Directory'
         $scopes += 'GroupMember.ReadWrite.All'
     }
@@ -1238,30 +1351,30 @@ function Get-NeologikGraphScope {
 }
 
 function Connect-NeologikGraph {
-    # Signs in to Microsoft Graph and checks the session is in the expected
-    # tenant. Returns $true, or $false after printing what to do.
+    # Signs in to Microsoft Graph and checks that the session is for the expected
+    # tenant. Returns $true. Returns $false after the function prints what to do.
     $state = $script:State
     $scopes = Get-NeologikGraphScope
     try {
         if ($state.UseAzureCliToken) {
-            Write-Log 'Signing in to Microsoft Graph with the Azure CLI session token (az account get-access-token)...' -Level Info
+            Write-Log 'The script signs in to Microsoft Graph with the token of the Azure CLI session' -Level Info
             if (-not (Test-NeologikCommand -Name 'az')) {
-                Write-ActionRequired "The Azure CLI (az) is not installed on this machine. Install it, sign in (az login --tenant $($state.TenantId)), or run the script without -UseAzureCliToken."
+                Write-ActionRequired "The Azure CLI is not installed on this workstation.`nInstall the Azure CLI and sign in with this command:`n  az login --tenant $($state.TenantId)`nOr run the script without -UseAzureCliToken."
                 return $false
             }
             $cli = Invoke-NeologikAzureCli -Arguments @('account', 'get-access-token', '--resource-type', 'ms-graph', '--tenant', $state.TenantId, '--query', 'accessToken', '-o', 'tsv')
             $cliToken = [string](@($cli.Output) | Where-Object { $_ -and $_.Trim() } | Select-Object -Last 1)
             if ($cli.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($cliToken)) {
-                Write-ActionRequired "az account get-access-token failed for tenant $($state.TenantId).`nSign in first: az login --tenant $($state.TenantId) --scope https://graph.microsoft.com//.default`nthen run this script again (or run it without -UseAzureCliToken for the device-code sign-in)."
+                Write-ActionRequired "The Azure CLI gave no token for tenant $($state.TenantId).`nSign in with this command:`n  az login --tenant $($state.TenantId) --scope https://graph.microsoft.com//.default`nThen run the script again. Or run the script without -UseAzureCliToken, to sign in with a device code."
                 return $false
             }
             Connect-MgGraph -AccessToken (ConvertTo-SecureString -String $cliToken.Trim() -AsPlainText -Force) -NoWelcome -ErrorAction Stop
         }
         else {
-            # The script's own device code first, then the Azure CLI session of the workstation
-            # if there is one, then the device code prompt of Microsoft Graph PowerShell.
+            # The order of the methods: the device code of the script, then the Azure CLI session
+            # of the workstation, then the device code prompt of Microsoft Graph PowerShell.
             $connected = $false
-            Write-Log 'Signing in to Microsoft Graph - use your Global Administrator account' -Level Info
+            Write-Log 'The script signs in to Microsoft Graph. Sign in as a Global Administrator' -Level Info
             $token = Get-NeologikDeviceCodeToken -ClientId $script:GraphPublicClientId -Label 'Microsoft Graph' `
                 -Scopes @(@($scopes) + @('openid', 'profile', 'offline_access'))
             if ($token) {
@@ -1269,10 +1382,10 @@ function Connect-NeologikGraph {
                     Connect-MgGraph -AccessToken (ConvertTo-SecureString -String $token.AccessToken -AsPlainText -Force) -NoWelcome -ErrorAction Stop
                     $connected = $true
                 }
-                catch { Write-Log "The Microsoft Graph session could not be opened with the sign-in token: $(Get-NeologikErrorText $_)" -Level Warning }
+                catch { Write-Log "The script could not open the Microsoft Graph session with the token of the sign-in. $(Get-NeologikErrorText $_)" -Level Warning }
             }
             if (-not $connected -and (Test-NeologikCommand -Name 'az')) {
-                Write-Log 'Trying the Azure CLI session on this machine instead (az account get-access-token)...' -Level Info
+                Write-Log 'The script now tries the Azure CLI session of this workstation' -Level Info
                 $cli = Invoke-NeologikAzureCli -Arguments @('account', 'get-access-token', '--resource-type', 'ms-graph', '--tenant', $state.TenantId, '--query', 'accessToken', '-o', 'tsv')
                 $cliToken = [string](@($cli.Output) | Where-Object { $_ -and $_.Trim() } | Select-Object -Last 1)
                 if ($cli.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($cliToken)) {
@@ -1280,41 +1393,41 @@ function Connect-NeologikGraph {
                         Connect-MgGraph -AccessToken (ConvertTo-SecureString -String $cliToken.Trim() -AsPlainText -Force) -NoWelcome -ErrorAction Stop
                         $connected = $true
                     }
-                    catch { Write-Log "The Microsoft Graph session could not be opened with the Azure CLI token: $(Get-NeologikErrorText $_)" -Level Warning }
+                    catch { Write-Log "The script could not open the Microsoft Graph session with the token of the Azure CLI session. $(Get-NeologikErrorText $_)" -Level Warning }
                 }
-                else { Write-Log '  the Azure CLI has no session for this tenant' -Level Info }
+                else { Write-Log '  The Azure CLI has no session for this tenant' -Level Info }
             }
             if (-not $connected) {
-                Write-Log 'Trying the Microsoft Graph PowerShell device-code prompt (120 seconds)...' -Level Info
-                # The SDK writes its device-code text on the Information stream.
+                Write-Log 'The script now tries the device code prompt of Microsoft Graph PowerShell. The prompt waits 120 seconds' -Level Info
+                # The SDK writes the device code text to the Information stream.
                 $InformationPreference = 'Continue'
                 Connect-MgGraph -TenantId $state.TenantId -Scopes $scopes -UseDeviceCode -NoWelcome -ErrorAction Stop
             }
         }
     }
     catch {
-        Write-Log "Microsoft Graph sign-in failed: $(Get-NeologikErrorText $_)" -Level Error
-        Write-ActionRequired "Sign in to Microsoft Graph did not complete - every sign-in method was tried (the script's device code, the Azure CLI session, the Microsoft Graph PowerShell device code).`nRun the script again on a machine with a browser (any device can open the sign-in address) and finish the sign-in with a Global Administrator account of tenant $($state.TenantId), approving the requested permissions."
+        Write-Log "The sign-in to Microsoft Graph failed. $(Get-NeologikErrorText $_)" -Level Error
+        Write-ActionRequired "The sign-in to Microsoft Graph did not complete. The script tried three methods:`n  1. The device code of the script.`n  2. The Azure CLI session.`n  3. The device code of Microsoft Graph PowerShell.`nRun the script again. Open the sign-in address in a browser on any device.`nSign in as a Global Administrator of tenant $($state.TenantId) and approve the permissions."
         return $false
     }
     $context = $null
     try { $context = Get-MgContext -ErrorAction Stop } catch { $context = $null }
     if (-not $context) {
-        Write-ActionRequired "No Microsoft Graph session was established. Run the script again and complete the sign-in."
+        Write-ActionRequired "The script has no Microsoft Graph session. Run the script again and complete the sign-in."
         return $false
     }
     $contextTenant = [string](Get-NeologikProperty $context 'TenantId' '')
     if ($contextTenant -and $contextTenant -ne $state.TenantId) {
-        Write-ActionRequired "The sign-in landed in tenant $contextTenant but this environment lives in tenant $($state.TenantId).`nRun 'Disconnect-MgGraph', then run the script again and sign in with a Global Administrator account of tenant $($state.TenantId)."
+        Write-ActionRequired "The sign-in is for tenant $contextTenant. The environment is in tenant $($state.TenantId).`nRun the command Disconnect-MgGraph. Then run the script again.`nSign in as a Global Administrator of tenant $($state.TenantId)."
         return $false
     }
     $account = [string](Get-NeologikProperty $context 'Account' '')
-    if ($account) { Write-Log "Signed in as $account (tenant $($state.TenantId))" -Level Info }
+    if ($account) { Write-Log "Signed in as $account, tenant $($state.TenantId)" -Level Info }
     $granted = @(Get-NeologikProperty $context 'Scopes' @())
     if ($granted.Count -gt 0) {
         $missing = @($scopes | Where-Object { $granted -notcontains $_ })
         if ($missing.Count -gt 0) {
-            Write-Log "  the session lacks the permission(s) $($missing -join ', ') - items that need them will be reported as failed" -Level Warning
+            Write-Log "  The session lacks the permission(s) $($missing -join ', '). The script reports each item that needs a missing permission as FAILED" -Level Warning
         }
     }
     return (Test-NeologikGlobalAdministrator)
@@ -1322,11 +1435,12 @@ function Connect-NeologikGraph {
 
 function Test-NeologikGlobalAdministrator {
     <#
-    Check of the signed-in account: it must hold Global Administrator, active,
-    before anything is changed. A run that writes stops with the one instruction. A
-    run with -Verify warns and carries on: its reads still work, and the items that
-    need the role are reported as failed. The object id of the account is kept for
-    the check of its Azure roles.
+    Checks the signed-in account. The signed-in account must hold an active Global
+    Administrator role before the script changes anything. A run that writes stops
+    and prints one instruction. A run with -Verify warns and continues. The reads
+    of a run with -Verify still work. The script reports each item that needs the
+    role as FAILED. The function keeps the object id of the signed-in account for
+    the check of the Azure roles.
     #>
     $state = $script:State
     $graph = $script:GraphV1
@@ -1337,40 +1451,40 @@ function Test-NeologikGlobalAdministrator {
         $roles = @(Get-NeologikGraphCollection -Uri "$graph/me/memberOf/microsoft.graph.directoryRole?`$select=id,displayName,roleTemplateId")
     }
     catch {
-        Write-Log "The signed-in account's directory roles could not be read ($(Get-NeologikErrorText $_)) - continuing; items that need Global Administrator will report as failed" -Level Warning
+        Write-Log "The script could not read the directory roles of the signed-in account. $(Get-NeologikErrorText $_). The script continues. The script reports each item that needs Global Administrator as FAILED" -Level Warning
         return $true
     }
     $isGlobalAdministrator = @($roles | Where-Object { [string](Get-NeologikProperty $_ 'roleTemplateId' '') -eq $script:GlobalAdministratorTemplateId }).Count -gt 0
     if ($isGlobalAdministrator) {
-        Write-Log '  the signed-in account holds Global Administrator (active)' -Level Success
+        Write-Log '  The signed-in account holds an active Global Administrator role' -Level Success
         return $true
     }
     $who = if ($state.SignedInUpn) { $state.SignedInUpn } else { 'The signed-in account' }
     if (Test-NeologikVerifyOnly) {
-        Write-Log "  $who does not hold Global Administrator (active) - verify-only continues; items that need the role will report as failed" -Level Warning
+        Write-Log "  $who does not hold an active Global Administrator role. The run with -Verify continues. The script reports each item that needs the role as FAILED" -Level Warning
         return $true
     }
-    Write-Log "$who does not hold Global Administrator (active)" -Level Error
-    Write-ActionRequired "$who does not hold the Global Administrator role (active) in tenant $($state.TenantId).`nActivate Global Administrator in Privileged Identity Management (Entra admin centre > Identity governance > Privileged Identity Management > My roles), or sign in with an account that holds it, then run the script again. Nothing was changed."
+    Write-Log "$who does not hold an active Global Administrator role" -Level Error
+    Write-ActionRequired "$who does not hold an active Global Administrator role in tenant $($state.TenantId).`nActivate the role in the Microsoft Entra admin centre: Identity governance > Privileged Identity Management > My roles.`nOr sign in with an account that holds the role.`nThen run the script again. The script changed nothing."
     return $false
 }
 
 function Resolve-NeologikPrincipal {
-    # The deployment identity and the Microsoft Graph service principal -
-    # nothing can be verified without them.
+    # Reads the deployment identity and the service principal of Microsoft Graph. The
+    # script can check nothing without both objects.
     $state = $script:State
     try {
         $deploySp = @(Get-MgServicePrincipal -Filter "appId eq '$($state.DeploySpClientId)'" -ErrorAction Stop) | Select-Object -First 1
     }
     catch {
-        Write-Log "Could not read the deployment identity: $(Get-NeologikErrorText $_)" -Level Error
-        Add-Summary 'Deployment identity' "FAILED - $(Get-NeologikErrorText $_)"
+        Write-Log "The script could not read the deployment identity. $(Get-NeologikErrorText $_)" -Level Error
+        Add-Summary 'Deployment identity' "FAILED: $(Get-NeologikErrorText $_)"
         return $false
     }
     if (-not $deploySp) {
-        Write-Log "Deployment service principal not found for client id $($state.DeploySpClientId) in tenant $($state.TenantId)." -Level Error
-        Add-Summary 'Deployment identity' 'MISSING - service principal not found'
-        Write-ActionRequired "The deployment identity (client id $($state.DeploySpClientId)) does not exist in tenant $($state.TenantId).`nCheck the configuration file or the -DeploySpClientId value with Neologik before running again."
+        Write-Log "Tenant $($state.TenantId) holds no service principal with the client id $($state.DeploySpClientId)" -Level Error
+        Add-Summary 'Deployment identity' 'MISSING: the tenant holds no service principal with this client id'
+        Write-ActionRequired "The deployment identity with the client id $($state.DeploySpClientId) does not exist in tenant $($state.TenantId).`nAsk Neologik to confirm the value of -DeploySpClientId. Then run the script again."
         return $false
     }
     $state.DeploySp = $deploySp
@@ -1379,26 +1493,27 @@ function Resolve-NeologikPrincipal {
         $graphSp = @(Get-MgServicePrincipal -Filter "appId eq '$script:GraphSpAppId'" -ErrorAction Stop) | Select-Object -First 1
     }
     catch {
-        Write-Log "Could not read the Microsoft Graph service principal: $(Get-NeologikErrorText $_)" -Level Error
-        Add-Summary 'Microsoft Graph service principal' "FAILED - $(Get-NeologikErrorText $_)"
+        Write-Log "The script could not read the service principal of Microsoft Graph. $(Get-NeologikErrorText $_)" -Level Error
+        Add-Summary 'Service principal of Microsoft Graph' "FAILED: $(Get-NeologikErrorText $_)"
         return $false
     }
     if (-not $graphSp) {
-        Add-Summary 'Microsoft Graph service principal' 'MISSING - report to Neologik'
-        Write-Log 'The Microsoft Graph service principal is missing from this tenant - report this to Neologik.' -Level Error
+        Add-Summary 'Service principal of Microsoft Graph' 'MISSING: report to Neologik'
+        Write-Log 'This tenant holds no service principal of Microsoft Graph. Report this message to Neologik' -Level Error
         return $false
     }
     $state.GraphSp = $graphSp
     return $true
 }
 
-# ----- Graph app roles ---------------------------------------------------------
+# ----- Microsoft Graph application permissions ----------------------------------
 
 function Grant-NeologikGraphAppRole {
     <#
-    Ensures a set of Graph application roles on one principal. Each role is
-    verified and granted independently; the result records how many were
-    newly granted and whether every role is now held.
+    Grants a set of Microsoft Graph application permissions to one principal. The
+    function checks and grants each permission separately. The result records the
+    number of permissions that the function granted. The result also records
+    whether the principal now holds every permission.
     #>
     param([string]$PrincipalId, [string]$Label, [string[]]$RoleNames)
     $graphSp = $script:State.GraphSp
@@ -1410,8 +1525,8 @@ function Grant-NeologikGraphAppRole {
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  could not read the role assignments of $Label`: $reason" -Level Error
-        foreach ($roleName in $RoleNames) { Add-Summary "$Label role: $roleName" "FAILED - $reason" }
+        Write-Log "  The script could not read the Microsoft Graph application permissions of: $Label. $reason" -Level Error
+        foreach ($roleName in $RoleNames) { Add-Summary "$Label permission: $roleName" "FAILED: $reason" }
         $outcome.Failed = $RoleNames.Count
         $outcome.Complete = $false
         return $outcome
@@ -1419,18 +1534,18 @@ function Grant-NeologikGraphAppRole {
     foreach ($roleName in $RoleNames) {
         $role = Get-NeologikGraphAppRole -RoleName $roleName
         if (-not $role) {
-            Write-Log "  role '$roleName' not published by Microsoft Graph in this cloud - report this to Neologik" -Level Warning
-            Add-Summary "$Label role: $roleName" 'NOT FOUND - report'
+            Write-Log "  Microsoft Graph does not publish the permission '$roleName' in this cloud. Report this message to Neologik" -Level Warning
+            Add-Summary "$Label permission: $roleName" 'NOT FOUND: report to Neologik'
             $outcome.Complete = $false
             continue
         }
         if (@($existing | Where-Object { $_.AppRoleId -eq $role.Id }).Count -gt 0) {
-            Write-Log "  $roleName - already granted" -Level Success
-            Add-Summary "$Label role: $roleName" 'Already granted'
+            Write-Log "  ${roleName}: already granted" -Level Success
+            Add-Summary "$Label permission: $roleName" 'Already granted'
             continue
         }
         if (Test-NeologikVerifyOnly) {
-            Add-NeologikPendingChange "$Label role: $roleName" 'GRANT'
+            Add-NeologikPendingChange "$Label permission: $roleName" 'GRANT'
             $outcome.Pending++
             continue
         }
@@ -1438,22 +1553,22 @@ function Grant-NeologikGraphAppRole {
             Invoke-NeologikWrite -Command 'New-MgServicePrincipalAppRoleAssignment' -Parameters @{
                 ServicePrincipalId = $PrincipalId; PrincipalId = $PrincipalId; ResourceId = $graphSp.Id; AppRoleId = $role.Id
             } | Out-Null
-            Write-Log "  $roleName - GRANTED" -Level Success
-            Add-Summary "$Label role: $roleName" 'Granted'
+            Write-Log "  ${roleName}: granted" -Level Success
+            Add-Summary "$Label permission: $roleName" 'Granted'
             $outcome.Granted++
         }
         catch {
             $reason = Get-NeologikErrorText $_
             if ($reason -match '(?i)already exists|Permission being assigned already exists') {
-                Write-Log "  $roleName - already granted" -Level Success
-                Add-Summary "$Label role: $roleName" 'Already granted'
+                Write-Log "  ${roleName}: already granted" -Level Success
+                Add-Summary "$Label permission: $roleName" 'Already granted'
                 continue
             }
             if (Test-NeologikPrivilegeError $_) {
-                $reason = 'insufficient privileges - sign in as a Global Administrator'
+                $reason = 'insufficient privileges. Sign in as a Global Administrator'
             }
-            Write-Log "  $roleName - FAILED ($reason)" -Level Error
-            Add-Summary "$Label role: $roleName" "FAILED - $reason"
+            Write-Log "  ${roleName}: FAILED. $reason" -Level Error
+            Add-Summary "$Label permission: $roleName" "FAILED: $reason"
             $outcome.Failed++
             $outcome.Complete = $false
         }
@@ -1461,10 +1576,11 @@ function Grant-NeologikGraphAppRole {
     return $outcome
 }
 
-# ----- grants to agent users ---------------------------------------------------
+# ----- Grants to agent users ----------------------------------------------------
 
 function Get-NeologikAgentUserGrant {
-    # The one delegated grant client -> agent user on Microsoft Graph.
+    # Returns the one delegated permission grant from the client to the agent user on
+    # Microsoft Graph.
     param([string]$IdentityObjectId, [string]$AgentUserObjectId)
     $graphSp = $script:State.GraphSp
     $uri = "$script:GraphV1/oauth2PermissionGrants?`$filter=clientId eq '$IdentityObjectId' and principalId eq '$AgentUserObjectId' and resourceId eq '$($graphSp.Id)'"
@@ -1473,13 +1589,16 @@ function Get-NeologikAgentUserGrant {
 
 function Grant-NeologikAgentUserAccess {
     <#
-    One delegated permission grant for each agent or App: client = the agent
-    identity (by its client id), principal = the agent user (by its object id),
-    resource = Microsoft Graph, scope = exactly the set in the file. The grant is
-    created, or changed where its scope differs, and counts as made only when it has
-    been read back and its scope compared. Microsoft Entra ID refuses some scope
-    strings for a short time, so a write that is refused is tried again with the
-    same scopes in another order.
+    Creates one delegated permission grant for each agent or App.
+      client     The agent identity, by client id.
+      principal  The agent user, by object id.
+      resource   Microsoft Graph.
+      scope      Exactly the permissions in the file.
+    The function creates the grant, or changes the grant when the scope differs. The
+    function then reads the grant back and compares the scope. The grant counts
+    only after that comparison. Microsoft Entra ID refuses some scope strings for a
+    short time. The function tries a refused write again with the same permissions
+    in another order.
     #>
     param(
         [Parameter(Mandatory)][string]$Kind,
@@ -1488,25 +1607,25 @@ function Grant-NeologikAgentUserAccess {
         [Parameter(Mandatory)][string]$AgentUserObjectId,
         [Parameter(Mandatory)][string[]]$Scopes
     )
-    $label = "Agent-user grant: $Kind $Name"
+    $label = "Grant to agent user: $Kind $Name"
     $graphSp = $script:State.GraphSp
     try {
         $identity = @(Get-NeologikGraphCollection -Uri "$script:GraphBeta/servicePrincipals?`$filter=appId eq '$IdentityClientId'&`$select=id") | Select-Object -First 1
         if (-not $identity) {
-            Write-Log "  $Kind '$Name': agent identity $IdentityClientId not found - re-run the platform provisioning, then this script" -Level Warning
-            Add-Summary $label 'MISSING - agent identity not found'
+            Write-Log "  $Kind '$Name': this tenant holds no agent identity with the client id $IdentityClientId. Tell Neologik. Run the script again after Neologik confirms the agent identity" -Level Warning
+            Add-Summary $label 'MISSING: the tenant holds no agent identity with this client id'
             return
         }
         $identityId = [string](Get-NeologikProperty $identity 'id')
         $desired = Get-NeologikScopeSet ($Scopes -join ' ')
         $existing = Get-NeologikAgentUserGrant -IdentityObjectId $identityId -AgentUserObjectId $AgentUserObjectId
         if ($existing -and (Get-NeologikScopeSet ([string](Get-NeologikProperty $existing 'scope' ''))) -eq $desired) {
-            Write-Log "  $Kind '$Name' - grant already present ($desired)" -Level Success
+            Write-Log "  $Kind '$Name': the grant already exists with the permissions $desired" -Level Success
             Add-Summary $label 'Already granted'
             return
         }
         if (Test-NeologikVerifyOnly) {
-            Add-NeologikPendingChange $label $(if ($existing) { "UPDATE ($desired)" } else { "GRANT ($desired)" })
+            Add-NeologikPendingChange $label $(if ($existing) { "UPDATE: $desired" } else { "GRANT: $desired" })
             return
         }
         $words = @($desired -split ' ' | Where-Object { $_ })
@@ -1532,40 +1651,41 @@ function Grant-NeologikAgentUserAccess {
             catch {
                 if (Test-NeologikPrivilegeError $_) {
                     $denied = $true
-                    Write-Log "  $Kind '$Name' - the directory refused the write: $(Get-NeologikErrorText $_)" -Level Error
+                    Write-Log "  $Kind '$Name': Microsoft Entra ID refused the write. $(Get-NeologikErrorText $_)" -Level Error
                 }
                 else {
-                    Write-Log "  attempt $($attempt + 1) refused scope string '$scopeTry': $(Get-NeologikErrorText $_)" -Level Warning
+                    Write-Log "  Attempt $($attempt + 1): Microsoft Entra ID refused the permissions '$scopeTry'. $(Get-NeologikErrorText $_)" -Level Warning
                 }
             }
         }
         if ($denied) {
-            Add-Summary $label 'FAILED - insufficient privileges (Global Administrator with DelegatedPermissionGrant.ReadWrite.All needed)'
+            Add-Summary $label 'FAILED: insufficient privileges. Sign in as a Global Administrator and approve DelegatedPermissionGrant.ReadWrite.All'
             return
         }
         $readback = Get-NeologikAgentUserGrant -IdentityObjectId $identityId -AgentUserObjectId $AgentUserObjectId
         if ($readback -and (Get-NeologikScopeSet ([string](Get-NeologikProperty $readback 'scope' ''))) -eq $desired) {
-            Write-Log "  $Kind '$Name' - GRANTED ($desired)" -Level Success
-            Add-Summary $label $(if ($existing) { "Updated ($desired)" } else { "Granted ($desired)" })
+            Write-Log "  $Kind '$Name': granted the permissions $desired" -Level Success
+            Add-Summary $label $(if ($existing) { "Updated: $desired" } else { "Granted: $desired" })
         }
         else {
-            Write-Log "  $Kind '$Name' - the scope set '$desired' did not land after 3 attempts; report the string to Neologik" -Level Error
-            Add-Summary $label 'PENDING - scope refused, report'
+            Write-Log "  $Kind '$Name': Microsoft Entra ID did not accept the permissions '$desired' in 3 attempts. Report the permissions to Neologik" -Level Error
+            Add-Summary $label 'PENDING: Microsoft Entra ID refused the permissions. Report to Neologik'
         }
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  $Kind '$Name' - FAILED ($reason)" -Level Error
-        Add-Summary $label "FAILED - $reason"
+        Write-Log "  $Kind '$Name': FAILED. $reason" -Level Error
+        Add-Summary $label "FAILED: $reason"
     }
 }
 
 function Grant-NeologikComponentGraphRole {
     <#
-    A Microsoft Graph application permission for a named workload identity, from
-    the grants file. Only permissions that are not limited to a mailbox or a site
-    are granted here; one that is limited is reported for your Exchange or
-    SharePoint administrator.
+    Grants one Microsoft Graph application permission from the agent grants file to
+    a named workload identity. The function grants only a permission that has no
+    limit to one mailbox or one site. The function reports a permission with such a
+    limit. An Exchange Administrator or a SharePoint Administrator grants that
+    permission.
     #>
     param(
         [Parameter(Mandatory)][string]$App,
@@ -1573,30 +1693,30 @@ function Grant-NeologikComponentGraphRole {
         [Parameter(Mandatory)][string]$RoleName,
         [string]$ScopeType
     )
-    $label = "Component role: $App $RoleName"
+    $label = "App $App permission: $RoleName"
     if ($ScopeType) {
-        Write-Log "  $App '$RoleName' is $ScopeType-scoped - grant it in Exchange Online or SharePoint for the declared resource (not a Graph app role)" -Level Warning
-        Add-Summary $label "SKIPPED - $ScopeType-scoped, administrator grants per resource"
+        Write-Log "  $App '$RoleName': the permission is limited to one $ScopeType. Grant the permission in Exchange Online or in SharePoint. Grant the permission for the mailbox or the site that the App uses" -Level Warning
+        Add-Summary $label "SKIPPED: the permission is limited to one $ScopeType. An administrator grants the permission in Exchange Online or in SharePoint"
         return
     }
     try {
         $escaped = $IdentityName -replace "'", "''"
         $sp = @(Get-NeologikGraphCollection -Uri "$script:GraphV1/servicePrincipals?`$filter=displayName eq '$escaped'&`$select=id") | Select-Object -First 1
         if (-not $sp) {
-            Write-Log "  workload identity '$IdentityName' not found - provision the app first" -Level Warning
-            Add-Summary $label 'MISSING - identity not found'
+            Write-Log "  This tenant holds no workload identity with the name '$IdentityName'. Neologik creates the workload identity when Neologik installs the App" -Level Warning
+            Add-Summary $label 'MISSING: the tenant holds no workload identity with this name'
             return
         }
-        $null = Grant-NeologikGraphAppRole -PrincipalId ([string](Get-NeologikProperty $sp 'id')) -Label "Component $App" -RoleNames @($RoleName)
+        $null = Grant-NeologikGraphAppRole -PrincipalId ([string](Get-NeologikProperty $sp 'id')) -Label "App $App" -RoleNames @($RoleName)
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  $App '$RoleName' - FAILED ($reason)" -Level Error
-        Add-Summary $label "FAILED - $reason"
+        Write-Log "  $App '$RoleName': FAILED. $reason" -Level Error
+        Add-Summary $label "FAILED: $reason"
     }
 }
 
-# ----- mailbox grants (email channels) ------------------------------------------
+# ----- Mailbox grants for email channels ----------------------------------------
 
 function Get-NeologikExchangeServicePrincipal {
     param([string]$Identity)
@@ -1605,12 +1725,15 @@ function Get-NeologikExchangeServicePrincipal {
 
 function Grant-NeologikMailboxAccess {
     <#
-    Exchange Online role-based access control for applications, limited to one
-    mailbox: the Exchange service principal of the channel identity, a management
-    scope whose recipient filter names the mailbox, and the roles Application
-    Mail.Read, Application Mail.ReadWrite and Application Mail.Send on that scope.
-    Exchange refuses a second scope with the same recipient filter, so an existing
-    scope that names the mailbox is used, whatever its name.
+    Grants access to one mailbox with the role based access control for
+    applications of Exchange Online. The grant has three parts.
+      1. The Exchange service principal of the identity of the email channel.
+      2. A management scope whose recipient filter names the mailbox.
+      3. The roles Application Mail.Read, Application Mail.ReadWrite and
+         Application Mail.Send on that management scope.
+    Exchange Online refuses a second management scope with the same recipient
+    filter. The function uses an existing management scope that names the mailbox,
+    whatever the name of the management scope.
     #>
     param(
         [Parameter(Mandatory)][string]$IdentityAppId,
@@ -1618,17 +1741,17 @@ function Grant-NeologikMailboxAccess {
         [Parameter(Mandatory)][string]$Mailbox,
         [Parameter(Mandatory)][string]$DisplayName
     )
-    $label = "Mailbox grant: $Mailbox -> $DisplayName"
+    $label = "Mailbox grant: $Mailbox for $DisplayName"
     $verify = Test-NeologikVerifyOnly
     try {
-        # Verify-only: what a real run would create, reported as one item.
+        # In a run with -Verify the function reports every pending part as one item.
         $pending = @()
         $sp = Get-NeologikExchangeServicePrincipal -Identity $IdentityAppId
         if (-not $sp) {
-            if ($verify) { $pending += 'service principal pointer' }
+            if ($verify) { $pending += 'Exchange service principal' }
             else {
                 $sp = Invoke-NeologikWrite -Command 'New-ServicePrincipal' -Parameters @{ AppId = $IdentityAppId; ObjectId = $IdentityObjectId; DisplayName = $DisplayName }
-                Write-Log "  service principal pointer created: $DisplayName" -Level Success
+                Write-Log "  The script created the Exchange service principal of $DisplayName" -Level Success
             }
         }
         $scopeName = "Scope-$DisplayName"
@@ -1636,13 +1759,13 @@ function Grant-NeologikMailboxAccess {
         try { $scope = Get-ManagementScope -Identity $scopeName -ErrorAction SilentlyContinue } catch { $scope = $null }
         if (-not $scope) {
             $scope = @(Get-ManagementScope -ErrorAction Stop | Where-Object { [string](Get-NeologikProperty $_ 'RecipientFilter' '') -like "*$Mailbox*" }) | Select-Object -First 1
-            if ($scope) { Write-Log "  reusing management scope '$($scope.Name)' (same recipient filter)" -Level Info }
+            if ($scope) { Write-Log "  The script uses the existing management scope '$($scope.Name)'. The management scope has the same recipient filter" -Level Info }
         }
         if (-not $scope) {
             if ($verify) { $pending += "management scope $scopeName" }
             else {
                 $scope = Invoke-NeologikWrite -Command 'New-ManagementScope' -Parameters @{ Name = $scopeName; RecipientRestrictionFilter = "PrimarySmtpAddress -eq '$Mailbox'" }
-                Write-Log "  management scope created: $scopeName" -Level Success
+                Write-Log "  The script created the management scope $scopeName" -Level Success
             }
         }
         $granted = 0
@@ -1654,14 +1777,14 @@ function Grant-NeologikMailboxAccess {
             $assignment = $null
             try { $assignment = Get-ManagementRoleAssignment -Identity $assignmentName -ErrorAction SilentlyContinue } catch { $assignment = $null }
             if ($assignment) { continue }
-            if ($verify) { $pending += "assignment $assignmentName"; continue }
+            if ($verify) { $pending += "role assignment $assignmentName"; continue }
             Invoke-NeologikWrite -Command 'New-ManagementRoleAssignment' -Parameters @{
                 Name = $assignmentName; App = $IdentityObjectId; Role = $role.Role; CustomResourceScope = $scope.Name
             } | Out-Null
             $granted++
         }
         if ($verify -and $pending.Count -gt 0) {
-            Add-NeologikPendingChange $label "GRANT ($($pending -join ', '))"
+            Add-NeologikPendingChange $label "GRANT: $($pending -join ', ')"
             return
         }
         $inScope = @()
@@ -1670,28 +1793,28 @@ function Grant-NeologikMailboxAccess {
                 Where-Object { [bool](Get-NeologikProperty $_ 'InScope' $false) })
         }
         catch {
-            Write-Log "  $Mailbox -> $DisplayName - $granted role(s) added; the authorisation test could not run yet ($(Get-NeologikErrorText $_)) - re-run to confirm" -Level Warning
-            Add-Summary $label 'PENDING - re-run to confirm InScope'
+            Write-Log "  $Mailbox for ${DisplayName}: the script added $granted role(s). Exchange Online could not yet test the access. $(Get-NeologikErrorText $_). Run the script again to confirm the mailbox grant" -Level Warning
+            Add-Summary $label 'PENDING: run the script again to confirm the mailbox grant'
             return
         }
         if ($inScope.Count -ge 3) {
-            Write-Log "  $Mailbox -> $DisplayName - in scope for $($inScope.Count) role(s)" -Level Success
-            Add-Summary $label $(if ($granted -gt 0) { "Granted ($granted role(s) added)" } else { 'Already granted' })
+            Write-Log "  $Mailbox for ${DisplayName}: Exchange Online confirms $($inScope.Count) role(s) for the mailbox" -Level Success
+            Add-Summary $label $(if ($granted -gt 0) { "Granted: $granted role(s) added" } else { 'Already granted' })
         }
         else {
-            Write-Log "  $Mailbox -> $DisplayName - $granted role(s) added; Exchange reports $($inScope.Count) in scope (propagation can take up to two hours - re-run to confirm)" -Level Warning
-            Add-Summary $label 'PENDING - re-run to confirm InScope'
+            Write-Log "  $Mailbox for ${DisplayName}: the script added $granted role(s). Exchange Online confirms $($inScope.Count) role(s) for the mailbox. Exchange Online can take two hours to apply a role. Run the script again to confirm the mailbox grant" -Level Warning
+            Add-Summary $label 'PENDING: run the script again to confirm the mailbox grant'
         }
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  $Mailbox -> $DisplayName - FAILED ($reason)" -Level Error
-        Add-Summary $label "FAILED - $reason"
+        Write-Log "  $Mailbox for ${DisplayName}: FAILED. $reason" -Level Error
+        Add-Summary $label "FAILED: $reason"
     }
 }
 
 function Get-NeologikExchangeAssignment {
-    # Every Exchange role assignment held by a service principal pointer.
+    # Returns every Exchange role assignment that an Exchange service principal holds.
     param($ServicePrincipal)
     $assignments = @()
     try {
@@ -1701,7 +1824,8 @@ function Get-NeologikExchangeAssignment {
         $assignments = @()
     }
     if ($assignments.Count -eq 0) {
-        # Fallback: match the assignee by any of the pointer's identifiers.
+        # The first read found no role assignment. The function now matches the assignee
+        # against each identifier of the Exchange service principal.
         $ids = @(
             [string](Get-NeologikProperty $ServicePrincipal 'ObjectId' ''),
             [string](Get-NeologikProperty $ServicePrincipal 'AppId' ''),
@@ -1718,68 +1842,71 @@ function Get-NeologikExchangeAssignment {
 function Remove-NeologikMailboxAccess {
     <#
     Removes the Exchange role assignments and the Exchange service principal of an
-    identity that is no longer used. The management scope is left in place: the
-    grant that replaces it uses the same scope.
+    identity that the environment has stopped using. The function keeps the
+    management scope. The mailbox grant of the email channel uses the same
+    management scope.
     #>
     param([Parameter(Mandatory)][string]$LegacyAppId)
-    $label = "Legacy mailbox grant: $LegacyAppId"
+    $label = "Mailbox grant to remove: $LegacyAppId"
     try {
         $sp = Get-NeologikExchangeServicePrincipal -Identity $LegacyAppId
         if (-not $sp) {
-            Write-Log "  legacy identity $LegacyAppId - no Exchange service principal (nothing to remove)" -Level Success
+            Write-Log "  Identity ${LegacyAppId}: Exchange Online holds no Exchange service principal of the identity. The script removes nothing" -Level Success
             Add-Summary $label 'Not present'
             return
         }
         $assignments = @(Get-NeologikExchangeAssignment -ServicePrincipal $sp)
         if (Test-NeologikVerifyOnly) {
-            Add-NeologikPendingChange $label "REMOVE ($($assignments.Count) assignment(s) and the pointer)"
+            Add-NeologikPendingChange $label "REMOVE: $($assignments.Count) role assignment(s) and the Exchange service principal"
             return
         }
         foreach ($assignment in $assignments) {
             Invoke-NeologikWrite -Command 'Remove-ManagementRoleAssignment' -Parameters @{ Identity = $assignment.Name; Confirm = $false } | Out-Null
         }
         Invoke-NeologikWrite -Command 'Remove-ServicePrincipal' -Parameters @{ Identity = $sp.Identity; Confirm = $false } | Out-Null
-        Write-Log "  legacy identity $LegacyAppId - $($assignments.Count) assignment(s) and the pointer REMOVED" -Level Success
-        Add-Summary $label "Removed ($($assignments.Count) assignment(s))"
+        Write-Log "  Identity ${LegacyAppId}: the script removed $($assignments.Count) role assignment(s) and the Exchange service principal" -Level Success
+        Add-Summary $label "Removed: $($assignments.Count) role assignment(s)"
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  legacy identity $LegacyAppId - FAILED ($reason)" -Level Error
-        Add-Summary $label "FAILED - $reason"
+        Write-Log "  Identity ${LegacyAppId}: FAILED. $reason" -Level Error
+        Add-Summary $label "FAILED: $reason"
     }
 }
 
-# ----- the steps (first run 1 to 4, later run 5 and 6) --------------------------
+# ----- The steps: 1 to 4 in the first run, 5 and 6 in the later run --------------
 
 function Set-NeologikAgentBlueprint {
     <#
-    Step 1a to 1c: the agent identity blueprint, its owner, its principal, the role
-    of the principal and the federated credentials. Each item stands alone once the
-    blueprint exists. When the blueprint cannot be found or created, the items that
-    depend on it are recorded as skipped.
+    Steps 1a to 1c: the agent identity blueprint, the owner, the service principal,
+    the permission of the service principal and the federated credentials. When the
+    agent identity blueprint exists, the function checks each item separately. When
+    the function cannot find or create the agent identity blueprint, the function
+    records each dependent item as SKIPPED.
     #>
     $state = $script:State
     $deploySp = $state.DeploySp
     $graph = $script:GraphV1
     $graphBeta = $script:GraphBeta
 
-    Write-Log 'Step 1a/4: agent identity blueprint' -Level Info
-    # The short name comes from the configuration file or -SolutionShortName, never
-    # from a display name. The blueprint is named
-    # 'Neologik Agent Blueprint - <key> - <short name>'.
+    Write-Log 'Step 1a of 4: the agent identity blueprint' -Level Info
+    # The short name comes from the configuration file or from -SolutionShortName. The
+    # script never reads the short name from a display name. The name of the agent
+    # identity blueprint is 'Neologik Agent Blueprint - <key> - <short name>'.
     $shortName = $state.ShortName
     $blueprintName = "Neologik Agent Blueprint - $($state.BlueprintKey) - $shortName"
-    Write-Log "  blueprint name '$blueprintName' (short name '$shortName' from $($state.ShortNameSource))" -Level Info
+    Write-Log "  Name of the agent identity blueprint: '$blueprintName'. Short name '$shortName' from $($state.ShortNameSource)" -Level Info
     $escaped = $blueprintName -replace "'", "''"
     $blueprint = $null
     $created = $false
     try {
         $blueprint = @(Get-NeologikGraphCollection -Uri "$graph/applications?`$filter=displayName eq '$escaped'&`$select=id,appId") | Select-Object -First 1
         if (-not $blueprint) {
-            # A blueprint the deployment identity already owns under another short name is
-            # the blueprint of the environment: it is adopted, so that no second one is
-            # created. Several such blueprints cannot be told apart: the script stops and
-            # names them.
+            # The deployment identity can already own one agent identity blueprint with another
+            # short name. That agent identity blueprint belongs to the environment. The script
+            # uses that agent identity blueprint and creates no second one. When the deployment
+            # identity owns several, the script cannot choose. The script stops and names each
+            # one.
             $prefix = "Neologik Agent Blueprint - $($state.BlueprintKey) - "
             $prefixEscaped = $prefix -replace "'", "''"
             $owned = @()
@@ -1792,38 +1919,39 @@ function Set-NeologikAgentBlueprint {
             if ($owned.Count -eq 1) {
                 $blueprint = $owned[0]
                 $adoptedName = [string](Get-NeologikProperty $blueprint 'displayName' '')
-                Write-Log "  blueprint '$adoptedName' - present, ADOPTED (owned by the deployment identity; its short name differs from '$shortName' - check the short name you gave)" -Level Warning
-                Add-Summary 'Agent blueprint' "Present (adopted '$adoptedName')"
+                Write-Log "  The agent identity blueprint '$adoptedName' exists, and the deployment identity is an owner. The script uses '$adoptedName'. The short name in that name differs from '$shortName'. Check the short name in the command" -Level Warning
+                Add-Summary 'Agent identity blueprint' "Present: the script uses '$adoptedName'"
                 $blueprintName = $adoptedName
             }
             elseif ($owned.Count -gt 1) {
                 $names = @($owned | ForEach-Object { [string](Get-NeologikProperty $_ 'displayName' '') })
-                Write-Log "  blueprint '$blueprintName' - FAILED (the deployment identity owns $($owned.Count) blueprints under other short names: $($names -join ', ') - pass -SolutionShortName naming the one the environment uses)" -Level Error
-                Add-Summary 'Agent blueprint' "FAILED - several blueprints owned by the deployment identity: $($names -join ', ')"
-                foreach ($item in @('Blueprint owner', 'Blueprint principal', 'Blueprint principal owner', 'Blueprint principal role', 'Blueprint credentials')) {
-                    Add-Summary $item 'SKIPPED - blueprint not available'
+                Write-Log "  The agent identity blueprint '$blueprintName': FAILED. The deployment identity owns $($owned.Count) agent identity blueprints with other short names: $($names -join ', '). Give -SolutionShortName the short name that the environment uses" -Level Error
+                Add-Summary 'Agent identity blueprint' "FAILED: the deployment identity owns several agent identity blueprints: $($names -join ', ')"
+                foreach ($item in @('Agent identity blueprint owner', 'Agent identity blueprint service principal', 'Agent identity blueprint service principal owner', 'Agent identity blueprint service principal permission', 'Agent identity blueprint credentials')) {
+                    Add-Summary $item 'SKIPPED: the agent identity blueprint is not available'
                 }
                 return
             }
         }
         elseif ($blueprint) {
-            Write-Log "  blueprint '$blueprintName' - present (Client ID $(Get-NeologikProperty $blueprint 'appId'))" -Level Success
-            Add-Summary 'Agent blueprint' 'Present'
+            Write-Log "  The agent identity blueprint '$blueprintName' exists, client id $(Get-NeologikProperty $blueprint 'appId')" -Level Success
+            Add-Summary 'Agent identity blueprint' 'Present'
         }
         if ($blueprint) { }
         elseif (Test-NeologikVerifyOnly) {
-            # Everything below hangs off the blueprint: reported as one set.
-            Add-NeologikPendingChange 'Agent blueprint' "CREATE ($blueprintName)"
-            Add-NeologikPendingChange 'Blueprint owner' 'ADD (set at creation)'
-            Add-NeologikPendingChange 'Blueprint principal' 'CREATE'
-            Add-NeologikPendingChange 'Blueprint principal owner' 'ADD'
-            foreach ($roleName in $script:BlueprintPrincipalGraphRoles) { Add-NeologikPendingChange "Blueprint principal role: $roleName" 'GRANT' }
-            foreach ($repo in $script:PipelineRepositories) { Add-NeologikPendingChange "Blueprint credential: github-oidc-$($repo.Name)" 'ADD' }
+            # Every item below depends on the agent identity blueprint. The function reports
+            # the items as one set.
+            Add-NeologikPendingChange 'Agent identity blueprint' "CREATE: $blueprintName"
+            Add-NeologikPendingChange 'Agent identity blueprint owner' 'ADD at creation'
+            Add-NeologikPendingChange 'Agent identity blueprint service principal' 'CREATE'
+            Add-NeologikPendingChange 'Agent identity blueprint service principal owner' 'ADD'
+            foreach ($roleName in $script:BlueprintPrincipalGraphRoles) { Add-NeologikPendingChange "Agent identity blueprint service principal permission: $roleName" 'GRANT' }
+            foreach ($repo in $script:PipelineRepositories) { Add-NeologikPendingChange "Agent identity blueprint credential: github-oidc-$($repo.Name)" 'ADD' }
             return
         }
         else {
             $sponsor = [string](Get-NeologikProperty (Invoke-NeologikGraph -Method GET -Uri "$graph/me?`$select=id") 'id' '')
-            if (-not $sponsor) { throw 'the signed-in user could not be resolved as the blueprint sponsor' }
+            if (-not $sponsor) { throw 'The script could not read the id of the signed-in user. The signed-in user is the sponsor of the agent identity blueprint' }
             $body = @{
                 '@odata.type'         = 'Microsoft.Graph.AgentIdentityBlueprint'
                 displayName           = $blueprintName
@@ -1833,47 +1961,47 @@ function Set-NeologikAgentBlueprint {
             $blueprint = Invoke-NeologikGraph -Method POST -Uri "$graph/applications/microsoft.graph.agentIdentityBlueprint" `
                 -Headers $script:OdataHeaders -Body $body
             $created = $true
-            Write-Log "  blueprint '$blueprintName' - CREATED (Client ID $(Get-NeologikProperty $blueprint 'appId'); sponsor = you)" -Level Success
-            Add-Summary 'Agent blueprint' 'Created'
+            Write-Log "  The script created the agent identity blueprint '$blueprintName', client id $(Get-NeologikProperty $blueprint 'appId'). The sponsor is the signed-in user" -Level Success
+            Add-Summary 'Agent identity blueprint' 'Created'
         }
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        if (Test-NeologikPrivilegeError $_) { $reason = "insufficient privileges ($reason)" }
-        Write-Log "  blueprint '$blueprintName' - FAILED ($reason)" -Level Error
-        Add-Summary 'Agent blueprint' "FAILED - $reason"
+        if (Test-NeologikPrivilegeError $_) { $reason = "insufficient privileges. $reason" }
+        Write-Log "  The agent identity blueprint '$blueprintName': FAILED. $reason" -Level Error
+        Add-Summary 'Agent identity blueprint' "FAILED: $reason"
         $blueprint = $null
     }
     if (-not $blueprint) {
-        foreach ($item in @('Blueprint owner', 'Blueprint principal', 'Blueprint principal owner', 'Blueprint principal role', 'Blueprint credentials')) {
-            Add-Summary $item 'SKIPPED - blueprint not available'
+        foreach ($item in @('Agent identity blueprint owner', 'Agent identity blueprint service principal', 'Agent identity blueprint service principal owner', 'Agent identity blueprint service principal permission', 'Agent identity blueprint credentials')) {
+            Add-Summary $item 'SKIPPED: the agent identity blueprint is not available'
         }
         return
     }
     $blueprintObjectId = [string](Get-NeologikProperty $blueprint 'id')
     $blueprintAppId = [string](Get-NeologikProperty $blueprint 'appId')
 
-    # Blueprint ownership by the deployment identity.
+    # The deployment identity as an owner of the agent identity blueprint.
     try {
         $owners = @(Get-NeologikGraphCollection -Uri "$graph/applications/$blueprintObjectId/owners?`$select=id" -RetryNotFound:$created)
         if (@($owners | ForEach-Object { [string](Get-NeologikProperty $_ 'id' '') }) -contains $deploySp.Id) {
-            Write-Log '  deployment identity owns the blueprint - already' -Level Success
-            Add-Summary 'Blueprint owner' 'Already in place'
+            Write-Log '  The deployment identity is already an owner of the agent identity blueprint' -Level Success
+            Add-Summary 'Agent identity blueprint owner' 'Already an owner'
         }
         elseif (Test-NeologikVerifyOnly) {
-            Add-NeologikPendingChange 'Blueprint owner' 'ADD'
+            Add-NeologikPendingChange 'Agent identity blueprint owner' 'ADD'
         }
         else {
             $ref = @{ '@odata.id' = "$graph/directoryObjects/$($deploySp.Id)" } | ConvertTo-Json -Compress
             try {
                 $null = Invoke-NeologikGraph -Method POST -Uri "$graph/applications/$blueprintObjectId/owners/`$ref" -Body $ref -RetryNotFound:$created
-                Write-Log '  deployment identity owns the blueprint - ADDED' -Level Success
-                Add-Summary 'Blueprint owner' 'Added'
+                Write-Log '  The script added the deployment identity as an owner of the agent identity blueprint' -Level Success
+                Add-Summary 'Agent identity blueprint owner' 'Added'
             }
             catch {
                 if ((Get-NeologikErrorText $_) -match '(?i)already exist') {
-                    Write-Log '  deployment identity owns the blueprint - already' -Level Success
-                    Add-Summary 'Blueprint owner' 'Already in place'
+                    Write-Log '  The deployment identity is already an owner of the agent identity blueprint' -Level Success
+                    Add-Summary 'Agent identity blueprint owner' 'Already an owner'
                 }
                 else { throw }
             }
@@ -1881,26 +2009,28 @@ function Set-NeologikAgentBlueprint {
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  blueprint owner - FAILED ($reason)" -Level Error
-        Add-Summary 'Blueprint owner' "FAILED - $reason"
+        Write-Log "  The owner of the agent identity blueprint: FAILED. $reason" -Level Error
+        Add-Summary 'Agent identity blueprint owner' "FAILED: $reason"
     }
 
-    # Blueprint principal (get-or-create by appId; a create fired within
-    # seconds of the application's creation is rejected until it replicates).
+    # The service principal of the agent identity blueprint. The function reads the
+    # service principal by appId and creates the service principal when absent.
+    # Microsoft Entra ID rejects the create until the new agent identity blueprint has
+    # replicated.
     $principal = $null
     $principalCreated = $false
     $principalPending = $false
     try {
         $principal = @(Get-NeologikGraphCollection -Uri "$graph/servicePrincipals?`$filter=appId eq '$blueprintAppId'&`$select=id") | Select-Object -First 1
         if ($principal) {
-            Write-Log '  blueprint principal - present' -Level Success
-            Add-Summary 'Blueprint principal' 'Present'
+            Write-Log '  The service principal of the agent identity blueprint exists' -Level Success
+            Add-Summary 'Agent identity blueprint service principal' 'Present'
         }
         elseif (Test-NeologikVerifyOnly) {
             $principalPending = $true
-            Add-NeologikPendingChange 'Blueprint principal' 'CREATE'
-            Add-NeologikPendingChange 'Blueprint principal owner' 'ADD'
-            foreach ($roleName in $script:BlueprintPrincipalGraphRoles) { Add-NeologikPendingChange "Blueprint principal role: $roleName" 'GRANT' }
+            Add-NeologikPendingChange 'Agent identity blueprint service principal' 'CREATE'
+            Add-NeologikPendingChange 'Agent identity blueprint service principal owner' 'ADD'
+            foreach ($roleName in $script:BlueprintPrincipalGraphRoles) { Add-NeologikPendingChange "Agent identity blueprint service principal permission: $roleName" 'GRANT' }
         }
         else {
             $body = @{ appId = $blueprintAppId } | ConvertTo-Json -Compress
@@ -1913,7 +2043,7 @@ function Set-NeologikAgentBlueprint {
                 catch {
                     $status = Get-NeologikHttpStatus $_
                     if ($attempt -lt 10 -and (($status -in @(400, 404)) -or ((Get-NeologikErrorText $_) -match 'local tenant|does not exist'))) {
-                        Write-Log "  blueprint not yet replicated - retrying in 15 seconds ($attempt of 10)" -Level Warning
+                        Write-Log "  Microsoft Entra ID has not yet replicated the agent identity blueprint. The script tries again in 15 seconds. Attempt $attempt of 10" -Level Warning
                         Start-Sleep -Seconds 15
                         continue
                     }
@@ -1921,14 +2051,14 @@ function Set-NeologikAgentBlueprint {
                 }
             }
             $principalCreated = $true
-            Write-Log '  blueprint principal - CREATED' -Level Success
-            Add-Summary 'Blueprint principal' 'Created'
+            Write-Log '  The script created the service principal of the agent identity blueprint' -Level Success
+            Add-Summary 'Agent identity blueprint service principal' 'Created'
         }
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  blueprint principal - FAILED ($reason)" -Level Error
-        Add-Summary 'Blueprint principal' "FAILED - $reason"
+        Write-Log "  The service principal of the agent identity blueprint: FAILED. $reason" -Level Error
+        Add-Summary 'Agent identity blueprint service principal' "FAILED: $reason"
         $principal = $null
     }
     if ($principal) {
@@ -1936,23 +2066,23 @@ function Set-NeologikAgentBlueprint {
         try {
             $spOwners = @(Get-NeologikGraphCollection -Uri "$graph/servicePrincipals/$principalId/owners?`$select=id" -RetryNotFound:$principalCreated)
             if (@($spOwners | ForEach-Object { [string](Get-NeologikProperty $_ 'id' '') }) -contains $deploySp.Id) {
-                Write-Log '  deployment identity owns the blueprint principal - already' -Level Success
-                Add-Summary 'Blueprint principal owner' 'Already in place'
+                Write-Log '  The deployment identity is already an owner of the service principal of the agent identity blueprint' -Level Success
+                Add-Summary 'Agent identity blueprint service principal owner' 'Already an owner'
             }
             elseif (Test-NeologikVerifyOnly) {
-                Add-NeologikPendingChange 'Blueprint principal owner' 'ADD'
+                Add-NeologikPendingChange 'Agent identity blueprint service principal owner' 'ADD'
             }
             else {
                 $ref = @{ '@odata.id' = "$graph/directoryObjects/$($deploySp.Id)" } | ConvertTo-Json -Compress
                 try {
                     $null = Invoke-NeologikGraph -Method POST -Uri "$graph/servicePrincipals/$principalId/owners/`$ref" -Body $ref -RetryNotFound:$principalCreated
-                    Write-Log '  deployment identity owns the blueprint principal - ADDED' -Level Success
-                    Add-Summary 'Blueprint principal owner' 'Added'
+                    Write-Log '  The script added the deployment identity as an owner of the service principal of the agent identity blueprint' -Level Success
+                    Add-Summary 'Agent identity blueprint service principal owner' 'Added'
                 }
                 catch {
                     if ((Get-NeologikErrorText $_) -match '(?i)already exist') {
-                        Write-Log '  deployment identity owns the blueprint principal - already' -Level Success
-                        Add-Summary 'Blueprint principal owner' 'Already in place'
+                        Write-Log '  The deployment identity is already an owner of the service principal of the agent identity blueprint' -Level Success
+                        Add-Summary 'Agent identity blueprint service principal owner' 'Already an owner'
                     }
                     else { throw }
                 }
@@ -1960,19 +2090,19 @@ function Set-NeologikAgentBlueprint {
         }
         catch {
             $reason = Get-NeologikErrorText $_
-            Write-Log "  blueprint principal owner - FAILED ($reason)" -Level Error
-            Add-Summary 'Blueprint principal owner' "FAILED - $reason"
+            Write-Log "  The owner of the service principal of the agent identity blueprint: FAILED. $reason" -Level Error
+            Add-Summary 'Agent identity blueprint service principal owner' "FAILED: $reason"
         }
 
-        Write-Log 'Step 1b/4: blueprint principal Graph role' -Level Info
-        $null = Grant-NeologikGraphAppRole -PrincipalId $principalId -Label 'Blueprint principal' -RoleNames $script:BlueprintPrincipalGraphRoles
+        Write-Log 'Step 1b of 4: the permission of the service principal of the agent identity blueprint' -Level Info
+        $null = Grant-NeologikGraphAppRole -PrincipalId $principalId -Label 'Agent identity blueprint service principal' -RoleNames $script:BlueprintPrincipalGraphRoles
     }
     elseif (-not $principalPending) {
-        Add-Summary 'Blueprint principal owner' 'SKIPPED - principal not available'
-        Add-Summary 'Blueprint principal role' 'SKIPPED - principal not available'
+        Add-Summary 'Agent identity blueprint service principal owner' 'SKIPPED: the service principal of the agent identity blueprint is not available'
+        Add-Summary 'Agent identity blueprint service principal permission' 'SKIPPED: the service principal of the agent identity blueprint is not available'
     }
 
-    Write-Log 'Step 1c/4: GitHub OIDC federated credentials on the blueprint' -Level Info
+    Write-Log 'Step 1c of 4: the federated credentials of the agent identity blueprint' -Level Info
     $existingNames = $null
     try {
         $existingCreds = @(Get-NeologikGraphCollection -Uri "$graphBeta/applications/$blueprintObjectId/federatedIdentityCredentials?`$select=name" -RetryNotFound:$created)
@@ -1980,19 +2110,19 @@ function Set-NeologikAgentBlueprint {
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  federated credentials could not be read - FAILED ($reason)" -Level Error
-        Add-Summary 'Blueprint credentials' "FAILED - $reason"
+        Write-Log "  The federated credentials of the agent identity blueprint: FAILED. The script could not read the federated credentials. $reason" -Level Error
+        Add-Summary 'Agent identity blueprint credentials' "FAILED: $reason"
     }
     if ($null -ne $existingNames) {
         foreach ($repo in $script:PipelineRepositories) {
             $credName = "github-oidc-$($repo.Name)"
             if ($existingNames -contains $credName) {
-                Write-Log "  $credName - present" -Level Success
-                Add-Summary "Blueprint credential: $credName" 'Present'
+                Write-Log "  ${credName}: present" -Level Success
+                Add-Summary "Agent identity blueprint credential: $credName" 'Present'
                 continue
             }
             if (Test-NeologikVerifyOnly) {
-                Add-NeologikPendingChange "Blueprint credential: $credName" 'ADD'
+                Add-NeologikPendingChange "Agent identity blueprint credential: $credName" 'ADD'
                 continue
             }
             $expression = "claims['sub'] matches 'repo:Neologik-AI/$($repo.Name):*' and claims['repository_id'] eq '$($repo.Id)'"
@@ -2005,18 +2135,18 @@ function Set-NeologikAgentBlueprint {
             } | ConvertTo-Json -Depth 5 -Compress
             try {
                 $null = Invoke-NeologikGraph -Method POST -Uri "$graphBeta/applications/$blueprintObjectId/federatedIdentityCredentials" -Body $body -RetryNotFound:$created
-                Write-Log "  $credName - ADDED" -Level Success
-                Add-Summary "Blueprint credential: $credName" 'Added'
+                Write-Log "  ${credName}: added" -Level Success
+                Add-Summary "Agent identity blueprint credential: $credName" 'Added'
             }
             catch {
                 $reason = Get-NeologikErrorText $_
                 if ($reason -match '(?i)already exist') {
-                    Write-Log "  $credName - present" -Level Success
-                    Add-Summary "Blueprint credential: $credName" 'Present'
+                    Write-Log "  ${credName}: present" -Level Success
+                    Add-Summary "Agent identity blueprint credential: $credName" 'Present'
                     continue
                 }
-                Write-Log "  $credName - FAILED ($reason)" -Level Error
-                Add-Summary "Blueprint credential: $credName" "FAILED - $reason"
+                Write-Log "  ${credName}: FAILED. $reason" -Level Error
+                Add-Summary "Agent identity blueprint credential: $credName" "FAILED: $reason"
             }
         }
     }
@@ -2025,18 +2155,19 @@ function Set-NeologikAgentBlueprint {
 function Set-NeologikDeploymentGraphRole {
     <#
     Step 1d: the Microsoft Graph application permissions of the deployment
-    identity. The two it keeps are confirmed first, and the others are then
-    removed. The removals are made only when both are confirmed.
+    identity. The function first confirms the two permissions that the deployment
+    identity keeps. The function removes the other permissions only when the
+    deployment identity holds both.
     #>
     $state = $script:State
     $deploySp = $state.DeploySp
     $graphSp = $state.GraphSp
-    Write-Log 'Step 1d/4: deployment identity Graph roles (retained, then retired)' -Level Info
-    $outcome = Grant-NeologikGraphAppRole -PrincipalId $deploySp.Id -Label 'Graph' -RoleNames $script:RequiredGraphRoles
+    Write-Log 'Step 1d of 4: the Microsoft Graph application permissions of the deployment identity' -Level Info
+    $outcome = Grant-NeologikGraphAppRole -PrincipalId $deploySp.Id -Label 'Deployment identity' -RoleNames $script:RequiredGraphRoles
     if (-not $outcome.Complete) {
-        Write-Log '  retained roles are not all in place - the retired roles are left untouched (narrow before broad)' -Level Warning
+        Write-Log '  The deployment identity does not hold both permissions that the deployment identity keeps. The script removes no permission' -Level Warning
         foreach ($roleName in $script:RetiredGraphRoles) {
-            Add-Summary "Retired Graph role: $roleName" 'SKIPPED - retained roles not all granted'
+            Add-Summary "Deployment identity permission to remove: $roleName" 'SKIPPED: the deployment identity does not hold both permissions that the deployment identity keeps'
         }
         return
     }
@@ -2047,50 +2178,50 @@ function Set-NeologikDeploymentGraphRole {
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  could not read the deployment identity's role assignments - FAILED ($reason)" -Level Error
-        foreach ($roleName in $script:RetiredGraphRoles) { Add-Summary "Retired Graph role: $roleName" "FAILED - $reason" }
+        Write-Log "  The permissions of the deployment identity: FAILED. The script could not read the permissions. $reason" -Level Error
+        foreach ($roleName in $script:RetiredGraphRoles) { Add-Summary "Deployment identity permission to remove: $roleName" "FAILED: $reason" }
         return
     }
     foreach ($roleName in $script:RetiredGraphRoles) {
         $role = Get-NeologikGraphAppRole -RoleName $roleName
         $assignment = if ($role) { @($assignments | Where-Object { $_.AppRoleId -eq $role.Id }) | Select-Object -First 1 } else { $null }
         if (-not $assignment) {
-            Write-Log "  $roleName - not held (nothing to remove)" -Level Success
-            Add-Summary "Retired Graph role: $roleName" 'Not held'
+            Write-Log "  ${roleName}: not held. The script removes nothing" -Level Success
+            Add-Summary "Deployment identity permission to remove: $roleName" 'Not held'
             continue
         }
         if (Test-NeologikVerifyOnly) {
-            Add-NeologikPendingChange "Retired Graph role: $roleName" 'REMOVE'
+            Add-NeologikPendingChange "Deployment identity permission to remove: $roleName" 'REMOVE'
             continue
         }
         try {
             Invoke-NeologikWrite -Command 'Remove-MgServicePrincipalAppRoleAssignment' -Parameters @{ ServicePrincipalId = $deploySp.Id; AppRoleAssignmentId = $assignment.Id } | Out-Null
-            Write-Log "  $roleName - REMOVED (retired, tenant-wide)" -Level Success
-            Add-Summary "Retired Graph role: $roleName" 'Removed'
+            Write-Log "  ${roleName}: removed" -Level Success
+            Add-Summary "Deployment identity permission to remove: $roleName" 'Removed'
         }
         catch {
             $reason = Get-NeologikErrorText $_
             if ((Get-NeologikHttpStatus $_) -eq 404) {
-                Write-Log "  $roleName - not held (nothing to remove)" -Level Success
-                Add-Summary "Retired Graph role: $roleName" 'Not held'
+                Write-Log "  ${roleName}: not held. The script removes nothing" -Level Success
+                Add-Summary "Deployment identity permission to remove: $roleName" 'Not held'
                 continue
             }
-            if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges - sign in as a Global Administrator' }
-            Write-Log "  $roleName - FAILED ($reason)" -Level Error
-            Add-Summary "Retired Graph role: $roleName" "FAILED - $reason"
+            if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges. Sign in as a Global Administrator' }
+            Write-Log "  ${roleName}: FAILED. $reason" -Level Error
+            Add-Summary "Deployment identity permission to remove: $roleName" "FAILED: $reason"
         }
     }
-    Write-Log "Graph roles complete ($($outcome.Granted) newly granted)" -Level Info
+    Write-Log "Step 1d is complete. Permissions that the script granted: $($outcome.Granted)" -Level Info
 }
 
 function Set-NeologikSignInGroupAssignment {
-    # Steps 2 and 3: the NCE user group on the sign-in application, and the
-    # tenant-wide admin consent check for that application.
+    # Steps 2 and 3: the assignment of the user group of the Neologik Context Engine to
+    # the Platform Sign-in application, and the check of the administrator consent.
     $state = $script:State
-    Write-Log 'Step 2/4: NCE user group assignment to the sign-in application' -Level Info
+    Write-Log 'Step 2 of 4: the assignment of the user group of the Neologik Context Engine to the Platform Sign-in application' -Level Info
     if (-not $state.SignInAppClientId -or -not $state.NceUserGroupId) {
-        Write-Log '  sign-in app id or NCE user group id not available - SKIPPED. Supply both: Neologik gives the values with the command.' -Level Warning
-        Add-Summary 'NCE group assignment' 'SKIPPED - ids not supplied'
+        Write-Log '  SKIPPED. The command gives no SignInAppClientId or no NceUserGroupId. The command from Neologik holds both values' -Level Warning
+        Add-Summary 'User group assignment' 'SKIPPED: the command gives no SignInAppClientId or no NceUserGroupId'
         return
     }
     $signInSp = $null
@@ -2099,103 +2230,104 @@ function Set-NeologikSignInGroupAssignment {
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  sign-in application could not be read - FAILED ($reason)" -Level Error
-        Add-Summary 'NCE group assignment' "FAILED - $reason"
-        Add-Summary 'Admin consent' 'SKIPPED - sign-in application not read'
+        Write-Log "  The Platform Sign-in application: FAILED. The script could not read the Platform Sign-in application. $reason" -Level Error
+        Add-Summary 'User group assignment' "FAILED: $reason"
+        Add-Summary 'Administrator consent' 'SKIPPED: the script could not read the Platform Sign-in application'
         return
     }
     if (-not $signInSp) {
-        Write-Log "  sign-in application service principal not found for client id $($state.SignInAppClientId) - check the id with Neologik" -Level Error
-        Add-Summary 'NCE group assignment' 'MISSING - sign-in application not found'
-        Add-Summary 'Admin consent' 'SKIPPED - sign-in application not found'
+        Write-Log "  This tenant holds no service principal of the Platform Sign-in application with the client id $($state.SignInAppClientId). Ask Neologik to confirm the client id" -Level Error
+        Add-Summary 'User group assignment' 'MISSING: the tenant holds no Platform Sign-in application with this client id'
+        Add-Summary 'Administrator consent' 'SKIPPED: the tenant holds no Platform Sign-in application with this client id'
         return
     }
-    Write-Log "  sign-in application: '$($signInSp.DisplayName)'" -Level Info
+    Write-Log "  Platform Sign-in application: '$($signInSp.DisplayName)'" -Level Info
     try {
         $assignments = @(Get-MgGroupAppRoleAssignment -GroupId $state.NceUserGroupId -All -ErrorAction Stop |
             Where-Object { $_.ResourceId -eq $signInSp.Id })
         if ($assignments.Count -gt 0) {
-            Write-Log '  NCE user group - already assigned' -Level Success
-            Add-Summary 'NCE group assignment' 'Already assigned'
+            Write-Log '  The user group is already assigned to the Platform Sign-in application' -Level Success
+            Add-Summary 'User group assignment' 'Already assigned'
         }
         elseif (Test-NeologikVerifyOnly) {
-            Add-NeologikPendingChange 'NCE group assignment' 'ASSIGN'
+            Add-NeologikPendingChange 'User group assignment' 'ASSIGN'
         }
         else {
             Invoke-NeologikWrite -Command 'New-MgGroupAppRoleAssignment' -Parameters @{
                 GroupId = $state.NceUserGroupId; PrincipalId = $state.NceUserGroupId; ResourceId = $signInSp.Id
                 AppRoleId = '00000000-0000-0000-0000-000000000000'
             } | Out-Null
-            Write-Log '  NCE user group - ASSIGNED (sign-in tokens now carry the groups claim)' -Level Success
-            Add-Summary 'NCE group assignment' 'Assigned'
+            Write-Log '  The script assigned the user group to the Platform Sign-in application. The sign-in token now holds the groups claim' -Level Success
+            Add-Summary 'User group assignment' 'Assigned'
         }
     }
     catch {
         $reason = Get-NeologikErrorText $_
         $status = Get-NeologikHttpStatus $_
         if ($status -eq 404) {
-            Write-Log "  NCE user group $($state.NceUserGroupId) not found - check the group id" -Level Error
-            Add-Summary 'NCE group assignment' 'MISSING - group not found (check the id)'
+            Write-Log "  This tenant holds no group with the id $($state.NceUserGroupId). Check the value of -NceUserGroupId" -Level Error
+            Add-Summary 'User group assignment' 'MISSING: the tenant holds no group with this id. Check the value of -NceUserGroupId'
         }
         elseif ($status -eq 403) {
-            Write-Log '  NCE user group assignment refused - sign in as a Global Administrator' -Level Error
-            Add-Summary 'NCE group assignment' 'FAILED - insufficient privileges (Global Administrator needed)'
+            Write-Log '  Microsoft Graph refused the assignment of the user group. Sign in as a Global Administrator' -Level Error
+            Add-Summary 'User group assignment' 'FAILED: insufficient privileges. Sign in as a Global Administrator'
         }
         else {
-            Write-Log "  NCE user group assignment - FAILED ($reason)" -Level Error
-            Add-Summary 'NCE group assignment' "FAILED - $reason"
+            Write-Log "  The assignment of the user group: FAILED. $reason" -Level Error
+            Add-Summary 'User group assignment' "FAILED: $reason"
         }
     }
     try {
         $group = Get-MgGroup -GroupId $state.NceUserGroupId -ErrorAction Stop
         $memberCount = @(Get-MgGroupMember -GroupId $state.NceUserGroupId -All -ErrorAction Stop).Count
         if ($memberCount -eq 0) {
-            Write-Log "  WARNING: group '$($group.DisplayName)' has no members - users must be DIRECT members to sign in (nested groups do not count)" -Level Warning
+            Write-Log "  WARNING: the group '$($group.DisplayName)' has no members. A user must be a direct member of the group to sign in. A member of a nested group cannot sign in" -Level Warning
         }
         else {
-            Write-Log "  group '$($group.DisplayName)' has $memberCount direct member(s)" -Level Info
+            Write-Log "  The group '$($group.DisplayName)' has $memberCount direct member(s)" -Level Info
         }
     }
     catch {
-        Write-Log "  group membership could not be read ($(Get-NeologikErrorText $_)) - check the group has direct members" -Level Warning
+        Write-Log "  The script could not read the members of the group. $(Get-NeologikErrorText $_). Check that the group has direct members" -Level Warning
     }
 
-    # ----- 3. admin consent check -----------------------------------------
-    Write-Log 'Step 3/4: admin consent for the sign-in application' -Level Info
+    # ----- Step 3: administrator consent ----------------------------------
+    Write-Log 'Step 3 of 4: the administrator consent of the Platform Sign-in application' -Level Info
     try {
         $grants = @(Get-MgServicePrincipalOauth2PermissionGrant -ServicePrincipalId $signInSp.Id -All -ErrorAction Stop |
             Where-Object { $_.ConsentType -eq 'AllPrincipals' })
         if ($grants.Count -gt 0) {
-            Write-Log '  tenant-wide admin consent - present' -Level Success
-            Add-Summary 'Admin consent' 'Present'
+            Write-Log '  The administrator consent for the whole tenant exists' -Level Success
+            Add-Summary 'Administrator consent' 'Present'
         }
         else {
             $consentUrl = "https://login.microsoftonline.com/$($state.TenantId)/adminconsent?client_id=$($state.SignInAppClientId)"
-            Write-Log '  tenant-wide admin consent NOT found. Open this URL in a browser, sign in as Global Administrator and approve:' -Level Warning
+            Write-Log '  The administrator consent for the whole tenant does NOT exist. Open this address in a browser, sign in as a Global Administrator and give the consent:' -Level Warning
             Write-Host ''
             Write-Host "    $consentUrl" -ForegroundColor Cyan
             Write-Host ''
-            Write-Log '  then re-run this script to confirm.' -Level Warning
-            Add-Summary 'Admin consent' 'MISSING - consent URL printed'
+            Write-Log '  Then run the script again to confirm the consent' -Level Warning
+            Add-Summary 'Administrator consent' 'MISSING: the script printed the consent address'
         }
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  admin consent could not be verified - FAILED ($reason)" -Level Error
-        Add-Summary 'Admin consent' "FAILED - $reason"
+        Write-Log "  The administrator consent: FAILED. The script could not read the consent. $reason" -Level Error
+        Add-Summary 'Administrator consent' "FAILED: $reason"
     }
 }
 
 function Test-NeologikSharePointConsent {
-    # The Sites.Selected admin consent of THIS environment's SharePoint app.
+    # Checks the administrator consent for Sites.Selected of the SharePoint application
+    # of this environment.
     $state = $script:State
     $graph = $script:GraphV1
     $graphSp = $state.GraphSp
-    Write-Log '  SharePoint ingestion is part of the solution - checking the Sites.Selected consent' -Level Info
+    Write-Log '  The solution uses SharePoint ingestion. The script checks the consent for Sites.Selected' -Level Info
     try {
-        # A tenant may hold several environments. The application of this environment is
-        # found by its exact name first, and by the beginning of its name only when one
-        # application matches.
+        # One tenant can hold several environments. The function first looks for the exact
+        # name of the SharePoint application of this environment. The function then looks for
+        # the start of the name, and accepts the result only when one application matches.
         $spApp = $null
         $ambiguous = $false
         if ($state.ShortName) {
@@ -2207,15 +2339,15 @@ function Test-NeologikSharePointConsent {
             $spCandidates = @(Get-NeologikGraphCollection -Uri "$graph/servicePrincipals?`$filter=startswith(displayName,'$prefix')&`$select=id,appId,displayName")
             if ($spCandidates.Count -eq 1) { $spApp = $spCandidates[0] }
             elseif ($spCandidates.Count -gt 1) {
-                Write-Log "  $($spCandidates.Count) SharePoint access apps in this tenant and no environment short name to pick by - supply -ConfigurationFile" -Level Warning
-                Add-Summary 'SharePoint Sites.Selected consent' 'UNKNOWN - several apps, environment not identified'
+                Write-Log "  This tenant holds $($spCandidates.Count) SharePoint applications. The script cannot choose without the short name of the environment. Add -SolutionShortName or -ConfigurationFile to the command" -Level Warning
+                Add-Summary 'SharePoint Sites.Selected consent' 'UNKNOWN: the tenant holds several SharePoint applications. Add -SolutionShortName or -ConfigurationFile to the command'
                 $ambiguous = $true
             }
         }
         if ($ambiguous) { return }
         if (-not $spApp) {
-            Write-Log '  SharePoint app not found in this tenant - the infrastructure deployment creates it' -Level Warning
-            Add-Summary 'SharePoint Sites.Selected consent' 'MISSING - app not found'
+            Write-Log '  This tenant holds no SharePoint application. The deployment by Neologik creates the SharePoint application' -Level Warning
+            Add-Summary 'SharePoint Sites.Selected consent' 'MISSING: the tenant holds no SharePoint application'
             return
         }
         $sitesSelected = Get-NeologikGraphAppRole -RoleName 'Sites.Selected'
@@ -2226,89 +2358,91 @@ function Test-NeologikSharePointConsent {
                 Where-Object { $_.ResourceId -eq $graphSp.Id -and $_.AppRoleId -eq $sitesSelected.Id })
         }
         if ($held.Count -gt 0) {
-            Write-Log "  '$(Get-NeologikProperty $spApp 'displayName')' holds Sites.Selected - consent present (sites are granted per site by a site administrator)" -Level Success
+            Write-Log "  '$(Get-NeologikProperty $spApp 'displayName')' holds Sites.Selected and the consent exists. A site administrator grants access to each site separately" -Level Success
             Add-Summary 'SharePoint Sites.Selected consent' 'Present'
         }
         else {
             $spConsentUrl = "https://login.microsoftonline.com/$($state.TenantId)/adminconsent?client_id=$(Get-NeologikProperty $spApp 'appId')"
-            Write-Log '  Sites.Selected consent NOT found. Open this URL as Global Administrator and approve:' -Level Warning
+            Write-Log '  The consent for Sites.Selected does NOT exist. Open this address in a browser, sign in as a Global Administrator and give the consent:' -Level Warning
             Write-Host ''
             Write-Host "    $spConsentUrl" -ForegroundColor Cyan
             Write-Host ''
-            Add-Summary 'SharePoint Sites.Selected consent' 'MISSING - consent URL printed'
+            Add-Summary 'SharePoint Sites.Selected consent' 'MISSING: the script printed the consent address'
         }
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  Sites.Selected consent could not be verified - FAILED ($reason)" -Level Error
-        Add-Summary 'SharePoint Sites.Selected consent' "FAILED - $reason"
+        Write-Log "  The consent for Sites.Selected: FAILED. The script could not read the consent. $reason" -Level Error
+        Add-Summary 'SharePoint Sites.Selected consent' "FAILED: $reason"
     }
 }
 
 function Test-NeologikPreWindowSharePointConsent {
     <#
-    Step 3a of the pre-window run. The configuration file may record
-    whether SharePoint ingestion is part of the solution
-    ("SharePointIngestion": true/false); when it does not, the check runs
-    with the agent grants file in the post-window run and the summary says
-    so without needing attention.
+    Step 3a of the first run. The configuration file can record whether the
+    solution uses SharePoint ingestion, in the field "SharePointIngestion". When
+    the configuration file does not hold the field, the later run makes the check
+    with the agent grants file. The summary then records that fact, and the item
+    needs no attention.
     #>
     $state = $script:State
-    Write-Log 'Step 3a/4: SharePoint Sites.Selected consent' -Level Info
+    Write-Log 'Step 3a of 4: the consent of the SharePoint application for Sites.Selected' -Level Info
     if (-not $state.Config -or -not (Test-NeologikProperty $state.Config 'SharePointIngestion')) {
-        Write-Log '  the configuration file does not record whether SharePoint ingestion is in use - the check runs with the agent grants file (post-window run)' -Level Info
-        Add-Summary 'SharePoint Sites.Selected consent' 'Not checked - runs with the agent grants file'
+        Write-Log '  The configuration file does not record whether the solution uses SharePoint ingestion. The later run makes the check with the agent grants file' -Level Info
+        Add-Summary 'SharePoint Sites.Selected consent' 'Not checked. The later run with -AgentGrantsFile makes the check'
         return
     }
     if ([bool](Get-NeologikProperty $state.Config 'SharePointIngestion' $false)) {
         Test-NeologikSharePointConsent
     }
     else {
-        Write-Log '  no SharePoint ingestion in the solution - Sites.Selected consent not checked (least exposure)' -Level Info
+        Write-Log '  The solution does not use SharePoint ingestion. The script does not check the consent for Sites.Selected' -Level Info
         Add-Summary 'SharePoint Sites.Selected consent' 'Not needed'
     }
 }
 
 function Set-NeologikPlatformAppOwnership {
     <#
-    Step 3b of the first run: every application registration the platform manages
-    in this tenant is owned by the deployment identity (application and service
-    principal) and carries the unique name by which the deployment finds it.
-    Nothing else on the registration changes.
+    Step 3b of the first run. The deployment identity must own each application
+    registration that the Neologik Platform manages in this tenant, and the service
+    principal of each. Each application registration must hold the unique name by
+    which the deployment finds the application registration. The function changes
+    nothing else on an application registration.
     #>
     $state = $script:State
     $deploySp = $state.DeploySp
     $graph = $script:GraphV1
-    Write-Log 'Step 3b/4: platform app registrations owned by the deployment identity' -Level Info
+    Write-Log 'Step 3b of 4: the ownership of the application registrations by the deployment identity' -Level Info
     $shortName = $state.ShortName
     if (-not $shortName) {
-        Write-Log '  no solution short name - the platform app registrations cannot be identified' -Level Warning
-        Add-Summary 'Platform apps' 'SKIPPED - no solution short name'
+        Write-Log '  The command gives no SolutionShortName. The script cannot find the application registrations' -Level Warning
+        Add-Summary 'Application registrations' 'SKIPPED: the command gives no SolutionShortName'
         return
     }
     $select = 'id,appId,displayName,uniqueName,passwordCredentials'
     $targets = @()
     $listed = @{}
 
-    # Every registration is named by its client id: the sign-in application, the
-    # SharePoint application where the environment has one, and the agent
-    # registrations. None is chosen by display name.
-    $entries = @(@{ AppId = $state.SignInAppClientId; Kind = 'sign-in'; Item = 'Platform app: sign-in registration'
+    # The client id names each application registration: the Platform Sign-in
+    # application, the SharePoint application where the environment has one, and each
+    # agent registration. The function never chooses an application registration by
+    # display name.
+    $entries = @(@{ AppId = $state.SignInAppClientId; Kind = 'Platform Sign-in application'; Item = 'Platform Sign-in application registration'
             ExpectedUniqueName = "sp-admin-$($state.SolutionName)"; OwnSecret = 'auth'; RemovesAll = $true })
     if ($state.SharePointAppClientId) {
-        $entries += @{ AppId = $state.SharePointAppClientId; Kind = 'SharePoint'; Item = 'Platform app: SharePoint registration'
+        $entries += @{ AppId = $state.SharePointAppClientId; Kind = 'SharePoint application'; Item = 'SharePoint application registration'
             ExpectedUniqueName = "sp-neologik-sharepoint-$shortName"; OwnSecret = 'sharepoint-access'; RemovesAll = $false }
     }
     else {
-        Write-Log '  no SharePoint app registration listed (-SharePointAppClientId) - the deployment creates one when SharePoint ingestion is configured' -Level Info
-        Add-Summary 'Platform app: SharePoint registration' 'Not listed - the deployment creates it when SharePoint ingestion is configured'
+        Write-Log '  The command gives no SharePointAppClientId. The deployment creates the SharePoint application when the environment uses SharePoint ingestion' -Level Info
+        Add-Summary 'SharePoint application registration' 'Not listed. The deployment creates the SharePoint application when the environment uses SharePoint ingestion'
     }
     if ($state.BotAppClientIds.Count -eq 0) {
-        Write-Log '  no bot app registrations listed (-BotAppClientIds) - none adopted; the generated command line lists every bot' -Level Warning
-        Add-Summary 'Platform apps: bot registrations' 'None listed - no bot app registration adopted (the command line Neologik sends lists every bot)'
+        Write-Log '  The command gives no BotAppClientIds. The script changes no agent registration. The command from Neologik lists each agent registration' -Level Warning
+        Add-Summary 'Agent registrations' 'None listed. The script changes no agent registration. The command from Neologik lists each agent registration'
     }
     foreach ($botId in $state.BotAppClientIds) {
-        $entries += @{ AppId = $botId; Kind = 'bot'; Item = "Platform app: bot registration $botId"; ExpectedUniqueName = ''; OwnSecret = 'auth'; RemovesAll = $true }
+        $entries += @{ AppId = $botId; Kind = 'Agent registration'; Item = "Agent registration $botId"; ExpectedUniqueName = ''; OwnSecret = 'auth'; RemovesAll = $true }
     }
     foreach ($entry in $entries) {
         $listed[$entry.AppId.ToLowerInvariant()] = $true
@@ -2318,143 +2452,145 @@ function Set-NeologikPlatformAppOwnership {
                 $targets += @{ App = $app; Kind = $entry.Kind; ExpectedUniqueName = $entry.ExpectedUniqueName; OwnSecret = $entry.OwnSecret; RemovesAll = $entry.RemovesAll }
             }
             else {
-                Write-Log "  $($entry.Kind) app registration $($entry.AppId) is not in this tenant - a registration homed elsewhere cannot be adopted" -Level Error
-                Add-Summary $entry.Item 'NOT FOUND - not registered in this tenant (check the id with Neologik; a multi-tenant app homed elsewhere cannot be adopted)'
+                Write-Log "  $($entry.Kind): this tenant holds no application registration with the client id $($entry.AppId). The deployment identity cannot own an application registration of another tenant" -Level Error
+                Add-Summary $entry.Item 'NOT FOUND: this tenant holds no application registration with this client id. Ask Neologik to confirm the client id. The deployment identity cannot own an application registration of another tenant'
             }
         }
         catch {
-            Add-Summary $entry.Item "FAILED - $(Get-NeologikErrorText $_)"
+            Add-Summary $entry.Item "FAILED: $(Get-NeologikErrorText $_)"
         }
     }
-    # Report only: every other registration in this tenant named for the
-    # platform. The agent identity blueprint has its own step.
+    # The function reports every other application registration in this tenant whose
+    # name begins 'Neologik', and changes none. The agent identity blueprint has a
+    # separate step.
     try {
         foreach ($found in @(Get-NeologikGraphCollection -Uri "$graph/applications?`$filter=startswith(displayName,'Neologik')&`$select=id,appId,displayName")) {
             $name = [string](Get-NeologikProperty $found 'displayName' '')
             $appId = [string](Get-NeologikProperty $found 'appId' '')
             if ($listed.ContainsKey($appId.ToLowerInvariant()) -or $name -like 'Neologik Agent Blueprint*' -or $name -like 'Neologik Autonomous Agent Blueprint*') { continue }
-            Write-Log "  '$name' ($appId) is not on the list - not touched" -Level Info
-            Add-Summary "Platform apps: unlisted '$name'" "Review - $appId is not on the list and was not touched; tell Neologik if the platform manages this registration"
+            Write-Log "  The command does not name '$name', client id $appId. The script does not change the application registration" -Level Info
+            Add-Summary "Registration not on the list: '$name'" "Review: the command does not name $appId. The script did not change the application registration. Tell Neologik when the Neologik Platform uses the application registration"
         }
     }
     catch {
-        Add-Summary 'Platform apps: discovery' "FAILED - $(Get-NeologikErrorText $_)"
+        Add-Summary 'Search for other registrations' "FAILED: $(Get-NeologikErrorText $_)"
     }
-    Write-Log "  $($targets.Count) platform app registration(s) to verify" -Level Info
+    Write-Log "  Application registrations to check: $($targets.Count)" -Level Info
 
     foreach ($target in $targets) {
         $app = $target.App
         $objectId = [string](Get-NeologikProperty $app 'id' '')
         $appId = [string](Get-NeologikProperty $app 'appId' '')
         $displayName = [string](Get-NeologikProperty $app 'displayName' '')
-        $prefix = "App '$displayName'"
-        Write-Log "  $displayName ($($target.Kind), $appId)" -Level Info
+        $prefix = "Registration '$displayName'"
+        Write-Log "  $($target.Kind) '$displayName', client id $appId" -Level Info
 
-        # Application owner.
+        # The owner of the application registration.
         Set-NeologikDirectoryObjectOwner -Item "$prefix owner" -Uri "$graph/applications/$objectId" -OwnerId $deploySp.Id
 
-        # Service principal owner (the deployment creates a missing principal itself).
+        # The owner of the service principal. The deployment creates a missing service
+        # principal.
         try {
             $principal = @(Get-NeologikGraphCollection -Uri "$graph/servicePrincipals?`$filter=appId eq '$appId'&`$select=id") | Select-Object -First 1
             if ($principal) {
-                Set-NeologikDirectoryObjectOwner -Item "$prefix principal owner" -Uri "$graph/servicePrincipals/$([string](Get-NeologikProperty $principal 'id' ''))" -OwnerId $deploySp.Id
+                Set-NeologikDirectoryObjectOwner -Item "$prefix service principal owner" -Uri "$graph/servicePrincipals/$([string](Get-NeologikProperty $principal 'id' ''))" -OwnerId $deploySp.Id
             }
             else {
-                Add-Summary "$prefix principal owner" 'Not present - the deployment creates the principal'
+                Add-Summary "$prefix service principal owner" 'Not present. The deployment creates the service principal'
             }
         }
         catch {
-            Add-Summary "$prefix principal owner" "FAILED - $(Get-NeologikErrorText $_)"
+            Add-Summary "$prefix service principal owner" "FAILED: $(Get-NeologikErrorText $_)"
         }
 
-        # uniqueName: what the deployment finds the registration by.
+        # uniqueName: the deployment finds the application registration by this value.
         $current = [string](Get-NeologikProperty $app 'uniqueName' '')
         $expected = [string]$target.ExpectedUniqueName
-        $item = "$prefix uniqueName"
+        $item = "$prefix unique name"
         try {
             if ($expected) {
-                if ($current -eq $expected) { Add-Summary $item 'Already in place' }
+                if ($current -eq $expected) { Add-Summary $item 'Already set' }
                 elseif (-not $current) {
                     if (Test-NeologikVerifyOnly) { Add-NeologikPendingChange $item "SET $expected" }
                     else {
                         $null = Invoke-NeologikGraph -Method PATCH -Uri "$graph/applications/$objectId" -Body (@{ uniqueName = $expected } | ConvertTo-Json -Compress)
-                        Write-Log "  uniqueName '$expected' set on '$displayName'" -Level Success
-                        Add-Summary $item "Set ($expected)"
+                        Write-Log "  The script set the unique name of '$displayName' to '$expected'" -Level Success
+                        Add-Summary $item "Set: $expected"
                     }
                 }
                 else {
-                    Write-Log "  '$displayName' carries uniqueName '$current' but the deployment expects '$expected'" -Level Error
-                    Add-Summary $item "FAILED - '$current' differs from the deployment's '$expected' - reconcile with Neologik before the window"
+                    Write-Log "  The unique name of '$displayName' is '$current'. The deployment expects '$expected'" -Level Error
+                    Add-Summary $item "FAILED: the unique name is '$current'. The deployment expects '$expected'. Agree the unique name with Neologik before the upgrade"
                 }
             }
-            elseif ($current) { Add-Summary $item "Already in place ($current)" }
-            else { Add-Summary $item 'Not required - the deployment finds a bot app registration by its client id' }
+            elseif ($current) { Add-Summary $item "Already set: $current" }
+            else { Add-Summary $item 'Not required. The deployment finds an agent registration by the client id' }
         }
         catch {
-            Add-Summary $item "FAILED - $(Get-NeologikErrorText $_)"
+            Add-Summary $item "FAILED: $(Get-NeologikErrorText $_)"
         }
 
-        # Password credentials the deployment did not mint.
+        # The client secrets that the deployment did not create.
         $foreign = @(@(Get-NeologikProperty $app 'passwordCredentials' @()) | Where-Object {
                 [string](Get-NeologikProperty $_ 'displayName' '') -ne $target.OwnSecret })
-        $item = "$prefix credentials"
-        if ($foreign.Count -eq 0) { Add-Summary $item 'None foreign' }
+        $item = "$prefix client secrets"
+        if ($foreign.Count -eq 0) { Add-Summary $item 'None from another source' }
         else {
-            $names = @($foreign | ForEach-Object { $n = [string](Get-NeologikProperty $_ 'displayName' ''); if ($n) { $n } else { '(unnamed)' } }) -join ', '
+            $names = @($foreign | ForEach-Object { $n = [string](Get-NeologikProperty $_ 'displayName' ''); if ($n) { $n } else { 'no name' } }) -join ', '
             if ($target.RemovesAll) {
-                Write-Log "  '$displayName' carries $($foreign.Count) password credential(s) the deployment did not mint ($names) - the deployment removes every credential on this app" -Level Warning
-                Add-Summary $item "PENDING - $($foreign.Count) credential(s) not minted by the deployment ($names); the deployment removes every credential on this app - confirm nothing else uses them"
+                Write-Log "  '$displayName' holds $($foreign.Count) client secret(s) that the deployment did not create: $names. The deployment removes every client secret of this application registration" -Level Warning
+                Add-Summary $item "PENDING: $($foreign.Count) client secret(s) that the deployment did not create: $names. The deployment removes every client secret of this application registration. Confirm that nothing else uses the client secret(s)"
             }
             else {
-                Write-Log "  '$displayName' carries $($foreign.Count) password credential(s) the deployment did not mint ($names) - left in place" -Level Info
-                Add-Summary $item "Review - $($foreign.Count) credential(s) not minted by the deployment ($names) - left in place"
+                Write-Log "  '$displayName' holds $($foreign.Count) client secret(s) that the deployment did not create: $names. The client secret(s) stay unchanged" -Level Info
+                Add-Summary $item "Review: $($foreign.Count) client secret(s) that the deployment did not create: $names. The client secret(s) stay unchanged"
             }
         }
     }
 }
 
 function Set-NeologikDirectoryObjectOwner {
-    # Ensures one owner on an application or service principal (verify-only
-    # records the change); the summary row is the caller's item name.
+    # Adds one owner to an application registration or to a service principal. A run
+    # with -Verify records the change. The caller gives the name of the summary item.
     param([Parameter(Mandatory)][string]$Item, [Parameter(Mandatory)][string]$Uri, [Parameter(Mandatory)][string]$OwnerId)
     $graph = $script:GraphV1
     try {
         $owners = @(Get-NeologikGraphCollection -Uri "$Uri/owners?`$select=id")
         if (@($owners | ForEach-Object { [string](Get-NeologikProperty $_ 'id' '') }) -contains $OwnerId) {
-            Add-Summary $Item 'Already in place'
+            Add-Summary $Item 'Already an owner'
             return
         }
         if (Test-NeologikVerifyOnly) { Add-NeologikPendingChange $Item 'ADD'; return }
         $ref = @{ '@odata.id' = "$graph/directoryObjects/$OwnerId" } | ConvertTo-Json -Compress
         try {
             $null = Invoke-NeologikGraph -Method POST -Uri "$Uri/owners/`$ref" -Body $ref
-            Write-Log "  $Item - ADDED" -Level Success
+            Write-Log "  ${Item}: added" -Level Success
             Add-Summary $Item 'Added'
         }
         catch {
-            if ((Get-NeologikErrorText $_) -match '(?i)already exist') { Add-Summary $Item 'Already in place' }
+            if ((Get-NeologikErrorText $_) -match '(?i)already exist') { Add-Summary $Item 'Already an owner' }
             else { throw }
         }
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  $Item - FAILED ($reason)" -Level Error
-        Add-Summary $Item "FAILED - $reason"
+        Write-Log "  ${Item}: FAILED. $reason" -Level Error
+        Add-Summary $Item "FAILED: $reason"
     }
 }
 
 function Set-NeologikAgentUserGrant {
-    # Step 5 (later run): the grants to agent users, the application permissions and
-    # the SharePoint consent check.
+    # Step 5 of the later run: the grants to agent users, the application permissions
+    # and the check of the SharePoint consent.
     $state = $script:State
     $grantsFile = $state.AgentGrants
-    Write-Log 'Step 5/6: agent-user delegated grants from the exported grants file' -Level Info
+    Write-Log 'Step 5 of 6: the grants to agent users from the agent grants file' -Level Info
     foreach ($entry in @(Get-NeologikProperty $grantsFile 'grants' @())) {
         $kind = [string](Get-NeologikProperty $entry 'kind' 'agent')
-        $name = [string](Get-NeologikProperty $entry 'name' '(unnamed)')
+        $name = [string](Get-NeologikProperty $entry 'name' 'no name')
         if ([string](Get-NeologikProperty $entry 'status' '') -ne 'ready') {
-            Write-Log "  $kind '$name': identity not stamped yet - run the platform provisioning, export again" -Level Warning
-            Add-Summary "Agent-user grant: $kind $name" 'SKIPPED - identity not stamped'
+            Write-Log "  $kind '$name': the agent grants file marks the entry as not ready. Ask Neologik for a new agent grants file" -Level Warning
+            Add-Summary "Grant to agent user: $kind $name" 'SKIPPED: the agent grants file marks the entry as not ready'
             continue
         }
         $scopes = @(@(Get-NeologikProperty $entry 'scopes' @()) | ForEach-Object { [string]$_ } | Where-Object { $_.Trim() })
@@ -2464,18 +2600,18 @@ function Set-NeologikAgentUserGrant {
             -Scopes $scopes
     }
     foreach ($role in @(Get-NeologikProperty $grantsFile 'componentGraphRoles' @())) {
-        $app = [string](Get-NeologikProperty $role 'app' '(app)')
+        $app = [string](Get-NeologikProperty $role 'app' 'no name')
         $roleName = [string](Get-NeologikProperty $role 'roleName' '')
         $resource = [string](Get-NeologikProperty $role 'resource' '')
         $identityName = [string](Get-NeologikProperty $role 'identityName' '')
         if ($resource -and $resource -ne 'graph') {
-            Write-Log "  $app '$roleName' is a $resource role - granted through that service, not Graph" -Level Warning
-            Add-Summary "Component role: $app $roleName" "SKIPPED - $resource role"
+            Write-Log "  $app '$roleName': the role belongs to $resource, not to Microsoft Graph. An administrator grants the role in $resource" -Level Warning
+            Add-Summary "App $app permission: $roleName" "SKIPPED: the role belongs to $resource, not to Microsoft Graph"
             continue
         }
         if (-not $roleName -or -not $identityName) {
-            Write-Log "  $app`: a component role entry without roleName or identityName - export the file again" -Level Warning
-            Add-Summary "Component role: $app $roleName" 'SKIPPED - incomplete entry in the grants file'
+            Write-Log "  ${app}: an entry in the agent grants file lacks roleName or identityName. Ask Neologik for a new agent grants file" -Level Warning
+            Add-Summary "App $app permission: $roleName" 'SKIPPED: the entry in the agent grants file is incomplete'
             continue
         }
         Grant-NeologikComponentGraphRole -App $app -IdentityName $identityName `
@@ -2485,50 +2621,51 @@ function Set-NeologikAgentUserGrant {
         Test-NeologikSharePointConsent
     }
     else {
-        Write-Log '  no SharePoint ingestion in the solution - Sites.Selected consent not checked (least exposure)' -Level Info
+        Write-Log '  The solution does not use SharePoint ingestion. The script does not check the consent for Sites.Selected' -Level Info
         Add-Summary 'SharePoint Sites.Selected consent' 'Not needed'
     }
 }
 
 function Set-NeologikMailboxGrant {
     <#
-    Step 6 (later run): the Exchange Online mailbox grants of the email channels,
-    and the removal of the assignments of identities that are no longer used. An
-    identity the file lists under adoptedIdentityAppIds keeps its assignment.
+    Step 6 of the later run: the Exchange Online mailbox grants of the email
+    channels. The function also removes the role assignments of each identity that
+    the environment has stopped using. An identity that the file lists under
+    adoptedIdentityAppIds keeps the role assignments.
     #>
     $state = $script:State
-    Write-Log 'Step 6/6: Exchange Online mailbox grants for email channels' -Level Info
+    Write-Log 'Step 6 of 6: the Exchange Online mailbox grants of the email channels' -Level Info
     $legacyToRemove = @()
     foreach ($legacyAppId in $state.RemoveLegacyGrantAppIds) {
         if ($state.AdoptedIdentityAppIds -contains $legacyAppId) {
-            Write-Log "  legacy identity $legacyAppId - identity adopted by the v5 email channel - assignment kept" -Level Success
-            Add-Summary "Legacy mailbox grant: $legacyAppId" 'Identity adopted by the v5 email channel - assignment kept'
+            Write-Log "  Identity ${legacyAppId}: an email channel still uses the identity. The script keeps the role assignments" -Level Success
+            Add-Summary "Mailbox grant to remove: $legacyAppId" 'Kept. An email channel still uses the identity'
             continue
         }
         $legacyToRemove += $legacyAppId
     }
     $items = @()
-    foreach ($grant in $state.MailboxGrants) { $items += "Mailbox grant: $($grant.Mailbox) -> $($grant.DisplayName)" }
-    foreach ($legacyAppId in $legacyToRemove) { $items += "Legacy mailbox grant: $legacyAppId" }
+    foreach ($grant in $state.MailboxGrants) { $items += "Mailbox grant: $($grant.Mailbox) for $($grant.DisplayName)" }
+    foreach ($legacyAppId in $legacyToRemove) { $items += "Mailbox grant to remove: $legacyAppId" }
     if ($items.Count -eq 0) {
-        Write-Log '  no mailbox grant to apply and no legacy identity to remove - Exchange Online not contacted' -Level Info
+        Write-Log '  The run has no mailbox grant to apply and no identity to remove. The script does not contact Exchange Online' -Level Info
         return
     }
     if (-not (Import-NeologikModuleSet -Names @('ExchangeOnlineManagement') -MinimumVersion $script:ExchangeModuleMinimumVersion `
                 -InstallHint 'Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force')) {
-        foreach ($item in $items) { Add-Summary $item 'SKIPPED - Exchange Online module not available' }
+        foreach ($item in $items) { Add-Summary $item 'SKIPPED: the Exchange Online module is not available' }
         return
     }
     $connected = $false
     try {
-        Write-Log '  Signing in to Exchange Online (device code - the same Global Administrator account)...' -Level Info
+        Write-Log '  The script signs in to Exchange Online with a device code. Sign in as an Exchange Administrator or as a Global Administrator' -Level Info
         Connect-ExchangeOnline -Device -ShowBanner:$false -ErrorAction Stop
         $connected = $true
     }
     catch {
-        Write-Log "  Exchange Online sign-in failed: $(Get-NeologikErrorText $_)" -Level Error
-        Write-ActionRequired "Exchange Online sign-in did not complete. Run the script again and finish the device-code sign-in with an Exchange Administrator or Global Administrator account of tenant $($state.TenantId)."
-        foreach ($item in $items) { Add-Summary $item 'SKIPPED - Exchange Online sign-in failed' }
+        Write-Log "  The sign-in to Exchange Online failed. $(Get-NeologikErrorText $_)" -Level Error
+        Write-ActionRequired "The sign-in to Exchange Online did not complete.`nRun the script again. Sign in as an Exchange Administrator or as a Global Administrator of tenant $($state.TenantId)."
+        foreach ($item in $items) { Add-Summary $item 'SKIPPED: the sign-in to Exchange Online failed' }
         return
     }
     try {
@@ -2539,14 +2676,14 @@ function Set-NeologikMailboxGrant {
                     Add-NeologikPendingChange 'Exchange organisation customisation' 'ENABLE'
                 }
                 else {
-                    Write-Log '  Enabling organisation customisation (one-off; 60 s propagation)...' -Level Info
+                    Write-Log '  The script enables organisation customisation in Exchange Online. Exchange Online needs the setting once. The script then waits 60 seconds' -Level Info
                     Invoke-NeologikWrite -Command 'Enable-OrganizationCustomization' | Out-Null
                     Start-Sleep -Seconds 60
                 }
             }
         }
         catch {
-            Write-Log "  organisation customisation could not be verified ($(Get-NeologikErrorText $_)) - continuing" -Level Warning
+            Write-Log "  The script could not read the organisation customisation of Exchange Online. $(Get-NeologikErrorText $_). The script continues" -Level Warning
         }
         foreach ($grant in $state.MailboxGrants) {
             Grant-NeologikMailboxAccess -IdentityAppId $grant.IdentityAppId -IdentityObjectId $grant.IdentityObjectId `
@@ -2558,17 +2695,17 @@ function Set-NeologikMailboxGrant {
     }
     finally {
         if ($connected) {
-            try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction Stop | Out-Null } catch { Write-Verbose "ignored: $($_.Exception.Message)" }
+            try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction Stop | Out-Null } catch { Write-Verbose "The script ignores the error. $($_.Exception.Message)" }
         }
     }
 }
 
-# ----- first run, step 4: permission reduction ----------------------------------
+# ----- First run, step 4: permission reduction ----------------------------------
 
 function Get-NeologikTokenAccountId {
-    # The signed-in account named by an access token (upn, unique_name or
-    # preferred_username claim) - the AccountId Connect-AzAccount needs with
-    # -AccessToken. '' when the token is not a readable JWT.
+    # Returns the account that an access token names. The function reads the claim upn,
+    # unique_name or preferred_username. Connect-AzAccount needs the account with
+    # -AccessToken. Returns '' when the token is not a JWT that the function can read.
     param([string]$Token)
     try {
         $parts = $Token.Split('.')
@@ -2586,22 +2723,23 @@ function Get-NeologikTokenAccountId {
 }
 
 function Connect-NeologikAzure {
-    # Signs in to Azure for the role-assignment reads and writes; returns
-    # $true or $false after printing what to do. With -UseAzureCliToken the
-    # Azure CLI session supplies the ARM token (the same session that signed
-    # in to Graph); otherwise the device-code prompt carrying the MFA claims
-    # challenge the role writes need.
+    # Signs in to Azure, to read and write role assignments. Returns $true. Returns
+    # $false after the function prints what to do. With -UseAzureCliToken the Azure CLI
+    # session gives the token for Azure Resource Manager. The same Azure CLI session
+    # signed in to Microsoft Graph. Without -UseAzureCliToken the function uses the
+    # device code prompt. The device code prompt requests the multi-factor
+    # authentication claim that a role assignment needs.
     $state = $script:State
     if ($state.UseAzureCliToken) {
-        Write-Log 'Signing in to Azure with the Azure CLI session token (az account get-access-token)...' -Level Info
-        # --subscription alone: az resolves the owning account and tenant from it
-        # (it refuses --tenant and --subscription together).
+        Write-Log 'The script signs in to Azure with the token of the Azure CLI session' -Level Info
+        # The command gives --subscription only. az finds the account and the tenant from the
+        # subscription. az refuses --tenant together with --subscription.
         $cli = Invoke-NeologikAzureCli -Arguments @('account', 'get-access-token', '--resource', 'https://management.azure.com/',
             '--subscription', $state.SubscriptionId, '--query', 'accessToken', '-o', 'tsv')
         $cliToken = if ($cli.ExitCode -eq 0) { [string]($cli.Output | Select-Object -Last 1) } else { '' }
         if (-not $cliToken.Trim()) {
-            Write-Log 'Azure sign-in failed: az account get-access-token returned no token for the subscription' -Level Error
-            Write-ActionRequired "az account get-access-token failed for subscription $($state.SubscriptionId) in tenant $($state.TenantId).`nSign in first: az login --tenant $($state.TenantId)`nthen run this script again (or run it without -UseAzureCliToken for the device-code sign-in)."
+            Write-Log 'The sign-in to Azure failed. The Azure CLI gave no token for the subscription' -Level Error
+            Write-ActionRequired "The Azure CLI gave no token for subscription $($state.SubscriptionId) in tenant $($state.TenantId).`nSign in with this command:`n  az login --tenant $($state.TenantId)`nThen run the script again. Or run the script without -UseAzureCliToken, to sign in with a device code."
             return $false
         }
         $accountId = Get-NeologikTokenAccountId -Token $cliToken.Trim()
@@ -2610,18 +2748,18 @@ function Connect-NeologikAzure {
             Connect-AzAccount -AccessToken $cliToken.Trim() -AccountId $accountId -Tenant $state.TenantId -Subscription $state.SubscriptionId -ErrorAction Stop | Out-Null
         }
         catch {
-            Write-Log "Azure sign-in failed: $(Get-NeologikErrorText $_)" -Level Error
-            Write-ActionRequired "Sign in to Azure with the Azure CLI token did not complete.`nSign in first: az login --tenant $($state.TenantId)`nthen run this script again (or run it without -UseAzureCliToken for the device-code sign-in)."
+            Write-Log "The sign-in to Azure failed. $(Get-NeologikErrorText $_)" -Level Error
+            Write-ActionRequired "The sign-in to Azure with the token of the Azure CLI session did not complete.`nSign in with this command:`n  az login --tenant $($state.TenantId)`nThen run the script again. Or run the script without -UseAzureCliToken, to sign in with a device code."
             return $false
         }
-        Write-Log '  the CLI token carries no MFA claims challenge - a role write refused with a claims error means run again without -UseAzureCliToken' -Level Info
+        Write-Log '  The token of the Azure CLI session holds no multi-factor authentication claim. When Azure refuses a role assignment with a claims error, run the script again without -UseAzureCliToken' -Level Info
     }
     else {
-        # The script's own device code first, with the claim the role writes need, then
-        # the Azure CLI session of the workstation if there is one, then the device code
-        # prompt of Az PowerShell.
+        # The order of the methods: the device code of the script, with the claim that a role
+        # assignment needs, then the Azure CLI session of the workstation, then the device
+        # code prompt of Az PowerShell.
         $connected = $false
-        Write-Log 'Signing in to Azure - the same administrator account' -Level Info
+        Write-Log 'The script signs in to Azure. Sign in with the same account' -Level Info
         $token = Get-NeologikDeviceCodeToken -ClientId $script:AzurePublicClientId -Label 'Azure' -Claims $script:AzureMfaClaims `
             -Scopes @('https://management.azure.com/.default', 'openid', 'profile', 'offline_access')
         if ($token) {
@@ -2630,10 +2768,10 @@ function Connect-NeologikAzure {
                 Connect-AzAccount -AccessToken $token.AccessToken -AccountId $accountId -Tenant $state.TenantId -Subscription $state.SubscriptionId -ErrorAction Stop | Out-Null
                 $connected = $true
             }
-            catch { Write-Log "The Azure session could not be opened with the sign-in token: $(Get-NeologikErrorText $_)" -Level Warning }
+            catch { Write-Log "The script could not open the Azure session with the token of the sign-in. $(Get-NeologikErrorText $_)" -Level Warning }
         }
         if (-not $connected -and (Test-NeologikCommand -Name 'az')) {
-            Write-Log 'Trying the Azure CLI session on this machine instead (az account get-access-token)...' -Level Info
+            Write-Log 'The script now tries the Azure CLI session of this workstation' -Level Info
             $cli = Invoke-NeologikAzureCli -Arguments @('account', 'get-access-token', '--resource', 'https://management.azure.com/',
                 '--subscription', $state.SubscriptionId, '--query', 'accessToken', '-o', 'tsv')
             $cliToken = if ($cli.ExitCode -eq 0) { [string]($cli.Output | Select-Object -Last 1) } else { '' }
@@ -2643,18 +2781,18 @@ function Connect-NeologikAzure {
                 try {
                     Connect-AzAccount -AccessToken $cliToken.Trim() -AccountId $accountId -Tenant $state.TenantId -Subscription $state.SubscriptionId -ErrorAction Stop | Out-Null
                     $connected = $true
-                    Write-Log '  the CLI token carries no MFA claims challenge - a role write refused with a claims error means run again and finish the device-code sign-in' -Level Info
+                    Write-Log '  The token of the Azure CLI session holds no multi-factor authentication claim. When Azure refuses a role assignment with a claims error, run the script again and complete the sign-in with the device code' -Level Info
                 }
-                catch { Write-Log "The Azure session could not be opened with the Azure CLI token: $(Get-NeologikErrorText $_)" -Level Warning }
+                catch { Write-Log "The script could not open the Azure session with the token of the Azure CLI session. $(Get-NeologikErrorText $_)" -Level Warning }
             }
-            else { Write-Log '  the Azure CLI has no session for this subscription' -Level Info }
+            else { Write-Log '  The Azure CLI has no session for this subscription' -Level Info }
         }
         if (-not $connected) {
-            Write-Log 'Trying the Az PowerShell device-code prompt...' -Level Info
+            Write-Log 'The script now tries the device code prompt of Az PowerShell' -Level Info
             try {
                 $connectParams = @{ Tenant = $state.TenantId; Subscription = $state.SubscriptionId; UseDeviceAuthentication = $true }
-                # Azure requires multi-factor authentication for every write. The sign-in requests
-                # the 'p1' authentication-context claim, so that the role assignments are not refused.
+                # Azure requires multi-factor authentication for each write. The sign-in requests the
+                # authentication context claim 'p1', so that Azure accepts the role assignments.
                 # The value decodes to {"access_token":{"acrs":{"essential":true,"values":["p1"]}}}. Requires Az.Accounts 5.2.0 or later.
                 if ((Get-Command Connect-AzAccount -ErrorAction Stop).Parameters.ContainsKey('ClaimsChallenge')) {
                     $connectParams['ClaimsChallenge'] = 'eyJhY2Nlc3NfdG9rZW4iOnsiYWNycyI6eyJlc3NlbnRpYWwiOnRydWUsInZhbHVlcyI6WyJwMSJdfX19'
@@ -2663,8 +2801,8 @@ function Connect-NeologikAzure {
                 Connect-AzAccount @connectParams -ErrorAction Stop | Out-Null
             }
             catch {
-                Write-Log "Azure sign-in failed: $(Get-NeologikErrorText $_)" -Level Error
-                Write-ActionRequired "Sign in to Azure did not complete - every sign-in method was tried (the script's device code, the Azure CLI session, the Az PowerShell device code).`nRun the script again on a machine with a browser and finish the sign-in with an account that holds Owner (or User Access Administrator) on subscription $($state.SubscriptionId) in tenant $($state.TenantId)."
+                Write-Log "The sign-in to Azure failed. $(Get-NeologikErrorText $_)" -Level Error
+                Write-ActionRequired "The sign-in to Azure did not complete. The script tried three methods:`n  1. The device code of the script.`n  2. The Azure CLI session.`n  3. The device code of Az PowerShell.`nRun the script again. Open the sign-in address in a browser on any device.`nSign in with an account that holds Owner or User Access Administrator on subscription $($state.SubscriptionId) in tenant $($state.TenantId)."
                 return $false
             }
         }
@@ -2673,29 +2811,30 @@ function Connect-NeologikAzure {
         $context = Get-AzContext -ErrorAction Stop
         $contextSub = [string](Get-NeologikProperty (Get-NeologikProperty $context 'Subscription') 'Id' '')
         if ($contextSub -and $contextSub -ne $state.SubscriptionId) {
-            Write-ActionRequired "The Azure sign-in selected subscription $contextSub, not $($state.SubscriptionId).`nMake sure your account has access to subscription $($state.SubscriptionId) and run the script again."
+            Write-ActionRequired "The sign-in to Azure selected subscription $contextSub. The run needs subscription $($state.SubscriptionId).`nConfirm that the account can use subscription $($state.SubscriptionId). Then run the script again."
             return $false
         }
     }
     catch {
-        Write-Log "Azure context could not be read ($(Get-NeologikErrorText $_)) - continuing" -Level Warning
+        Write-Log "The script could not read the Azure context. $(Get-NeologikErrorText $_). The script continues" -Level Warning
     }
     return (Test-NeologikSubscriptionAdministrator)
 }
 
 function Test-NeologikSubscriptionAdministrator {
     <#
-    Check of the signed-in account: it must hold Owner or User Access Administrator
-    on the subscription, directly or inherited, before the role assignments are
-    written. A run that writes stops with the one instruction. A run with -Verify
-    warns and carries on. The check is passed over, with a warning, when the object
-    id of the account is not known or the read fails.
+    Checks the signed-in account. The signed-in account must hold Owner or User
+    Access Administrator on the subscription before the script writes a role
+    assignment. A direct role assignment and an inherited role assignment both
+    count. A run that writes stops and prints one instruction. A run with -Verify
+    warns and continues. The function warns and makes no check when the object id
+    of the signed-in account is not known, or when the read fails.
     #>
     $state = $script:State
     $objectId = [string](Get-NeologikProperty $state 'SignedInObjectId' '')
     $subScope = "/subscriptions/$($state.SubscriptionId)"
     if (-not $objectId) {
-        Write-Log '  the signed-in account is not known to this run - its subscription rights are not checked' -Level Warning
+        Write-Log '  The script does not know the signed-in account. The script does not check the roles of the signed-in account on the subscription' -Level Warning
         return $true
     }
     try {
@@ -2703,42 +2842,42 @@ function Test-NeologikSubscriptionAdministrator {
             ForEach-Object { [string](Get-NeologikProperty $_ 'RoleDefinitionName' '') })
     }
     catch {
-        Write-Log "The signed-in account's subscription roles could not be read ($(Get-NeologikErrorText $_)) - continuing; role writes will report any refusal" -Level Warning
+        Write-Log "The script could not read the roles of the signed-in account on the subscription. $(Get-NeologikErrorText $_). The script continues. The script reports each role assignment that Azure refuses" -Level Warning
         return $true
     }
-    # One name per role: an inherited assignment at several scopes counts once.
+    # One name for each role. An inherited role assignment at several scopes counts once.
     $administrator = @($held | Where-Object { $script:SubscriptionAdministratorRoles -contains $_ } | Select-Object -Unique)
     if ($administrator.Count -gt 0) {
-        Write-Log "  the signed-in account holds $($administrator -join ', ') on the subscription" -Level Success
+        Write-Log "  The signed-in account holds $($administrator -join ', ') on the subscription" -Level Success
         return $true
     }
     $who = if ($state.SignedInUpn) { $state.SignedInUpn } else { 'The signed-in account' }
     if (Test-NeologikVerifyOnly) {
-        Write-Log "  $who holds neither Owner nor User Access Administrator on subscription $($state.SubscriptionId) - verify-only continues; the role writes would be refused" -Level Warning
+        Write-Log "  $who holds neither Owner nor User Access Administrator on subscription $($state.SubscriptionId). The run with -Verify continues. Azure refuses each role assignment of a run without -Verify" -Level Warning
         return $true
     }
     Write-Log "$who holds neither Owner nor User Access Administrator on subscription $($state.SubscriptionId)" -Level Error
-    Write-ActionRequired "$who holds neither Owner nor User Access Administrator on subscription $($state.SubscriptionId).`nAssign one of those roles to the account on the subscription (Azure portal > Subscriptions > Access control (IAM)), or activate it in Privileged Identity Management, then run the script again. Nothing was changed on Azure."
+    Write-ActionRequired "$who holds neither Owner nor User Access Administrator on subscription $($state.SubscriptionId).`nAssign one of the two roles to the account in the Azure portal: Subscriptions > Access control (IAM).`nOr activate the role in Privileged Identity Management.`nThen run the script again. The script changed nothing in Azure."
     return $false
 }
 
 function Set-NeologikAzureRoleAssignment {
-    # Ensures one role assignment for the deployment identity at one scope.
-    # Returns $true when the assignment is in place.
+    # Assigns one role to the deployment identity at one scope, when the role assignment
+    # is absent. Returns $true when the deployment identity holds the role assignment.
     param([string]$RoleName, [string]$Scope, [string]$Label)
     $deploySp = $script:State.DeploySp
     try {
         $assignment = @(Get-AzRoleAssignment -ObjectId $deploySp.Id -RoleDefinitionName $RoleName -Scope $Scope -ErrorAction Stop |
             Where-Object { $_.Scope -eq $Scope })
         if ($assignment.Count -gt 0) {
-            Write-Log "  $Label role '$RoleName' - already in place" -Level Success
-            Add-Summary "$Label role: $RoleName" 'Already in place'
+            Write-Log "  $Label role '$RoleName': already assigned" -Level Success
+            Add-Summary "$Label role: $RoleName" 'Already assigned'
             return $true
         }
         if (Test-NeologikVerifyOnly) {
-            # A pending narrow role counts as in place for the projection:
-            # the report shows what a successful real run would then remove.
-            Add-NeologikPendingChange "$Label role: $RoleName" 'CREATE'
+            # In a run with -Verify a pending role counts as held. The report then shows what a
+            # run without -Verify would remove after the run assigned the role.
+            Add-NeologikPendingChange "$Label role: $RoleName" 'ASSIGN'
             return $true
         }
         try {
@@ -2746,23 +2885,23 @@ function Set-NeologikAzureRoleAssignment {
         }
         catch {
             if ((Get-NeologikErrorText $_) -match '(?i)RoleAssignmentExists|already exists') {
-                Write-Log "  $Label role '$RoleName' - already in place" -Level Success
-                Add-Summary "$Label role: $RoleName" 'Already in place'
+                Write-Log "  $Label role '$RoleName': already assigned" -Level Success
+                Add-Summary "$Label role: $RoleName" 'Already assigned'
                 return $true
             }
             throw
         }
-        Write-Log "  $Label role '$RoleName' - CREATED" -Level Success
-        Add-Summary "$Label role: $RoleName" 'Created'
+        Write-Log "  $Label role '$RoleName': assigned" -Level Success
+        Add-Summary "$Label role: $RoleName" 'Assigned'
         return $true
     }
     catch {
         $reason = Get-NeologikErrorText $_
         if ($reason -match '(?i)AuthorizationFailed|does not have authorization|Forbidden') {
-            $reason = 'insufficient privileges - the signed-in account needs Owner or User Access Administrator on the subscription'
+            $reason = 'insufficient privileges. The signed-in account needs Owner or User Access Administrator on the subscription'
         }
-        Write-Log "  $Label role '$RoleName' - FAILED ($reason)" -Level Error
-        Add-Summary "$Label role: $RoleName" "FAILED - $reason"
+        Write-Log "  $Label role '$RoleName': FAILED. $reason" -Level Error
+        Add-Summary "$Label role: $RoleName" "FAILED: $reason"
         return $false
     }
 }
@@ -2774,31 +2913,31 @@ function Remove-NeologikAzureRoleAssignment {
         $assignment = @(Get-AzRoleAssignment -ObjectId $deploySp.Id -RoleDefinitionName $RoleName -Scope $Scope -ErrorAction Stop |
             Where-Object { $_.Scope -eq $Scope })
         if ($assignment.Count -eq 0) {
-            Write-Log "  $Label role '$RoleName' - not present (nothing to remove)" -Level Success
-            Add-Summary "Legacy $Label role: $RoleName" 'Not present'
+            Write-Log "  $Label role '$RoleName': not held. The script removes nothing" -Level Success
+            Add-Summary "$Label role to remove: $RoleName" 'Not held'
             return
         }
         if (Test-NeologikVerifyOnly) {
-            Add-NeologikPendingChange "Legacy $Label role: $RoleName" 'REMOVE'
+            Add-NeologikPendingChange "$Label role to remove: $RoleName" 'REMOVE'
             return
         }
         Invoke-NeologikWrite -Command 'Remove-AzRoleAssignment' -Parameters @{ ObjectId = $deploySp.Id; RoleDefinitionName = $RoleName; Scope = $Scope } | Out-Null
-        Write-Log "  $Label role '$RoleName' - REMOVED" -Level Success
-        Add-Summary "Legacy $Label role: $RoleName" 'Removed'
+        Write-Log "  $Label role '$RoleName': removed" -Level Success
+        Add-Summary "$Label role to remove: $RoleName" 'Removed'
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  $Label role '$RoleName' - removal FAILED ($reason)" -Level Error
-        Add-Summary "Legacy $Label role: $RoleName" "FAILED - $reason"
+        Write-Log "  $Label role '$RoleName': the removal FAILED. $reason" -Level Error
+        Add-Summary "$Label role to remove: $RoleName" "FAILED: $reason"
     }
 }
 
 function Get-NeologikDirectoryRoleHeld {
-    # The directory roles the deployment identity holds, read from its own list of
-    # memberships. The list of members of a role omits service principals, so a check
-    # through it would report a role as not held when it is. Returns Id,
-    # RoleTemplateId and DisplayName for each role. A read that fails throws, so that
-    # it is never taken to mean that no role is held.
+    # Returns the directory roles that the deployment identity holds. The function reads
+    # the memberships of the deployment identity. The list of members of a directory role
+    # omits service principals, so that list would wrongly report a role as not held.
+    # Returns Id, RoleTemplateId and DisplayName for each role. A failed read throws, so
+    # that no caller reads a failure as an empty list.
     $deploySp = $script:State.DeploySp
     return @(Get-MgServicePrincipalMemberOf -ServicePrincipalId $deploySp.Id -All -ErrorAction Stop | ForEach-Object {
             $extra = Get-NeologikProperty $_ 'AdditionalProperties' @{}
@@ -2809,7 +2948,7 @@ function Get-NeologikDirectoryRoleHeld {
 }
 
 function Remove-NeologikAppAdminRole {
-    # 4c. The Application Administrator directory role membership.
+    # Step 4c: the membership of the directory role Application Administrator.
     $deploySp = $script:State.DeploySp
     try {
         $appAdminRole = @(Get-NeologikDirectoryRoleHeld | Where-Object { $_.RoleTemplateId -eq $script:AppAdminRoleTemplateId }) | Select-Object -First 1
@@ -2819,31 +2958,32 @@ function Remove-NeologikAppAdminRole {
         }
         elseif ($isMember) {
             Invoke-NeologikWrite -Command 'Remove-MgDirectoryRoleMemberDirectoryObjectByRef' -Parameters @{ DirectoryRoleId = $appAdminRole.Id; DirectoryObjectId = $deploySp.Id } | Out-Null
-            Write-Log '  Application Administrator directory role - REMOVED' -Level Success
+            Write-Log '  The directory role Application Administrator: removed' -Level Success
             Add-Summary 'Application Administrator role' 'Removed'
         }
         else {
-            Write-Log '  Application Administrator directory role - not held (nothing to remove)' -Level Success
+            Write-Log '  The directory role Application Administrator: not held. The script removes nothing' -Level Success
             Add-Summary 'Application Administrator role' 'Not held'
         }
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges - sign in as a Global Administrator or Privileged Role Administrator' }
-        Write-Log "  Application Administrator directory role - FAILED ($reason)" -Level Error
-        Add-Summary 'Application Administrator role' "FAILED - $reason"
+        if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges. Sign in as a Global Administrator or as a Privileged Role Administrator' }
+        Write-Log "  The directory role Application Administrator: FAILED. $reason" -Level Error
+        Add-Summary 'Application Administrator role' "FAILED: $reason"
     }
 }
 
 function Test-NeologikSqlAdministratorIsDeployIdentity {
-    # Every SQL server in the resource group must name the deployment identity as its
-    # Microsoft Entra administrator before the membership of the Admin User Group can
-    # be removed. Returns $true, or $false with the reason logged. Reads only.
+    # Each SQL server in the resource group must name the deployment identity as the
+    # Microsoft Entra administrator before the script removes the membership of the Admin
+    # User Group. Returns $true. Returns $false after the function logs the reason. The
+    # function only reads.
     $state = $script:State
     $deploySp = $state.DeploySp
     $servers = @(Get-AzSqlServer -ResourceGroupName $state.ResourceGroupName -ErrorAction Stop)
     if ($servers.Count -eq 0) {
-        Write-Log '  no SQL server in the resource group yet - the infrastructure deployment has not run' -Level Warning
+        Write-Log '  The resource group holds no SQL server yet. Neologik has not yet deployed the environment' -Level Warning
         return $false
     }
     foreach ($server in $servers) {
@@ -2852,7 +2992,7 @@ function Test-NeologikSqlAdministratorIsDeployIdentity {
         $adminId = [string](Get-NeologikProperty $admin 'ObjectId' '')
         if ($adminId.ToLowerInvariant() -ne ([string]$deploySp.Id).ToLowerInvariant()) {
             $adminName = [string](Get-NeologikProperty $admin 'DisplayName' '')
-            Write-Log "  SQL server $serverName - the Entra administrator is '$adminName' ($adminId), not the deployment identity: run the infrastructure deployment first" -Level Warning
+            Write-Log "  SQL server ${serverName}: the Microsoft Entra administrator is '$adminName', id $adminId. The Microsoft Entra administrator is not the deployment identity. The deployment by Neologik sets the administrator" -Level Warning
             return $false
         }
     }
@@ -2860,28 +3000,28 @@ function Test-NeologikSqlAdministratorIsDeployIdentity {
 }
 
 function Remove-NeologikAdminGroupMembership {
-    # 4d. The membership of the Admin User Group: removed only once the SQL server
-    # administrator is the deployment identity, because until then the membership is
-    # its only access to SQL.
+    # Step 4d: the membership of the Admin User Group. The function removes the
+    # membership only when the SQL server administrator is the deployment identity.
+    # Before that, the membership is the only access of the deployment identity to SQL.
     $state = $script:State
     $deploySp = $state.DeploySp
     $label = 'Admin User Group membership'
     if (-not $state.AdminGroupId) {
-        Write-Log '  Admin User Group membership - not checked (no Admin User Group id: configuration file SecurityGroups or -AdminGroupId)' -Level Warning
-        Add-Summary $label 'Not checked - no Admin User Group id (configuration file SecurityGroups or -AdminGroupId)'
+        Write-Log '  The membership of the Admin User Group: not checked. The command gives no AdminGroupId, and no configuration file names the Admin User Group' -Level Warning
+        Add-Summary $label 'Not checked. The command gives no AdminGroupId'
         return
     }
     try {
         $isMember = @(Get-MgGroupMember -GroupId $state.AdminGroupId -All -ErrorAction Stop |
             Where-Object { $_.Id -eq $deploySp.Id }).Count -gt 0
         if (-not $isMember) {
-            Write-Log '  Admin User Group membership - not held (nothing to remove)' -Level Success
+            Write-Log '  The membership of the Admin User Group: not held. The script removes nothing' -Level Success
             Add-Summary $label 'Not held'
             return
         }
         if (-not (Test-NeologikSqlAdministratorIsDeployIdentity)) {
-            Write-Log '  Admin User Group membership - HELD and kept: it is the deployment identity''s only SQL access until every SQL server names the identity as its Entra administrator' -Level Warning
-            Add-Summary $label 'HELD - kept until every SQL server names the deployment identity as its Entra administrator (run the infrastructure deployment)'
+            Write-Log '  The membership of the Admin User Group: HELD. The script keeps the membership. The membership is the only access of the deployment identity to SQL. The script removes the membership when each SQL server names the deployment identity as the Microsoft Entra administrator' -Level Warning
+            Add-Summary $label 'HELD. The script keeps the membership until each SQL server names the deployment identity as the Microsoft Entra administrator. The deployment by Neologik sets the administrator'
             return
         }
         if (Test-NeologikVerifyOnly) {
@@ -2889,20 +3029,20 @@ function Remove-NeologikAdminGroupMembership {
             return
         }
         Invoke-NeologikWrite -Command 'Remove-MgGroupMemberByRef' -Parameters @{ GroupId = $state.AdminGroupId; DirectoryObjectId = $deploySp.Id } | Out-Null
-        Write-Log '  Admin User Group membership - REMOVED (SQL access is the declared server administrator)' -Level Success
+        Write-Log '  The membership of the Admin User Group: removed. The deployment identity reaches SQL as the Microsoft Entra administrator of the SQL server' -Level Success
         Add-Summary $label 'Removed'
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges - sign in as a Global Administrator or an owner of the group' }
-        Write-Log "  Admin User Group membership - FAILED ($reason)" -Level Error
-        Add-Summary $label "FAILED - $reason"
+        if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges. Sign in as a Global Administrator or as an owner of the group' }
+        Write-Log "  The membership of the Admin User Group: FAILED. $reason" -Level Error
+        Add-Summary $label "FAILED: $reason"
     }
 }
 
 function ConvertTo-NeologikScopeLabel {
-    # A short scope label for the summary: 'subscription', 'resource group',
-    # or the resource name below the group.
+    # Returns a short name of the scope for the summary: 'subscription', 'resource
+    # group', or the name of the resource below the resource group.
     param([string]$Scope)
     if ($Scope -match '^/subscriptions/[^/]+$') { return 'subscription' }
     if ($Scope -match '^/subscriptions/[^/]+/resourceGroups/[^/]+$') { return 'resource group' }
@@ -2910,7 +3050,7 @@ function ConvertTo-NeologikScopeLabel {
 }
 
 function Test-NeologikDeclaredAzureRole {
-    # Is this assignment part of the declared set?
+    # Returns whether the role assignment belongs to the declared set.
     param([string]$RoleName, [string]$Scope, [string]$RgScope, [string]$SubScope)
     if ($Scope -eq $RgScope) { return [bool]($script:RequiredRgRoles -contains $RoleName) }
     if ($Scope -eq $SubScope) { return [bool]($script:RequiredSubRoles -contains $RoleName) }
@@ -2921,10 +3061,10 @@ function Test-NeologikDeclaredAzureRole {
 }
 
 function Remove-NeologikUndeclaredAzureRole {
-    # 4e. The declared set: every Azure role assignment the deployment identity holds
-    # in the subscription outside the declared set is removed. The set is the seven
-    # roles on the resource group, the two on the subscription and the declared role
-    # below the resource group.
+    # Step 4e: the function removes every Azure role assignment of the deployment
+    # identity in the subscription that is outside the declared set. The declared set is
+    # the seven roles on the resource group, the two roles on the subscription and the
+    # declared role below the resource group.
     $state = $script:State
     $deploySp = $state.DeploySp
     $rgScope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)"
@@ -2934,75 +3074,75 @@ function Remove-NeologikUndeclaredAzureRole {
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  undeclared Azure roles - could not be listed ($reason)" -Level Error
-        Add-Summary 'Undeclared Azure roles' "FAILED - $reason"
+        Write-Log "  Other Azure roles: FAILED. The script could not list the Azure roles of the deployment identity. $reason" -Level Error
+        Add-Summary 'Other Azure roles' "FAILED: $reason"
         return
     }
     $undeclared = @($assignments | Where-Object {
             -not (Test-NeologikDeclaredAzureRole -RoleName ([string]$_.RoleDefinitionName) -Scope ([string]$_.Scope) -RgScope $rgScope -SubScope $subScope)
         })
     if ($undeclared.Count -eq 0) {
-        Write-Log '  undeclared Azure roles - none' -Level Success
-        Add-Summary 'Undeclared Azure roles' 'None'
+        Write-Log '  Other Azure roles: none' -Level Success
+        Add-Summary 'Other Azure roles' 'None'
         return
     }
     foreach ($assignment in $undeclared) {
         $roleName = [string]$assignment.RoleDefinitionName
         $scope = [string]$assignment.Scope
-        $label = "Undeclared Azure role: $roleName @ $(ConvertTo-NeologikScopeLabel $scope)"
+        $label = "Other Azure role: $roleName on $(ConvertTo-NeologikScopeLabel $scope)"
         if (Test-NeologikVerifyOnly) {
             Add-NeologikPendingChange $label 'REMOVE'
             continue
         }
         try {
             Invoke-NeologikWrite -Command 'Remove-AzRoleAssignment' -Parameters @{ ObjectId = $deploySp.Id; RoleDefinitionName = $roleName; Scope = $scope } | Out-Null
-            Write-Log "  $label - REMOVED" -Level Success
+            Write-Log "  ${label}: removed" -Level Success
             Add-Summary $label 'Removed'
         }
         catch {
             $reason = Get-NeologikErrorText $_
-            Write-Log "  $label - FAILED ($reason)" -Level Error
-            Add-Summary $label "FAILED - $reason"
+            Write-Log "  ${label}: FAILED. $reason" -Level Error
+            Add-Summary $label "FAILED: $reason"
         }
     }
 }
 
 function Remove-NeologikUndeclaredDirectoryRole {
-    # 4f. The declared set: the deployment identity holds no directory role.
-    # Application Administrator has its own step (4c). This step removes every other
-    # directory role, read from the identity's own list of memberships.
+    # Step 4f: the deployment identity holds no directory role. Step 4c removes
+    # Application Administrator. This step removes every other directory role. The
+    # function reads the memberships of the deployment identity.
     $deploySp = $script:State.DeploySp
     try {
         $held = @(Get-NeologikDirectoryRoleHeld | Where-Object { $_.RoleTemplateId -ne $script:AppAdminRoleTemplateId })
         if ($held.Count -eq 0) {
-            Write-Log '  undeclared directory roles - none' -Level Success
-            Add-Summary 'Undeclared directory roles' 'None'
+            Write-Log '  Other directory roles: none' -Level Success
+            Add-Summary 'Other directory roles' 'None'
             return
         }
         foreach ($role in $held) {
             $name = [string](Get-NeologikProperty $role 'DisplayName' '')
             if (-not $name) { $name = [string]$role.RoleTemplateId }
-            $label = "Undeclared directory role: $name"
+            $label = "Other directory role: $name"
             if (Test-NeologikVerifyOnly) {
                 Add-NeologikPendingChange $label 'REMOVE'
                 continue
             }
             Invoke-NeologikWrite -Command 'Remove-MgDirectoryRoleMemberDirectoryObjectByRef' -Parameters @{ DirectoryRoleId = $role.Id; DirectoryObjectId = $deploySp.Id } | Out-Null
-            Write-Log "  $label - REMOVED" -Level Success
+            Write-Log "  ${label}: removed" -Level Success
             Add-Summary $label 'Removed'
         }
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges - sign in as a Global Administrator or Privileged Role Administrator' }
-        Write-Log "  undeclared directory roles - FAILED ($reason)" -Level Error
-        Add-Summary 'Undeclared directory roles' "FAILED - $reason"
+        if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges. Sign in as a Global Administrator or as a Privileged Role Administrator' }
+        Write-Log "  Other directory roles: FAILED. $reason" -Level Error
+        Add-Summary 'Other directory roles' "FAILED: $reason"
     }
 }
 
 function Remove-NeologikUndeclaredGroupMembership {
-    # 4g. The declared set: the deployment identity is a member of no group. The Admin
-    # User Group has its own step (4d). This step removes every other membership.
+    # Step 4g: the deployment identity is a member of no group. Step 4d covers the Admin
+    # User Group. This step removes every other group membership.
     $state = $script:State
     $deploySp = $state.DeploySp
     try {
@@ -3011,143 +3151,145 @@ function Remove-NeologikUndeclaredGroupMembership {
                 ([string]$extra['@odata.type']) -eq '#microsoft.graph.group' -and $_.Id -ne $state.AdminGroupId
             })
         if ($groups.Count -eq 0) {
-            Write-Log '  undeclared group memberships - none' -Level Success
-            Add-Summary 'Undeclared group memberships' 'None'
+            Write-Log '  Other group memberships: none' -Level Success
+            Add-Summary 'Other group memberships' 'None'
             return
         }
         foreach ($group in $groups) {
             $extra = Get-NeologikProperty $group 'AdditionalProperties' @{}
             $name = [string]$extra['displayName']
             if (-not $name) { $name = [string]$group.Id }
-            $label = "Undeclared group membership: $name"
+            $label = "Other group membership: $name"
             if (Test-NeologikVerifyOnly) {
                 Add-NeologikPendingChange $label 'REMOVE'
                 continue
             }
             Invoke-NeologikWrite -Command 'Remove-MgGroupMemberByRef' -Parameters @{ GroupId = $group.Id; DirectoryObjectId = $deploySp.Id } | Out-Null
-            Write-Log "  $label - REMOVED" -Level Success
+            Write-Log "  ${label}: removed" -Level Success
             Add-Summary $label 'Removed'
         }
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges - sign in as a Global Administrator or an owner of the group' }
-        Write-Log "  undeclared group memberships - FAILED ($reason)" -Level Error
-        Add-Summary 'Undeclared group memberships' "FAILED - $reason"
+        if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges. Sign in as a Global Administrator or as an owner of the group' }
+        Write-Log "  Other group memberships: FAILED. $reason" -Level Error
+        Add-Summary 'Other group memberships' "FAILED: $reason"
     }
 }
 
 function Set-NeologikKitVersionTag {
-    # 4h. The version of the kit: the tag NeologikOnboardingKit on the resource group.
-    # The platform reads it before an upgrade. It is written last, merged with the
-    # existing tags, and only when it differs.
+    # Step 4h: the version of the onboarding kit, in the tag NeologikOnboardingKit on the
+    # resource group. The Neologik Platform reads the tag before an upgrade. The function
+    # writes the tag last, merges the tag with the existing tags, and writes only a
+    # changed value.
     param([Parameter(Mandatory)][string]$ResourceId)
-    $label = 'Kit version tag'
+    $label = 'Onboarding kit version tag'
     try {
         $rg = Get-AzResourceGroup -Name $script:State.ResourceGroupName -ErrorAction Stop
         $tags = Get-NeologikProperty $rg 'Tags' @{}
         if ($null -eq $tags) { $tags = @{} }
         $current = [string](Get-NeologikProperty $tags 'NeologikOnboardingKit' '')
         if ($current -eq $script:KitVersion) {
-            Write-Log "  $label - $current (in place)" -Level Success
-            Add-Summary $label "In place ($current)"
+            Write-Log "  ${label}: already set to $current" -Level Success
+            Add-Summary $label "Already set: $current"
             return
         }
         if (Test-NeologikVerifyOnly) {
-            Add-NeologikPendingChange $label "SET $($script:KitVersion) (currently '$current')"
+            Add-NeologikPendingChange $label "SET $($script:KitVersion). The current value is '$current'"
             return
         }
         Invoke-NeologikWrite -Command 'Update-AzTag' -Parameters @{ ResourceId = $ResourceId; Tag = @{ NeologikOnboardingKit = $script:KitVersion }; Operation = 'Merge' } | Out-Null
-        $was = if ($current) { " (was $current)" } else { '' }
-        Write-Log "  $label - SET $($script:KitVersion)$was" -Level Success
-        Add-Summary $label "Set ($($script:KitVersion))"
+        $was = if ($current) { ". The earlier value was $current" } else { '' }
+        Write-Log "  ${label}: set to $($script:KitVersion)$was" -Level Success
+        Add-Summary $label "Set: $($script:KitVersion)"
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  $label - FAILED ($reason)" -Level Error
-        Add-Summary $label "FAILED - $reason"
+        Write-Log "  ${label}: FAILED. $reason" -Level Error
+        Add-Summary $label "FAILED: $reason"
     }
 }
 
 function Invoke-NeologikPermissionReduction {
     <#
-    Step 4 of the first run: the deployment identity is moved to roles on the
-    resource group. The seven roles on the resource group and the two on the
-    subscription are applied first, and nothing is removed unless every one of them
-    is confirmed in place.
+    Step 4 of the first run: the permission reduction. The function first assigns
+    the seven roles on the resource group and the two roles on the subscription. The
+    function removes nothing unless the deployment identity holds all nine roles.
     #>
     $state = $script:State
-    Write-Log 'Step 4/4: permission reduction - the deployment identity moves to the resource-group-scoped model' -Level Info
+    Write-Log 'Step 4 of 4: the permission reduction of the deployment identity' -Level Info
 
     $azureItems = @()
-    foreach ($roleName in $script:RequiredRgRoles) { $azureItems += "RG role: $roleName" }
-    foreach ($roleName in $script:RequiredSubRoles) { $azureItems += "Sub role: $roleName" }
-    foreach ($roleName in $script:LegacySubRoles) { $azureItems += "Legacy Sub role: $roleName" }
+    foreach ($roleName in $script:RequiredRgRoles) { $azureItems += "Resource group role: $roleName" }
+    foreach ($roleName in $script:RequiredSubRoles) { $azureItems += "Subscription role: $roleName" }
+    foreach ($roleName in $script:LegacySubRoles) { $azureItems += "Subscription role to remove: $roleName" }
     if (-not (Import-NeologikModuleSet -Names @('Az.Accounts', 'Az.Resources', 'Az.Sql') -MinimumVersion ([version]'2.0.0') -Independent `
                 -InstallHint 'Install-Module Az.Accounts, Az.Resources, Az.Sql -Scope CurrentUser -Force')) {
-        foreach ($item in $azureItems) { Add-Summary $item 'SKIPPED - Az modules not available' }
-        Add-Summary 'Application Administrator role' 'SKIPPED - narrow Azure roles not confirmed'
-        Add-Summary 'Admin User Group membership' 'SKIPPED - narrow Azure roles not confirmed'
-        foreach ($item in @('Undeclared Azure roles', 'Undeclared directory roles', 'Undeclared group memberships')) { Add-Summary $item 'SKIPPED - narrow Azure roles not confirmed' }
+        foreach ($item in $azureItems) { Add-Summary $item 'SKIPPED: the Az modules are not available' }
+        Add-Summary 'Application Administrator role' 'SKIPPED: the script did not confirm the Azure roles of the deployment identity'
+        Add-Summary 'Admin User Group membership' 'SKIPPED: the script did not confirm the Azure roles of the deployment identity'
+        foreach ($item in @('Other Azure roles', 'Other directory roles', 'Other group memberships')) { Add-Summary $item 'SKIPPED: the script did not confirm the Azure roles of the deployment identity' }
         return
     }
     if (-not (Connect-NeologikAzure)) {
-        foreach ($item in $azureItems) { Add-Summary $item 'SKIPPED - Azure sign-in failed' }
-        Add-Summary 'Application Administrator role' 'SKIPPED - narrow Azure roles not confirmed'
-        Add-Summary 'Admin User Group membership' 'SKIPPED - narrow Azure roles not confirmed'
-        foreach ($item in @('Undeclared Azure roles', 'Undeclared directory roles', 'Undeclared group memberships')) { Add-Summary $item 'SKIPPED - narrow Azure roles not confirmed' }
+        foreach ($item in $azureItems) { Add-Summary $item 'SKIPPED: the sign-in to Azure failed' }
+        Add-Summary 'Application Administrator role' 'SKIPPED: the script did not confirm the Azure roles of the deployment identity'
+        Add-Summary 'Admin User Group membership' 'SKIPPED: the script did not confirm the Azure roles of the deployment identity'
+        foreach ($item in @('Other Azure roles', 'Other directory roles', 'Other group memberships')) { Add-Summary $item 'SKIPPED: the script did not confirm the Azure roles of the deployment identity' }
         return
     }
 
     $rgScope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)"
     $subScope = "/subscriptions/$($state.SubscriptionId)"
 
-    # 4a. The roles on the resource group first, so that the deployment never loses access.
+    # Step 4a: the roles on the resource group come first, so that the deployment never
+    # loses access.
     $narrowComplete = $true
     foreach ($roleName in $script:RequiredRgRoles) {
-        if (-not (Set-NeologikAzureRoleAssignment -RoleName $roleName -Scope $rgScope -Label 'RG')) { $narrowComplete = $false }
+        if (-not (Set-NeologikAzureRoleAssignment -RoleName $roleName -Scope $rgScope -Label 'Resource group')) { $narrowComplete = $false }
     }
 
-    # 4a2. The two roles on the subscription, still before any removal.
+    # Step 4a, second part: the two roles on the subscription, before any removal.
     foreach ($roleName in $script:RequiredSubRoles) {
-        if (-not (Set-NeologikAzureRoleAssignment -RoleName $roleName -Scope $subScope -Label 'subscription')) { $narrowComplete = $false }
+        if (-not (Set-NeologikAzureRoleAssignment -RoleName $roleName -Scope $subScope -Label 'Subscription')) { $narrowComplete = $false }
     }
 
     if (-not $narrowComplete) {
-        Write-Log '  the narrow role set is not complete - the legacy broad grants are left in place (narrow before broad)' -Level Warning
-        foreach ($roleName in $script:LegacySubRoles) { Add-Summary "Legacy subscription role: $roleName" 'SKIPPED - narrow roles not all in place' }
-        Add-Summary 'Application Administrator role' 'SKIPPED - narrow roles not all in place'
-        Add-Summary 'Admin User Group membership' 'SKIPPED - narrow roles not all in place'
-        foreach ($item in @('Undeclared Azure roles', 'Undeclared directory roles', 'Undeclared group memberships')) { Add-Summary $item 'SKIPPED - narrow roles not all in place' }
+        Write-Log '  The deployment identity does not hold all nine Azure roles. The script removes no access' -Level Warning
+        foreach ($roleName in $script:LegacySubRoles) { Add-Summary "Subscription role to remove: $roleName" 'SKIPPED: the deployment identity does not hold all nine Azure roles' }
+        Add-Summary 'Application Administrator role' 'SKIPPED: the deployment identity does not hold all nine Azure roles'
+        Add-Summary 'Admin User Group membership' 'SKIPPED: the deployment identity does not hold all nine Azure roles'
+        foreach ($item in @('Other Azure roles', 'Other directory roles', 'Other group memberships')) { Add-Summary $item 'SKIPPED: the deployment identity does not hold all nine Azure roles' }
         return
     }
 
-    # 4b. Remove the roles on the subscription that are no longer needed.
+    # Step 4b: remove the two roles on the subscription that the deployment identity
+    # does not need.
     foreach ($roleName in $script:LegacySubRoles) {
-        Remove-NeologikAzureRoleAssignment -RoleName $roleName -Scope $subScope -Label 'subscription'
+        Remove-NeologikAzureRoleAssignment -RoleName $roleName -Scope $subScope -Label 'Subscription'
     }
 
-    # 4c. Remove the Application Administrator directory role.
+    # Step 4c: remove the directory role Application Administrator.
     Remove-NeologikAppAdminRole
 
-    # 4d. Remove the membership of the Admin User Group, only once the SQL server
+    # Step 4d: remove the membership of the Admin User Group, only when the SQL server
     # administrator is the deployment identity.
     Remove-NeologikAdminGroupMembership
 
-    # 4e to 4g. The declared set: every other Azure role assignment, directory role
-    # and group membership is removed.
+    # Steps 4e to 4g: remove every other Azure role assignment, directory role and
+    # group membership.
     Remove-NeologikUndeclaredAzureRole
     Remove-NeologikUndeclaredDirectoryRole
     Remove-NeologikUndeclaredGroupMembership
 
-    # 4h. The version of the kit, once everything above is in place.
+    # Step 4h: record the version of the onboarding kit, after every step above.
     Set-NeologikKitVersionTag -ResourceId $rgScope
 }
 
-# ----- the two runs ---------------------------------------------------------------
+# ----- The two runs --------------------------------------------------------------
 
 function Invoke-NeologikPreWindowRun {
-    # No grants file given: the checks and grants, then the permission reduction.
+    # The first run: the checks and the grants, then the permission reduction.
     Set-NeologikAgentBlueprint
     Set-NeologikDeploymentGraphRole
     Set-NeologikSignInGroupAssignment
@@ -3157,16 +3299,17 @@ function Invoke-NeologikPreWindowRun {
 }
 
 function Invoke-NeologikPostWindowRun {
-    # A grants file given: exactly what the files list and nothing else.
+    # The later run: the grants that the files list, and nothing else.
     $state = $script:State
     if ($state.AgentGrants) { Set-NeologikAgentUserGrant }
     if ($state.MailboxGrantsFile) { Set-NeologikMailboxGrant }
 }
 
-# ----- summary ----------------------------------------------------------------
+# ----- Summary ------------------------------------------------------------------
 
 function Get-NeologikHeldGraphRole {
-    # The deployment identity's Graph application roles as they stand.
+    # Returns the Microsoft Graph application permissions that the deployment identity
+    # holds now.
     $state = $script:State
     if (-not $state.ContainsKey('DeploySp') -or -not $state.DeploySp -or -not $state.ContainsKey('GraphSp') -or -not $state.GraphSp) { return @() }
     $graphSp = $state.GraphSp
@@ -3177,8 +3320,8 @@ function Get-NeologikHeldGraphRole {
 }
 
 function Write-NeologikSummary {
-    # Prints the summary table, writes the JSON summary and returns the
-    # exit code: 0 when nothing needs attention, otherwise 1.
+    # Prints the summary table and writes the summary file. Returns the exit code: 0
+    # when no item needs attention, otherwise 1.
     $state = $script:State
     Write-Host ''
     Write-Host '============================ SUMMARY ============================' -ForegroundColor Cyan
@@ -3186,18 +3329,19 @@ function Write-NeologikSummary {
         $script:Summary | Format-Table -AutoSize | Out-String | Write-Host
     }
     else {
-        Write-Host '  (no items were verified - see the messages above)'
+        Write-Host '  The script checked no item. Read the messages above'
     }
     $attention = @($script:Summary | Where-Object { $_.Result -match $script:AttentionPattern })
     $pending = @($script:Summary | Where-Object { $_.Result -like 'WOULD *' })
-    $runName = if ((Get-NeologikProperty $state 'Run' '') -eq 'PostWindow') { 'Post-window run' } else { 'Pre-window run' }
-    # The summary file in JSON: the Microsoft Graph application permissions of the
-    # deployment identity as they stand, and every item of the run. Written beside the
-    # script. It never contains a secret.
+    $runName = if ((Get-NeologikProperty $state 'Run' '') -eq 'PostWindow') { 'The later run' } else { 'The first run' }
+    # The summary file in JSON. The summary file holds the Microsoft Graph application
+    # permissions that the deployment identity holds now, and every item of the run. The
+    # function writes the summary file to the folder of the script. The summary file
+    # holds no secret.
     try {
         $heldRoles = @()
         try { $heldRoles = @(Get-NeologikHeldGraphRole) }
-        catch { Write-Log "The deployment identity's current Graph roles could not be read for the summary: $(Get-NeologikErrorText $_)" -Level Warning }
+        catch { Write-Log "The script could not read the permissions of the deployment identity for the summary. $(Get-NeologikErrorText $_)" -Level Warning }
         $json = [pscustomobject]@{
             tenantId             = [string](Get-NeologikProperty $state 'TenantId' '')
             deploymentIdentity   = [string](Get-NeologikProperty $state 'DeploySpClientId' '')
@@ -3221,38 +3365,38 @@ function Write-NeologikSummary {
                 break
             }
             catch {
-                Write-Log "Could not write the JSON summary to $directory ($(Get-NeologikErrorText $_)) - trying the next location" -Level Warning
+                Write-Log "The script could not write the summary file to $directory. $(Get-NeologikErrorText $_). The script tries the next folder" -Level Warning
             }
         }
-        if ($written) { Write-Log "Summary written to $written - send it to Neologik" -Level Info }
-        else { Write-Log 'Could not write the JSON summary anywhere - send the summary table to Neologik instead' -Level Warning }
+        if ($written) { Write-Log "The script wrote the summary file to $written. Send the summary file to Neologik" -Level Info }
+        else { Write-Log 'The script could not write the summary file to any folder. Send the summary table to Neologik' -Level Warning }
     }
     catch {
-        Write-Log "Could not write the JSON summary: $(Get-NeologikErrorText $_)" -Level Warning
+        Write-Log "The script could not write the summary file. $(Get-NeologikErrorText $_)" -Level Warning
     }
     if ($attention.Count -gt 0) {
         if ($pending.Count -gt 0) {
-            Write-Log "Verify-only: $($pending.Count) change(s) would be made - nothing was written." -Level Warning
+            Write-Log "A run without -Verify would make $($pending.Count) change(s). The script wrote nothing" -Level Warning
         }
-        Write-Log "$($attention.Count) item(s) need attention - see the summary above." -Level Warning
+        Write-Log "$($attention.Count) item(s) need attention. Read the summary above" -Level Warning
         return 1
     }
     if (Get-NeologikProperty $state 'Verify' $false) {
-        Write-Log "$runName (verify-only) complete - nothing would change; environment access is in the expected state." -Level Success
+        Write-Log "$runName with -Verify is complete. A run without -Verify would change nothing. The environment access is in the expected state" -Level Success
     }
     else {
-        Write-Log "$runName complete - environment access is in the expected state." -Level Success
+        Write-Log "$runName is complete. The environment access is in the expected state" -Level Success
     }
     return 0
 }
 
-# ----- main entry ---------------------------------------------------------------
+# ----- Main entry ---------------------------------------------------------------
 
 function Invoke-NeologikEnvironmentAccess {
     <#
-    The run. Returns the exit code (0 = everything in the expected state,
-    1 = attention needed) and never throws: every failure is reported with
-    the action the operator should take.
+    Runs the script. Returns the exit code: 0 when every item is in the expected
+    state, 1 when an item needs attention. The function never throws. The function
+    reports each failure together with the action to take.
     #>
     [CmdletBinding()]
     [OutputType([int])]
@@ -3311,15 +3455,15 @@ function Invoke-NeologikEnvironmentAccess {
         return 1
     }
     catch {
-        Write-Log "The inputs could not be read: $(Get-NeologikErrorText $_)" -Level Error
-        Write-ActionRequired "The inputs could not be read: $(Get-NeologikErrorText $_)"
+        Write-Log "The script could not read the inputs. $(Get-NeologikErrorText $_)" -Level Error
+        Write-ActionRequired "The script could not read the inputs. $(Get-NeologikErrorText $_)"
         return 1
     }
 
     Write-NeologikHeader
 
-    # Every address the run uses must answer before anything is changed.
-    Write-Log 'Checking this machine can reach Microsoft...' -Level Info
+    # Each address that the run uses must answer before the script changes anything.
+    Write-Log 'The script checks that this workstation can reach each Microsoft address' -Level Info
     if (-not (Test-NeologikPreflightEndpoint)) { return 1 }
 
     if (-not (Import-NeologikModuleSet -Names $script:GraphModules -MinimumVersion $script:GraphModuleMinimumVersion `
@@ -3335,13 +3479,14 @@ function Invoke-NeologikEnvironmentAccess {
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "Unexpected error - the run stopped early: $reason" -Level Error
-        Add-Summary 'Run' "FAILED - unexpected error: $reason"
+        Write-Log "An unexpected error stopped the run. $reason" -Level Error
+        Add-Summary 'Run' "FAILED: unexpected error. $reason"
     }
     return (Write-NeologikSummary)
 }
 
-# When the script is loaded with a dot, the functions are defined and nothing runs.
+# When a caller loads the script with a dot, PowerShell defines the functions and
+# runs nothing.
 if ($MyInvocation.InvocationName -ne '.') {
     $neologikExitCode = Invoke-NeologikEnvironmentAccess @PSBoundParameters
     exit ([int](@($neologikExitCode)[-1]))

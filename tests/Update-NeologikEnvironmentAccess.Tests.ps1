@@ -936,14 +936,14 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
     It 'fails cleanly when neither a configuration file nor the ids are given' {
         $code = Invoke-Run @{ }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'TenantId could not be resolved'
+        ($script:Console -join "`n") | Should -Match 'The command does not give TenantId'
         Should -Invoke Connect-MgGraph -Times 0
     }
 
     It 'reports a missing configuration file' {
         $code = Invoke-Run @{ ConfigurationFile = (Join-Path $TestDrive 'nope.json') }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'Configuration file not found'
+        ($script:Console -join "`n") | Should -Match 'The configuration file does not exist'
         Should -Invoke Connect-MgGraph -Times 0
     }
 
@@ -968,7 +968,7 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
         Set-Content -LiteralPath $path -Value '[{"IdentityAppId": "x"}]'
         $code = Invoke-Run @{ ConfigurationFile = $path }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'not the onboarding configuration'
+        ($script:Console -join "`n") | Should -Match 'not the file that the onboarding script wrote'
     }
 
     It 'rejects ids that are not GUIDs before they reach a filter' {
@@ -978,14 +978,14 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
         Should -Invoke Connect-MgGraph -Times 0
     }
 
-    It 'requires the subscription and resource group for the pre-window run' {
+    It 'requires the subscription and resource group for the first run' {
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'pre-window run needs SubscriptionId'
+        ($script:Console -join "`n") | Should -Match 'first run needs SubscriptionId'
         Should -Invoke Connect-MgGraph -Times 0
     }
 
-    It 'does not require the subscription for the post-window run' {
+    It 'does not require the subscription for the later run' {
         Add-AgentIdentities
         $grants = New-GrantsFile -Grants @((New-AgentGrantEntry))
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; AgentGrantsFile = $grants }
@@ -998,15 +998,15 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
         $cfg = New-ConfigFile -Remove @('AppRegistration', 'SecurityGroups', 'NceAuthApp')
         $code = Invoke-Run @{ ConfigurationFile = $cfg; DeploySpClientId = $script:Ids.DeployAppId; SignInAppClientId = $script:Ids.SignInAppId }
         $code | Should -Be 1
-        Get-SummaryResult 'NCE group assignment' | Should -Be 'SKIPPED - ids not supplied'
-        Get-SummaryResult 'Agent blueprint' | Should -Be 'Present'
+        Get-SummaryResult 'User group assignment' | Should -Be 'SKIPPED: the command gives no SignInAppClientId or no NceUserGroupId'
+        Get-SummaryResult 'Agent identity blueprint' | Should -Be 'Present'
     }
 
     It 'reports a missing agent grants file' {
         $cfg = New-ConfigFile
         $code = Invoke-Run @{ ConfigurationFile = $cfg; AgentGrantsFile = (Join-Path $TestDrive 'missing-grants.json') }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'Agent grants file not found'
+        ($script:Console -join "`n") | Should -Match 'The agent grants file does not exist'
         Should -Invoke Connect-MgGraph -Times 0
     }
 
@@ -1023,7 +1023,7 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
         $grants = New-GrantsFile -Raw -RawContent '[{"IdentityAppId": "x"}]'
         $code = Invoke-Run @{ ConfigurationFile = $cfg; AgentGrantsFile = $grants }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'not the platform export'
+        ($script:Console -join "`n") | Should -Match 'not the file that Neologik exports'
     }
 
     It 'refuses an agent grants file exported from another tenant' {
@@ -1031,7 +1031,7 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
         $grants = New-GrantsFile -Grants @((New-AgentGrantEntry)) -TenantId $script:Ids.OtherTenant
         $code = Invoke-Run @{ ConfigurationFile = $cfg; AgentGrantsFile = $grants }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'exported from tenant'
+        ($script:Console -join "`n") | Should -Match 'belongs to tenant'
         Should -Invoke Connect-MgGraph -Times 0
     }
 
@@ -1053,14 +1053,14 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
         $grants = New-GrantsFile -Grants @($entry)
         $code = Invoke-Run @{ ConfigurationFile = $cfg; AgentGrantsFile = $grants }
         $code | Should -Be 1
-        Get-SummaryResult 'Agent-user grant: agent Support Agent' | Should -Be 'SKIPPED - identity not stamped'
+        Get-SummaryResult 'Grant to agent user: agent Support Agent' | Should -Be 'SKIPPED: the agent grants file marks the entry as not ready'
     }
 
     It 'validates every mailbox grants entry' {
         $cfg = New-ConfigFile
         $file = New-MailboxFile -Entries @(@{ IdentityAppId = $script:Ids.MailboxAppId; IdentityObjectId = $script:Ids.MailboxObjectId; Mailbox = 'support@contoso.com' })
         (Invoke-Run @{ ConfigurationFile = $cfg; MailboxGrantsFile = $file }) | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'every entry needs DisplayName'
+        ($script:Console -join "`n") | Should -Match 'each entry needs DisplayName'
         $script:Console = @()
         $file = New-MailboxFile -Entries @(@{ IdentityAppId = 'x'; IdentityObjectId = $script:Ids.MailboxObjectId; Mailbox = 'support@contoso.com'; DisplayName = 'neo' })
         (Invoke-Run @{ ConfigurationFile = $cfg; MailboxGrantsFile = $file }) | Should -Be 1
@@ -1079,13 +1079,13 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
     It 'rejects legacy application ids that are not GUIDs' {
         $cfg = New-ConfigFile
         (Invoke-Run @{ ConfigurationFile = $cfg; RemoveLegacyGrantAppIds = @('old-monitor') }) | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'RemoveLegacyGrantAppIds must be'
+        ($script:Console -join "`n") | Should -Match 'RemoveLegacyGrantAppIds must hold'
     }
 
     It 'refuses -RemoveLegacyGrantAppIds without the mailbox grants file that lists the adopted identities' {
         $cfg = New-ConfigFile
         (Invoke-Run @{ ConfigurationFile = $cfg; RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }) | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'belongs to the post-window run'
+        ($script:Console -join "`n") | Should -Match 'belongs to the later run'
         Should -Invoke Connect-MgGraph -Times 0
     }
 
@@ -1093,15 +1093,15 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
         $cfg = New-ConfigFile
         $file = New-MailboxFile -Raw -RawContent '{"IdentityAppId": "x"}'
         (Invoke-Run @{ ConfigurationFile = $cfg; MailboxGrantsFile = $file }) | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'not the platform export'
+        ($script:Console -join "`n") | Should -Match 'not the file that Neologik exports'
         $script:Console = @()
         $file = New-MailboxFile -Entries @() -AdoptedIdentityAppIds @('not-a-guid')
         (Invoke-Run @{ ConfigurationFile = $cfg; MailboxGrantsFile = $file }) | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'adoptedIdentityAppIds must be'
+        ($script:Console -join "`n") | Should -Match 'adoptedIdentityAppIds must hold'
         $script:Console = @()
         $file = New-MailboxFile -AsObject -TenantId $script:Ids.OtherTenant
         (Invoke-Run @{ ConfigurationFile = $cfg; MailboxGrantsFile = $file }) | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'exported from tenant'
+        ($script:Console -join "`n") | Should -Match 'belongs to tenant'
         Should -Invoke Connect-MgGraph -Times 0
     }
 }
@@ -1157,7 +1157,7 @@ Context 'Modules and sign-in' {
         Mock Connect-MgGraph { throw 'Device code authentication timed out' }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'Sign in to Microsoft Graph did not complete'
+        ($script:Console -join "`n") | Should -Match 'The sign-in to Microsoft Graph did not complete'
         Should -Invoke Get-MgServicePrincipal -Times 0
     }
 
@@ -1165,7 +1165,7 @@ Context 'Modules and sign-in' {
         $script:ContextTenant = $script:Ids.OtherTenant
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'landed in tenant'
+        ($script:Console -join "`n") | Should -Match 'The sign-in is for tenant'
         Should -Invoke Get-MgServicePrincipal -Times 0
     }
 
@@ -1184,7 +1184,7 @@ Context 'Modules and sign-in' {
         Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $AccessToken -is [securestring] -and -not $UseDeviceCode }
     }
 
-    It 'adds the grant write scope only with a grants file and the directory role scope only in the pre-window run' {
+    It 'adds the grant write scope only with a grants file and the directory role scope only in the first run' {
         Add-AgentIdentities
         $grants = New-GrantsFile -Grants @((New-AgentGrantEntry))
         $graphScopes = {
@@ -1229,7 +1229,7 @@ Context 'Modules and sign-in' {
         Should -Invoke Invoke-NeologikAzureCli -Times 1 -ParameterFilter { ($Arguments -join ' ') -match "get-access-token --resource https://management.azure.com/ --subscription $($script:Ids.Subscription)" }
         Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $AccessToken -eq 'eyJ0b2tlbg' -and $AccountId -and -not $UseDeviceAuthentication }
         ($script:Console -join "`n") | Should -Not -Match 'device code'
-        Get-SummaryResult 'RG role: Contributor' | Should -Be 'Already in place'
+        Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Already assigned'
     }
 
     It 'reports ACTION REQUIRED and skips the reduction when the Azure CLI has no token for the subscription' {
@@ -1237,8 +1237,8 @@ Context 'Modules and sign-in' {
         Mock Invoke-NeologikAzureCli { param($Arguments) if (($Arguments -join ' ') -match 'management\.azure\.com') { @{ ExitCode = 1; Output = @() } } else { @{ ExitCode = 0; Output = @('eyJ0b2tlbg') } } }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UseAzureCliToken = $true }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'get-access-token failed for subscription'
-        Get-SummaryResult 'RG role: Contributor' | Should -Be 'SKIPPED - Azure sign-in failed'
+        ($script:Console -join "`n") | Should -Match 'The Azure CLI gave no token for subscription'
+        Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'SKIPPED: the sign-in to Azure failed'
         Should -Invoke Connect-AzAccount -Times 0
     }
 
@@ -1246,7 +1246,7 @@ Context 'Modules and sign-in' {
         Mock Test-NeologikCommand { $false }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UseAzureCliToken = $true }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'Azure CLI \(az\) is not installed'
+        ($script:Console -join "`n") | Should -Match 'The Azure CLI is not installed'
         Mock Test-NeologikCommand { $true }
         Mock Invoke-NeologikAzureCli { @{ ExitCode = 1; Output = @() } }
         $script:Console = @()
@@ -1260,7 +1260,7 @@ Context 'Modules and sign-in' {
         $script:Tenant.ServicePrincipals = @($script:Tenant.ServicePrincipals | Where-Object { $_.id -ne $script:Ids.DeploySpId })
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        Get-SummaryResult 'Deployment identity' | Should -Be 'MISSING - service principal not found'
+        Get-SummaryResult 'Deployment identity' | Should -Be 'MISSING: the tenant holds no service principal with this client id'
         ($script:Console -join "`n") | Should -Match 'ACTION REQUIRED'
         $script:Writes | Should -HaveCount 0
     }
@@ -1269,7 +1269,7 @@ Context 'Modules and sign-in' {
         Mock Get-MgServicePrincipal { throw (New-ForbiddenException) }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        (Get-SummaryResult 'Deployment identity') | Should -Match '^FAILED - '
+        (Get-SummaryResult 'Deployment identity') | Should -Match '^FAILED: '
     }
 }
 
@@ -1305,12 +1305,12 @@ Context 'Sign-in and preflight' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         $console = $script:Console -join "`n"
-        $console | Should -Match 'still waiting for the Microsoft Graph sign-in \(code WXYZ-1234'
+        $console | Should -Match 'The script still waits for the sign-in to Microsoft Graph\. Code WXYZ-1234'
         $console | Should -Match 'code expired after 2 minutes'
         # Bounded: polled at once and after each of the twelve 10-second waits, never more.
         @($script:TokenRequests | Where-Object { $_.Uri -match '/token$' }).Count | Should -Be 13
         ($script:Sleeps | Measure-Object -Sum).Sum | Should -Be 120
-        $console | Should -Match 'Sign in to Microsoft Graph did not complete - every sign-in method was tried'
+        $console | Should -Match 'The sign-in to Microsoft Graph did not complete\. The script tried three methods'
         Should -Invoke Get-MgServicePrincipal -Times 0
     }
 
@@ -1326,8 +1326,8 @@ Context 'Sign-in and preflight' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $console = $script:Console -join "`n"
-        $console | Should -Match 'sign-in did not complete: AADSTS70020'
-        $console | Should -Match 'Trying the Azure CLI session on this machine instead'
+        $console | Should -Match 'The sign-in to Microsoft Graph did not complete\. AADSTS70020'
+        $console | Should -Match 'The script now tries the Azure CLI session of this workstation'
         Should -Invoke Invoke-NeologikAzureCli -Times 1 -ParameterFilter { ($Arguments -join ' ') -match 'ms-graph' }
         Should -Invoke Invoke-NeologikAzureCli -Times 1 -ParameterFilter { ($Arguments -join ' ') -match 'management\.azure\.com' }
         Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $AccessToken -is [securestring] }
@@ -1339,7 +1339,7 @@ Context 'Sign-in and preflight' {
         $code | Should -Be 0
         Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $UseDeviceCode }
         Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $UseDeviceAuthentication }
-        ($script:Console -join "`n") | Should -Match 'Trying the Microsoft Graph PowerShell device-code prompt'
+        ($script:Console -join "`n") | Should -Match 'The script now tries the device code prompt of Microsoft Graph PowerShell'
     }
 
     It 'stops before the sign-in with ACTION REQUIRED when an endpoint is not reachable' {
@@ -1362,7 +1362,7 @@ Context 'Sign-in and preflight' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         $console = $script:Console -join "`n"
-        $console | Should -Match 'admin@contoso.com does not hold the Global Administrator role \(active\)'
+        $console | Should -Match 'admin@contoso.com does not hold an active Global Administrator role'
         $console | Should -Match 'Privileged Identity Management'
         Should -Invoke Get-MgServicePrincipal -Times 0
         $script:Writes | Should -HaveCount 0
@@ -1370,7 +1370,7 @@ Context 'Sign-in and preflight' {
         $script:Console = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
         $code | Should -Be 0
-        ($script:Console -join "`n") | Should -Match 'verify-only continues'
+        ($script:Console -join "`n") | Should -Match 'The run with -Verify continues'
     }
 
     It 'stops the permission reduction when the signed-in account holds neither Owner nor User Access Administrator' {
@@ -1382,14 +1382,14 @@ Context 'Sign-in and preflight' {
         $console = $script:Console -join "`n"
         $console | Should -Match 'holds neither Owner nor User Access Administrator'
         $console | Should -Match 'Access control \(IAM\)'
-        Get-SummaryResult 'RG role: Contributor' | Should -Be 'SKIPPED - Azure sign-in failed'
+        Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'SKIPPED: the sign-in to Azure failed'
         Should -Invoke New-AzRoleAssignment -Times 0
         Should -Invoke Remove-AzRoleAssignment -Times 0
 
         $script:Console = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
         $code | Should -Be 0
-        ($script:Console -join "`n") | Should -Match 'verify-only continues; the role writes would be refused'
+        ($script:Console -join "`n") | Should -Match 'The run with -Verify continues\. Azure refuses each role assignment'
     }
 
     It 'accepts User Access Administrator inherited from above the subscription' {
@@ -1415,16 +1415,16 @@ Context 'Blueprint short name' {
         $principal.displayName = $app.displayName
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = 'xprd01'; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 0
-        Get-SummaryResult 'Agent blueprint' | Should -Be 'Present'
-        ($script:Console -join "`n") | Should -Match "blueprint name 'Neologik Agent Blueprint - default - xprd01'"
+        Get-SummaryResult 'Agent identity blueprint' | Should -Be 'Present'
+        ($script:Console -join "`n") | Should -Match "Name of the agent identity blueprint: 'Neologik Agent Blueprint - default - xprd01'"
         @($script:Writes | Where-Object { $_ -match 'POST blueprint' }) | Should -HaveCount 0
 
         # A wrong short name given: the owned blueprint is adopted and named, never duplicated.
         $script:Console = @()
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = 'x-prd'; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 0
-        Get-SummaryResult 'Agent blueprint' | Should -Be "Present (adopted 'Neologik Agent Blueprint - default - xprd01')"
-        ($script:Console -join "`n") | Should -Match 'ADOPTED \(owned by the deployment identity'
+        Get-SummaryResult 'Agent identity blueprint' | Should -Be "Present: the script uses 'Neologik Agent Blueprint - default - xprd01'"
+        ($script:Console -join "`n") | Should -Match 'The script uses ''Neologik Agent Blueprint - default - xprd01'''
         @($script:Writes | Where-Object { $_ -match 'POST blueprint' }) | Should -HaveCount 0
         @($script:Tenant.Apps | Where-Object { $_.displayName -like 'Neologik Agent Blueprint - default - *' }) | Should -HaveCount 1
     }
@@ -1438,8 +1438,8 @@ Context 'Blueprint short name' {
         $script:Tenant.Apps += $second
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Overrides @{ SolutionShortName = 'x-prd' }) }
         $code | Should -Be 1
-        (Get-SummaryResult 'Agent blueprint') | Should -Match '^FAILED - several blueprints owned by the deployment identity: .*xprd01.*xprd02'
-        Get-SummaryResult 'Blueprint principal' | Should -Be 'SKIPPED - blueprint not available'
+        (Get-SummaryResult 'Agent identity blueprint') | Should -Match '^FAILED: the deployment identity owns several agent identity blueprints: .*xprd01.*xprd02'
+        Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'SKIPPED: the agent identity blueprint is not available'
         @($script:Writes | Where-Object { $_ -match 'POST blueprint' }) | Should -HaveCount 0
     }
 
@@ -1449,25 +1449,25 @@ Context 'Blueprint short name' {
         $script:Tenant.ServicePrincipals = @($script:Tenant.ServicePrincipals | Where-Object { $_.id -ne $script:Ids.BlueprintSpId })
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
         $code | Should -Be 1
-        Get-SummaryResult 'Agent blueprint' | Should -Be "WOULD CREATE (Neologik Agent Blueprint - default - $($script:ShortName))"
+        Get-SummaryResult 'Agent identity blueprint' | Should -Be "WOULD CREATE: Neologik Agent Blueprint - default - $($script:ShortName)"
         @($script:Writes) | Should -HaveCount 0
     }
 }
 
-Context 'Pre-window run on a compliant environment' {
+Context 'The first run on a compliant environment' {
     It 'records the kit version on the resource group once the reduction is complete, and leaves it when in place' {
         Add-CompliantPreWindowState
         $script:Tenant.ResourceGroupTags = @{ Vendor = 'Neologik' }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Kit version tag' | Should -Be "Set ($script:KitVersion)"
+        Get-SummaryResult 'Onboarding kit version tag' | Should -Be "Set: $script:KitVersion"
         @($script:Writes | Where-Object { $_ -like 'SET tag NeologikOnboardingKit*' }) | Should -HaveCount 1
         $script:Tenant.ResourceGroupTags['NeologikOnboardingKit'] | Should -Be $script:KitVersion
         $script:Tenant.ResourceGroupTags['Vendor'] | Should -Be 'Neologik' -Because 'the tag is merged, never replacing the others'
         $script:Writes = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Kit version tag' | Should -Be "In place ($script:KitVersion)"
+        Get-SummaryResult 'Onboarding kit version tag' | Should -Be "Already set: $script:KitVersion"
         $script:Writes | Should -HaveCount 0
     }
 
@@ -1476,7 +1476,7 @@ Context 'Pre-window run on a compliant environment' {
         $script:Tenant.ResourceGroupTags = @{ NeologikOnboardingKit = 'v5.0.1' }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
         $code | Should -Be 1 -Because 'a pending change needs attention'
-        Get-SummaryResult 'Kit version tag' | Should -Match '^WOULD SET'
+        Get-SummaryResult 'Onboarding kit version tag' | Should -Match '^WOULD SET'
         $script:Writes | Should -HaveCount 0
         $script:Tenant.ResourceGroupTags['NeologikOnboardingKit'] | Should -Be 'v5.0.1'
     }
@@ -1494,24 +1494,24 @@ Context 'Pre-window run on a compliant environment' {
         $script:Writes | Should -HaveCount 0
         $script:Summary | Should -Not -BeNullOrEmpty
         @($script:Summary | Where-Object { $_.Result -match $script:AttentionPattern }) | Should -HaveCount 0
-        Get-SummaryResult 'Agent blueprint' | Should -Be 'Present'
-        Get-SummaryResult 'Blueprint owner' | Should -Be 'Already in place'
-        Get-SummaryResult 'Blueprint principal' | Should -Be 'Present'
-        Get-SummaryResult 'Blueprint principal owner' | Should -Be 'Already in place'
-        Get-SummaryResult 'Blueprint principal role: AgentIdUser.ReadWrite.IdentityParentedBy' | Should -Be 'Already granted'
-        Get-SummaryResult 'Blueprint credential: github-oidc-neo-env-config' | Should -Be 'Present'
-        Get-SummaryResult 'Graph role: Application.ReadWrite.OwnedBy' | Should -Be 'Already granted'
-        Get-SummaryResult 'Retired Graph role: Group.Create' | Should -Be 'Not held'
-        Get-SummaryResult 'NCE group assignment' | Should -Be 'Already assigned'
-        Get-SummaryResult 'Admin consent' | Should -Be 'Present'
-        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'Not checked - runs with the agent grants file'
-        Get-SummaryResult 'RG role: Contributor' | Should -Be 'Already in place'
-        Get-SummaryResult 'subscription role: Cost Management Contributor' | Should -Be 'Already in place'
-        Get-SummaryResult 'Legacy subscription role: Contributor' | Should -Be 'Not present'
+        Get-SummaryResult 'Agent identity blueprint' | Should -Be 'Present'
+        Get-SummaryResult 'Agent identity blueprint owner' | Should -Be 'Already an owner'
+        Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'Present'
+        Get-SummaryResult 'Agent identity blueprint service principal owner' | Should -Be 'Already an owner'
+        Get-SummaryResult 'Agent identity blueprint service principal permission: AgentIdUser.ReadWrite.IdentityParentedBy' | Should -Be 'Already granted'
+        Get-SummaryResult 'Agent identity blueprint credential: github-oidc-neo-env-config' | Should -Be 'Present'
+        Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Already granted'
+        Get-SummaryResult 'Deployment identity permission to remove: Group.Create' | Should -Be 'Not held'
+        Get-SummaryResult 'User group assignment' | Should -Be 'Already assigned'
+        Get-SummaryResult 'Administrator consent' | Should -Be 'Present'
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'Not checked. The later run with -AgentGrantsFile makes the check'
+        Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Already assigned'
+        Get-SummaryResult 'Subscription role: Cost Management Contributor' | Should -Be 'Already assigned'
+        Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'Not held'
         Get-SummaryResult 'Application Administrator role' | Should -Be 'Not held'
         Should -Invoke Connect-AzAccount -Times 1
-        ($script:Console -join "`n") | Should -Match 'pre-window run'
-        ($script:Console -join "`n") | Should -Match 'Pre-window run complete'
+        ($script:Console -join "`n") | Should -Match 'first run'
+        ($script:Console -join "`n") | Should -Match 'The first run is complete'
     }
 
     It 'checks the Sites.Selected consent when the configuration file records SharePoint ingestion' {
@@ -1554,19 +1554,19 @@ Context 'Pre-window run on a compliant environment' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         @(Get-ChildItem -Path $second -Filter '*.json') | Should -HaveCount 1
-        ($script:Console -join "`n") | Should -Match 'trying the next location'
+        ($script:Console -join "`n") | Should -Match 'The script tries the next folder'
     }
 
     It 'takes the short name from -SolutionShortName when no configuration file is given' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 0
-        Get-SummaryResult 'Agent blueprint' | Should -Be 'Present'
-        ($script:Console -join "`n") | Should -Match "short name '$($script:ShortName)' from -SolutionShortName"
+        Get-SummaryResult 'Agent identity blueprint' | Should -Be 'Present'
+        ($script:Console -join "`n") | Should -Match "Short name '$($script:ShortName)' from -SolutionShortName"
         $script:Writes | Should -HaveCount 0
     }
 
-    It 'refuses the pre-window run without a short name rather than guessing it from a display name' {
+    It 'refuses the first run without a short name rather than guessing it from a display name' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 1
@@ -1579,11 +1579,11 @@ Context 'Pre-window run on a compliant environment' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 1
-        Get-SummaryResult 'NCE group assignment' | Should -Be 'SKIPPED - ids not supplied'
-        Get-SummaryResult 'Admin consent' | Should -BeNullOrEmpty
+        Get-SummaryResult 'User group assignment' | Should -Be 'SKIPPED: the command gives no SignInAppClientId or no NceUserGroupId'
+        Get-SummaryResult 'Administrator consent' | Should -BeNullOrEmpty
     }
 
-    It 'refuses the pre-window run without the sign-in app client id or the solution name' {
+    It 'refuses the first run without the sign-in app client id or the solution name' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SolutionName = $script:SolutionName; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 1
@@ -1607,7 +1607,7 @@ Context 'Pre-window run on a compliant environment' {
     }
 }
 
-Context 'Pre-window run on an environment with missing state' {
+Context 'The first run on an environment with missing state' {
     It 'performs the directory checks and then the guarded permission reduction, in that order' {
         Add-CompliantPreWindowState
         $deploy = Get-FakeSp -Id $script:Ids.DeploySpId
@@ -1618,10 +1618,10 @@ Context 'Pre-window run on an environment with missing state' {
         Add-LegacyAzureState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Graph role: Application.ReadWrite.OwnedBy' | Should -Be 'Granted'
-        Get-SummaryResult 'Retired Graph role: Application.Read.All' | Should -Be 'Removed'
-        Get-SummaryResult 'RG role: Contributor' | Should -Be 'Created'
-        Get-SummaryResult 'Legacy subscription role: User Access Administrator' | Should -Be 'Removed'
+        Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Granted'
+        Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -Be 'Removed'
+        Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Assigned'
+        Get-SummaryResult 'Subscription role to remove: User Access Administrator' | Should -Be 'Removed'
         Get-SummaryResult 'Application Administrator role' | Should -Be 'Removed'
         $kinds = @($script:Writes | ForEach-Object {
                 if ($_ -like 'NEW approle*') { 'graph-grant' }
@@ -1644,12 +1644,12 @@ Context 'Pre-window run on an environment with missing state' {
         $script:Tenant.PrincipalCreateDelays = 2
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Agent blueprint' | Should -Be 'Created'
-        Get-SummaryResult 'Blueprint owner' | Should -Be 'Already in place' -Because 'owners@odata.bind set the deployment identity at creation'
-        Get-SummaryResult 'Blueprint principal' | Should -Be 'Created'
-        Get-SummaryResult 'Blueprint principal owner' | Should -Be 'Added'
-        Get-SummaryResult 'Blueprint principal role: AgentIdUser.ReadWrite.IdentityParentedBy' | Should -Be 'Granted'
-        Get-SummaryResult 'Blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'Added'
+        Get-SummaryResult 'Agent identity blueprint' | Should -Be 'Created'
+        Get-SummaryResult 'Agent identity blueprint owner' | Should -Be 'Already an owner' -Because 'owners@odata.bind set the deployment identity at creation'
+        Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'Created'
+        Get-SummaryResult 'Agent identity blueprint service principal owner' | Should -Be 'Added'
+        Get-SummaryResult 'Agent identity blueprint service principal permission: AgentIdUser.ReadWrite.IdentityParentedBy' | Should -Be 'Granted'
+        Get-SummaryResult 'Agent identity blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'Added'
         @($script:Writes | Where-Object { $_ -like 'POST credential*' }) | Should -HaveCount 3
         @($script:Sleeps | Where-Object { $_ -eq 15 }) | Should -HaveCount 2 -Because 'the principal create is retried while the blueprint replicates'
         $blueprintApp = @($script:Tenant.Apps | Where-Object { $_.displayName -like 'Neologik Agent Blueprint*' })[0]
@@ -1661,7 +1661,7 @@ Context 'Pre-window run on an environment with missing state' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $script:Writes | Should -HaveCount 0
-        Get-SummaryResult 'Blueprint principal' | Should -Be 'Present'
+        Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'Present'
     }
 
     It 'adopts a pipeline-created blueprint the deployment identity does not own yet' {
@@ -1673,10 +1673,10 @@ Context 'Pre-window run on an environment with missing state' {
         $app.credentials = @('github-oidc-neo-infrastructure')
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Blueprint owner' | Should -Be 'Added'
-        Get-SummaryResult 'Blueprint principal owner' | Should -Be 'Added'
-        Get-SummaryResult 'Blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'Present'
-        Get-SummaryResult 'Blueprint credential: github-oidc-neo-bot-service' | Should -Be 'Added'
+        Get-SummaryResult 'Agent identity blueprint owner' | Should -Be 'Added'
+        Get-SummaryResult 'Agent identity blueprint service principal owner' | Should -Be 'Added'
+        Get-SummaryResult 'Agent identity blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'Present'
+        Get-SummaryResult 'Agent identity blueprint credential: github-oidc-neo-bot-service' | Should -Be 'Added'
         $app.owners | Should -Contain $script:Ids.DeploySpId
         $principal.owners | Should -Contain $script:Ids.DeploySpId
         @($script:Writes) | Should -HaveCount 4
@@ -1689,11 +1689,11 @@ Context 'Pre-window run on an environment with missing state' {
         foreach ($roleName in @('Application.Read.All', 'AgentIdentity.Create.All', 'Group.Create')) { Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName $roleName }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Graph role: Application.ReadWrite.OwnedBy' | Should -Be 'Granted'
-        Get-SummaryResult 'Graph role: AgentIdentityBlueprint.AddRemoveCreds.All' | Should -Be 'Granted'
-        Get-SummaryResult 'Retired Graph role: Application.Read.All' | Should -Be 'Removed'
-        Get-SummaryResult 'Retired Graph role: Group.Create' | Should -Be 'Removed'
-        Get-SummaryResult 'Retired Graph role: AgentIdUser.ReadWrite.All' | Should -Be 'Not held'
+        Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Granted'
+        Get-SummaryResult 'Deployment identity permission: AgentIdentityBlueprint.AddRemoveCreds.All' | Should -Be 'Granted'
+        Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -Be 'Removed'
+        Get-SummaryResult 'Deployment identity permission to remove: Group.Create' | Should -Be 'Removed'
+        Get-SummaryResult 'Deployment identity permission to remove: AgentIdUser.ReadWrite.All' | Should -Be 'Not held'
         $roleWrites = @($script:Writes | Where-Object { $_ -match "approle $($script:Ids.DeploySpId)" })
         $roleWrites | Should -HaveCount 5
         $roleWrites[0] | Should -Match '^NEW'
@@ -1712,8 +1712,8 @@ Context 'Pre-window run on an environment with missing state' {
         Mock New-MgServicePrincipalAppRoleAssignment { throw (New-ForbiddenException) }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        (Get-SummaryResult 'Graph role: Application.ReadWrite.OwnedBy') | Should -Match '^FAILED - insufficient privileges'
-        Get-SummaryResult 'Retired Graph role: Application.Read.All' | Should -Be 'SKIPPED - retained roles not all granted'
+        (Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy') | Should -Match '^FAILED: insufficient privileges'
+        Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -Be 'SKIPPED: the deployment identity does not hold both permissions that the deployment identity keeps'
         Should -Invoke Remove-MgServicePrincipalAppRoleAssignment -Times 0
         (Get-FakeSp -Id $script:Ids.DeploySpId).appRoleAssignments | Should -HaveCount 1
     }
@@ -1724,8 +1724,8 @@ Context 'Pre-window run on an environment with missing state' {
         try {
             $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
             $code | Should -Be 1
-            Get-SummaryResult 'Graph role: AgentIdentityBlueprint.AddRemoveCreds.All' | Should -Be 'NOT FOUND - report'
-            Get-SummaryResult 'Admin consent' | Should -Be 'Present'
+            Get-SummaryResult 'Deployment identity permission: AgentIdentityBlueprint.AddRemoveCreds.All' | Should -Be 'NOT FOUND: report to Neologik'
+            Get-SummaryResult 'Administrator consent' | Should -Be 'Present'
         }
         finally {
             $script:AppRoleIds['AgentIdentityBlueprint.AddRemoveCreds.All'] = [guid]::NewGuid().ToString()
@@ -1738,7 +1738,7 @@ Context 'Pre-window run on an environment with missing state' {
         $group.appRoleAssignments = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'NCE group assignment' | Should -Be 'Assigned'
+        Get-SummaryResult 'User group assignment' | Should -Be 'Assigned'
         Should -Invoke New-MgGroupAppRoleAssignment -Times 1 -ParameterFilter { $GroupId -eq $script:Ids.Group -and $PrincipalId -eq $script:Ids.Group -and $ResourceId -eq $script:Ids.SignInSpId -and $AppRoleId -eq '00000000-0000-0000-0000-000000000000' }
         $script:Writes | Should -HaveCount 1
     }
@@ -1757,15 +1757,15 @@ Context 'Pre-window run on an environment with missing state' {
         # an id no object in the fake tenant carries
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Overrides @{ SecurityGroups = @(@{ Name = "Neologik NCE User Group - $script:ShortName"; Id = '55555555-ffff-5555-5555-555555555555' }) }) }
         $code | Should -Be 1
-        Get-SummaryResult 'NCE group assignment' | Should -Be 'MISSING - group not found (check the id)'
-        Get-SummaryResult 'Admin consent' | Should -Be 'Present'
+        Get-SummaryResult 'User group assignment' | Should -Be 'MISSING: the tenant holds no group with this id. Check the value of -NceUserGroupId'
+        Get-SummaryResult 'Administrator consent' | Should -Be 'Present'
         $script:Tenant = New-EmptyTenant
         Add-CompliantPreWindowState
         $script:Tenant.ServicePrincipals = @($script:Tenant.ServicePrincipals | Where-Object { $_.id -ne $script:Ids.SignInSpId })
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        Get-SummaryResult 'NCE group assignment' | Should -Be 'MISSING - sign-in application not found'
-        Get-SummaryResult 'Admin consent' | Should -Be 'SKIPPED - sign-in application not found'
+        Get-SummaryResult 'User group assignment' | Should -Be 'MISSING: the tenant holds no Platform Sign-in application with this client id'
+        Get-SummaryResult 'Administrator consent' | Should -Be 'SKIPPED: the tenant holds no Platform Sign-in application with this client id'
     }
 
     It 'prints the consent URL when tenant-wide admin consent is missing' {
@@ -1773,7 +1773,7 @@ Context 'Pre-window run on an environment with missing state' {
         (Get-FakeSp -Id $script:Ids.SignInSpId).grants = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        Get-SummaryResult 'Admin consent' | Should -Be 'MISSING - consent URL printed'
+        Get-SummaryResult 'Administrator consent' | Should -Be 'MISSING: the script printed the consent address'
         ($script:Console -join "`n") | Should -Match "https://login.microsoftonline.com/$($script:Ids.Tenant)/adminconsent\?client_id=$($script:Ids.SignInAppId)"
         $script:Writes | Should -HaveCount 0
     }
@@ -1783,7 +1783,7 @@ Context 'Pre-window run on an environment with missing state' {
         (Get-FakeSp -Id $script:Ids.SignInSpId).grants = @(@{ id = 'p'; clientId = $script:Ids.SignInSpId; consentType = 'Principal'; principalId = $script:Ids.Me; resourceId = $script:Ids.GraphSpId; scope = 'User.Read' })
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        Get-SummaryResult 'Admin consent' | Should -Be 'MISSING - consent URL printed'
+        Get-SummaryResult 'Administrator consent' | Should -Be 'MISSING: the script printed the consent address'
     }
 
     It 'continues past a blueprint failure and records the dependents as skipped' {
@@ -1791,10 +1791,10 @@ Context 'Pre-window run on an environment with missing state' {
         $script:Faults += @{ Match = 'GET /applications$'; Status = 403; Code = 'Authorization_RequestDenied'; Message = 'Insufficient privileges'; Remaining = 1 }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        (Get-SummaryResult 'Agent blueprint') | Should -Match '^FAILED - insufficient privileges'
-        Get-SummaryResult 'Blueprint principal' | Should -Be 'SKIPPED - blueprint not available'
-        Get-SummaryResult 'Graph role: Application.ReadWrite.OwnedBy' | Should -Be 'Already granted'
-        Get-SummaryResult 'Admin consent' | Should -Be 'Present'
+        (Get-SummaryResult 'Agent identity blueprint') | Should -Match '^FAILED: insufficient privileges'
+        Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'SKIPPED: the agent identity blueprint is not available'
+        Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Already granted'
+        Get-SummaryResult 'Administrator consent' | Should -Be 'Present'
     }
 }
 
@@ -1803,12 +1803,12 @@ Context 'Platform app ownership' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' owner" | Should -Be 'Already in place'
-        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' principal owner" | Should -Be 'Already in place'
-        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' uniqueName" | Should -Be 'Already in place'
-        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' credentials" | Should -Be 'None foreign'
-        Get-SummaryResult 'Platform app: SharePoint registration' | Should -Match '^Not listed'
-        Get-SummaryResult 'Platform apps: bot registrations' | Should -Match '^None listed'
+        Get-SummaryResult "Registration 'Neologik Platform Sign-in - $script:ShortName' owner" | Should -Be 'Already an owner'
+        Get-SummaryResult "Registration 'Neologik Platform Sign-in - $script:ShortName' service principal owner" | Should -Be 'Already an owner'
+        Get-SummaryResult "Registration 'Neologik Platform Sign-in - $script:ShortName' unique name" | Should -Be 'Already set'
+        Get-SummaryResult "Registration 'Neologik Platform Sign-in - $script:ShortName' client secrets" | Should -Be 'None from another source'
+        Get-SummaryResult 'SharePoint application registration' | Should -Match '^Not listed'
+        Get-SummaryResult 'Agent registrations' | Should -Match '^None listed'
         $script:Writes | Should -HaveCount 0
     }
 
@@ -1832,9 +1832,9 @@ Context 'Platform app ownership' {
         $t.ServicePrincipals += $spPrincipal
         # An agent registration named by hand, listed by client id, with a secret
         # the deployment did not create and will remove.
-        $bot = New-FakeApp -Id 'bot-obj' -AppId $botAppId -DisplayName 'ABC Chat Bot'
+        $bot = New-FakeApp -Id 'bot-obj' -AppId $botAppId -DisplayName 'ABC Chat Agent'
         $bot.owners = @($script:Ids.Me)
-        $bot.passwordCredentials = @(@{ displayName = 'legacy-manual' })
+        $bot.passwordCredentials = @(@{ displayName = 'manual-secret' })
         $t.Apps += $bot
         $t.ServicePrincipals += (New-FakeSp -Id 'bot-sp' -AppId $botAppId -DisplayName $bot.displayName)
         # Registrations named for the platform but NOT listed: reported, never touched.
@@ -1854,13 +1854,13 @@ Context 'Platform app ownership' {
         (Get-FakeSp -Id 'bot-sp').owners | Should -Contain $script:Ids.DeploySpId
         $lookalike.owners | Should -HaveCount 0
         (Get-FakeApp -Id 'other-obj').owners | Should -HaveCount 0
-        Get-SummaryResult "App 'Neologik SharePoint Access - $script:ShortName' credentials" | Should -Match '^Review - 1 credential\(s\) not minted by the deployment \(power-automate\)'
-        Get-SummaryResult "App 'ABC Chat Bot' credentials" | Should -Match '^PENDING - 1 credential\(s\) not minted by the deployment \(legacy-manual\)'
-        Get-SummaryResult "App 'ABC Chat Bot' uniqueName" | Should -Match '^Not required'
-        Get-SummaryResult "Platform apps: unlisted 'Neologik Integration - $script:ShortName'" | Should -Match '^Review - c3c3c3c3-0000-4000-8000-000000000003 is not on the list and was not touched'
-        Get-SummaryResult "Platform apps: unlisted 'Neologik - ide - otherenv'" | Should -Match '^Review - '
-        Get-SummaryResult 'Platform apps: bot registrations' | Should -BeNullOrEmpty
-        ($script:Console -join "`n") | Should -Match 'removes every credential on this app'
+        Get-SummaryResult "Registration 'Neologik SharePoint Access - $script:ShortName' client secrets" | Should -Match '^Review: 1 client secret\(s\) that the deployment did not create: power-automate'
+        Get-SummaryResult "Registration 'ABC Chat Agent' client secrets" | Should -Match '^PENDING: 1 client secret\(s\) that the deployment did not create: manual-secret'
+        Get-SummaryResult "Registration 'ABC Chat Agent' unique name" | Should -Match '^Not required'
+        Get-SummaryResult "Registration not on the list: 'Neologik Integration - $script:ShortName'" | Should -Match '^Review: the command does not name c3c3c3c3-0000-4000-8000-000000000003\. The script did not change the application registration'
+        Get-SummaryResult "Registration not on the list: 'Neologik - ide - otherenv'" | Should -Match '^Review: '
+        Get-SummaryResult 'Agent registrations' | Should -BeNullOrEmpty
+        ($script:Console -join "`n") | Should -Match 'removes every client secret of this application registration'
         @($script:Writes | Where-Object { $_ -match 'look-obj|other-obj' }) | Should -HaveCount 0
 
         # Second run: everything already in place; the secret still needs attention.
@@ -1869,16 +1869,16 @@ Context 'Platform app ownership' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); SharePointAppClientId = $spAppId; BotAppClientIds = @($botAppId) }
         $code | Should -Be 1
         $script:Writes | Should -HaveCount 0
-        Get-SummaryResult "App 'Neologik SharePoint Access - $script:ShortName' owner" | Should -Be 'Already in place'
-        Get-SummaryResult "App 'Neologik SharePoint Access - $script:ShortName' uniqueName" | Should -Be 'Already in place'
-        Get-SummaryResult "App 'ABC Chat Bot' owner" | Should -Be 'Already in place'
+        Get-SummaryResult "Registration 'Neologik SharePoint Access - $script:ShortName' owner" | Should -Be 'Already an owner'
+        Get-SummaryResult "Registration 'Neologik SharePoint Access - $script:ShortName' unique name" | Should -Be 'Already set'
+        Get-SummaryResult "Registration 'ABC Chat Agent' owner" | Should -Be 'Already an owner'
     }
 
     It 'accepts the bot ids as one comma-separated value and fails a listed id that is not in this tenant' {
         Add-CompliantPreWindowState
         $botAppId = 'b2b2b2b2-0000-4000-8000-000000000002'
         $missingId = 'd5d5d5d5-0000-4000-8000-000000000005'
-        $bot = New-FakeApp -Id 'bot-obj' -AppId $botAppId -DisplayName 'ABC Chat Bot'
+        $bot = New-FakeApp -Id 'bot-obj' -AppId $botAppId -DisplayName 'ABC Chat Agent'
         $bot.owners = @($script:Ids.DeploySpId)
         $script:Tenant.Apps += $bot
         $botSp = New-FakeSp -Id 'bot-sp' -AppId $botAppId -DisplayName $bot.displayName
@@ -1886,8 +1886,8 @@ Context 'Platform app ownership' {
         $script:Tenant.ServicePrincipals += $botSp
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); BotAppClientIds = @("$botAppId,$missingId") }
         $code | Should -Be 1
-        Get-SummaryResult "App 'ABC Chat Bot' owner" | Should -Be 'Already in place'
-        Get-SummaryResult "Platform app: bot registration $missingId" | Should -Match '^NOT FOUND - not registered in this tenant'
+        Get-SummaryResult "Registration 'ABC Chat Agent' owner" | Should -Be 'Already an owner'
+        Get-SummaryResult "Agent registration $missingId" | Should -Match '^NOT FOUND: this tenant holds no application registration with this client id'
         $script:Writes | Should -HaveCount 0
     }
 
@@ -1898,8 +1898,8 @@ Context 'Platform app ownership' {
         $signIn.uniqueName = ''
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
         $code | Should -Be 1
-        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' owner" | Should -Be 'WOULD ADD'
-        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' uniqueName" | Should -Be "WOULD SET sp-admin-$script:SolutionName"
+        Get-SummaryResult "Registration 'Neologik Platform Sign-in - $script:ShortName' owner" | Should -Be 'WOULD ADD'
+        Get-SummaryResult "Registration 'Neologik Platform Sign-in - $script:ShortName' unique name" | Should -Be "WOULD SET sp-admin-$script:SolutionName"
         $script:Writes | Should -HaveCount 0
         $signIn.owners | Should -Not -Contain $script:Ids.DeploySpId
     }
@@ -1910,7 +1910,7 @@ Context 'Platform app ownership' {
         $signIn.uniqueName = 'sp-admin-something-else'
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        Get-SummaryResult "App 'Neologik Platform Sign-in - $script:ShortName' uniqueName" | Should -Match "^FAILED - 'sp-admin-something-else' differs from the deployment's 'sp-admin-$script:SolutionName'"
+        Get-SummaryResult "Registration 'Neologik Platform Sign-in - $script:ShortName' unique name" | Should -Match "^FAILED: the unique name is 'sp-admin-something-else'\. The deployment expects 'sp-admin-$script:SolutionName'"
 
         $signIn.uniqueName = ''
         $script:Summary = @()
@@ -1926,11 +1926,11 @@ Context 'Platform app ownership' {
         $script:Tenant.Apps = @($script:Tenant.Apps | Where-Object { $_.id -ne $script:Ids.SignInAppObj })
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        Get-SummaryResult 'Platform app: sign-in registration' | Should -Match '^NOT FOUND - not registered in this tenant'
+        Get-SummaryResult 'Platform Sign-in application registration' | Should -Match '^NOT FOUND: this tenant holds no application registration with this client id'
     }
 }
 
-Context 'Post-window run: agent grants file (step 5)' {
+Context 'The later run: agent grants file (step 5)' {
     It 'touches nothing else: no blueprint, no roles, no group assignment, no reduction' {
         # A tenant where every item of the first run is absent or no longer needed.
         Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.Read.All'
@@ -1939,20 +1939,20 @@ Context 'Post-window run: agent grants file (step 5)' {
         $grants = New-GrantsFile -Grants @((New-AgentGrantEntry -Scopes @('User.Read')))
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
         $code | Should -Be 0
-        Get-SummaryResult 'Agent-user grant: agent Support Agent' | Should -Be 'Granted (User.Read)'
+        Get-SummaryResult 'Grant to agent user: agent Support Agent' | Should -Be 'Granted: User.Read'
         $script:Writes | Should -HaveCount 1
         $script:Writes[0] | Should -BeLike 'POST grant*'
-        foreach ($item in @('Agent blueprint', 'Graph role: Application.ReadWrite.OwnedBy', 'Retired Graph role: Application.Read.All', 'NCE group assignment',
-                'Admin consent', 'RG role: Contributor', 'Legacy subscription role: Contributor', 'Application Administrator role')) {
-            Get-SummaryResult $item | Should -BeNullOrEmpty -Because "the post-window run must not touch '$item'"
+        foreach ($item in @('Agent identity blueprint', 'Deployment identity permission: Application.ReadWrite.OwnedBy', 'Deployment identity permission to remove: Application.Read.All', 'User group assignment',
+                'Administrator consent', 'Resource group role: Contributor', 'Subscription role to remove: Contributor', 'Application Administrator role')) {
+            Get-SummaryResult $item | Should -BeNullOrEmpty -Because "the later run must not touch '$item'"
         }
         Should -Invoke Connect-AzAccount -Times 0
         Should -Invoke Connect-ExchangeOnline -Times 0
         @($script:Tenant.Apps | Where-Object { $_.displayName -like 'Neologik Agent Blueprint*' }) | Should -HaveCount 0
         (Get-FakeSp -Id $script:Ids.DeploySpId).appRoleAssignments | Should -HaveCount 1
         @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
-        ($script:Console -join "`n") | Should -Match 'post-window run'
-        ($script:Console -join "`n") | Should -Match 'Post-window run complete'
+        ($script:Console -join "`n") | Should -Match 'later run'
+        ($script:Console -join "`n") | Should -Match 'The later run is complete'
     }
 
     It 'does nothing beyond the SharePoint marker for a file with no entries' {
@@ -1960,14 +1960,14 @@ Context 'Post-window run: agent grants file (step 5)' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
         $code | Should -Be 0
         Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'Not needed'
-        @($script:Summary | Where-Object { $_.Item -like 'Agent-user grant:*' }) | Should -HaveCount 0
+        @($script:Summary | Where-Object { $_.Item -like 'Grant to agent user:*' }) | Should -HaveCount 0
         $script:Writes | Should -HaveCount 0
     }
 
     It 'surfaces export warnings from the file' {
         $grants = New-GrantsFile -Grants @() -Warnings @('apps not enumerated: registry unavailable')
         $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
-        ($script:Console -join "`n") | Should -Match 'export warning: apps not enumerated'
+        ($script:Console -join "`n") | Should -Match 'Warning in the agent grants file: apps not enumerated'
     }
 
     It 'verifies an existing grant with the same scope set in any order' {
@@ -1975,7 +1975,7 @@ Context 'Post-window run: agent grants file (step 5)' {
         $grants = New-GrantsFile -Grants @((New-AgentGrantEntry -Scopes @('User.Read', 'Sites.ReadWrite.All')))
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
         $code | Should -Be 0
-        Get-SummaryResult 'Agent-user grant: agent Support Agent' | Should -Be 'Already granted'
+        Get-SummaryResult 'Grant to agent user: agent Support Agent' | Should -Be 'Already granted'
         $script:Writes | Should -HaveCount 0
     }
 
@@ -1984,7 +1984,7 @@ Context 'Post-window run: agent grants file (step 5)' {
         $grants = New-GrantsFile -Grants @((New-AgentGrantEntry -Scopes @('User.Read', 'Mail.Read')))
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
         $code | Should -Be 0
-        Get-SummaryResult 'Agent-user grant: agent Support Agent' | Should -Be 'Granted (Mail.Read User.Read)'
+        Get-SummaryResult 'Grant to agent user: agent Support Agent' | Should -Be 'Granted: Mail.Read User.Read'
         @($script:Writes | Where-Object { $_ -like 'POST grant*' }) | Should -HaveCount 1
         $created = @((Get-FakeSp -Id $script:Ids.AgentIdentitySp).grants)[0]
         $created.principalId | Should -Be $script:Ids.AgentUser
@@ -1995,7 +1995,7 @@ Context 'Post-window run: agent grants file (step 5)' {
         $grants = New-GrantsFile -Grants @((New-AgentGrantEntry -Scopes @('User.Read', 'Mail.Read', 'Calendars.Read')))
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
         $code | Should -Be 0
-        Get-SummaryResult 'Agent-user grant: agent Support Agent' | Should -Be 'Updated (Calendars.Read Mail.Read User.Read)'
+        Get-SummaryResult 'Grant to agent user: agent Support Agent' | Should -Be 'Updated: Calendars.Read Mail.Read User.Read'
         @($script:Writes | Where-Object { $_ -like 'PATCH grant*' }) | Should -HaveCount 1
         @((Get-FakeSp -Id $script:Ids.AgentIdentitySp).grants) | Should -HaveCount 1
     }
@@ -2023,10 +2023,10 @@ Context 'Post-window run: agent grants file (step 5)' {
         $grants = New-GrantsFile -Grants $entries
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
         $code | Should -Be 1
-        Get-SummaryResult 'Agent-user grant: agent Support Agent' | Should -Be 'Already granted'
-        Get-SummaryResult 'Agent-user grant: app Reference App' | Should -Be 'Updated (Mail.Read Mail.Send User.Read)'
-        Get-SummaryResult 'Agent-user grant: app MS Planner' | Should -Be 'SKIPPED - identity not stamped'
-        Get-SummaryResult "Agent-user grant: agent O'Brien Agent" | Should -Be 'MISSING - agent identity not found'
+        Get-SummaryResult 'Grant to agent user: agent Support Agent' | Should -Be 'Already granted'
+        Get-SummaryResult 'Grant to agent user: app Reference App' | Should -Be 'Updated: Mail.Read Mail.Send User.Read'
+        Get-SummaryResult 'Grant to agent user: app MS Planner' | Should -Be 'SKIPPED: the agent grants file marks the entry as not ready'
+        Get-SummaryResult "Grant to agent user: agent O'Brien Agent" | Should -Be 'MISSING: the tenant holds no agent identity with this client id'
         $script:Writes | Should -HaveCount 1
     }
 
@@ -2036,9 +2036,9 @@ Context 'Post-window run: agent grants file (step 5)' {
         $grants = New-GrantsFile -Grants @((New-AgentGrantEntry -Scopes @('User.Read', 'Mail.Read', 'Sites.ReadWrite.All')))
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
         $code | Should -Be 0
-        Get-SummaryResult 'Agent-user grant: agent Support Agent' | Should -Be 'Granted (Mail.Read Sites.ReadWrite.All User.Read)'
+        Get-SummaryResult 'Grant to agent user: agent Support Agent' | Should -Be 'Granted: Mail.Read Sites.ReadWrite.All User.Read'
         @($script:Writes | Where-Object { $_ -like 'POST grant*' }) | Should -HaveCount 1
-        ($script:Console -join "`n") | Should -Match 'attempt 2 refused'
+        ($script:Console -join "`n") | Should -Match 'Attempt 2: Microsoft Entra ID refused'
     }
 
     It 'reports PENDING when every rotation is refused' {
@@ -2047,7 +2047,7 @@ Context 'Post-window run: agent grants file (step 5)' {
         $grants = New-GrantsFile -Grants @((New-AgentGrantEntry -Scopes @('User.Read', 'Mail.Read')))
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
         $code | Should -Be 1
-        Get-SummaryResult 'Agent-user grant: agent Support Agent' | Should -Be 'PENDING - scope refused, report'
+        Get-SummaryResult 'Grant to agent user: agent Support Agent' | Should -Be 'PENDING: Microsoft Entra ID refused the permissions. Report to Neologik'
     }
 
     It 'stops retrying on a privilege refusal and names the missing permission' {
@@ -2056,7 +2056,7 @@ Context 'Post-window run: agent grants file (step 5)' {
         $grants = New-GrantsFile -Grants @((New-AgentGrantEntry -Scopes @('User.Read')))
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
         $code | Should -Be 1
-        (Get-SummaryResult 'Agent-user grant: agent Support Agent') | Should -Match '^FAILED - insufficient privileges'
+        (Get-SummaryResult 'Grant to agent user: agent Support Agent') | Should -Match '^FAILED: insufficient privileges'
         @($script:GraphCalls | Where-Object { $_ -eq 'POST /oauth2PermissionGrants' }) | Should -HaveCount 1
     }
 
@@ -2072,16 +2072,16 @@ Context 'Post-window run: agent grants file (step 5)' {
         $grants = New-GrantsFile -Grants @() -ComponentRoles $roles
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
         $code | Should -Be 1
-        Get-SummaryResult 'Component refapp role: User.Read.All' | Should -Be 'Granted'
-        Get-SummaryResult 'Component role: refapp Mail.Read' | Should -Be 'SKIPPED - mailbox-scoped, administrator grants per resource'
-        Get-SummaryResult 'Component role: refapp Application Mail.Read' | Should -Be 'SKIPPED - exchange role'
-        Get-SummaryResult 'Component role: other User.Read.All' | Should -Be 'MISSING - identity not found'
-        Get-SummaryResult 'Component role: broken ' | Should -Be 'SKIPPED - incomplete entry in the grants file'
+        Get-SummaryResult 'App refapp permission: User.Read.All' | Should -Be 'Granted'
+        Get-SummaryResult 'App refapp permission: Mail.Read' | Should -Be 'SKIPPED: the permission is limited to one mailbox. An administrator grants the permission in Exchange Online or in SharePoint'
+        Get-SummaryResult 'App refapp permission: Application Mail.Read' | Should -Be 'SKIPPED: the role belongs to exchange, not to Microsoft Graph'
+        Get-SummaryResult 'App other permission: User.Read.All' | Should -Be 'MISSING: the tenant holds no workload identity with this name'
+        Get-SummaryResult 'App broken permission: ' | Should -Be 'SKIPPED: the entry in the agent grants file is incomplete'
         @($script:Writes | Where-Object { $_ -like "NEW approle $($script:Ids.ComponentSpId)*" }) | Should -HaveCount 1
         # Second run: the component role is already there.
         $script:Writes = @()
         $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
-        Get-SummaryResult 'Component refapp role: User.Read.All' | Should -Be 'Already granted'
+        Get-SummaryResult 'App refapp permission: User.Read.All' | Should -Be 'Already granted'
         $script:Writes | Should -HaveCount 0
     }
 
@@ -2099,7 +2099,7 @@ Context 'Post-window run: agent grants file (step 5)' {
         $grants = New-GrantsFile -Grants @() -SharePoint $true
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
         $code | Should -Be 1
-        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'MISSING - consent URL printed'
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'MISSING: the script printed the consent address'
         ($script:Console -join "`n") | Should -Match "adminconsent\?client_id=$($script:Ids.SharePointAppId)"
     }
 
@@ -2113,23 +2113,23 @@ Context 'Post-window run: agent grants file (step 5)' {
         $script:Tenant.ServicePrincipals += New-FakeSp -Id $script:Ids.SharePoint2SpId -AppId $script:Ids.SharePoint2AppId -DisplayName 'Neologik SharePoint Access - other01'
         $code = Invoke-Run $params
         $code | Should -Be 1
-        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'UNKNOWN - several apps, environment not identified'
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'UNKNOWN: the tenant holds several SharePoint applications. Add -SolutionShortName or -ConfigurationFile to the command'
     }
 
     It 'reports a missing SharePoint app' {
         $grants = New-GrantsFile -Grants @() -SharePoint $true
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
         $code | Should -Be 1
-        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'MISSING - app not found'
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'MISSING: the tenant holds no SharePoint application'
     }
 }
 
-Context 'Post-window run: mailbox grants file (step 6)' {
+Context 'The later run: mailbox grants file (step 6)' {
     It 'verifies a fully granted mailbox without writing, and always disconnects' {
         Add-CompliantExchangeState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Mailbox grant: support@contoso.com -> neo-support' | Should -Be 'Already granted'
+        Get-SummaryResult 'Mailbox grant: support@contoso.com for neo-support' | Should -Be 'Already granted'
         $script:Writes | Should -HaveCount 0
         $script:ExchangeConnected | Should -BeTrue
         $script:ExchangeDisconnected | Should -BeTrue
@@ -2139,7 +2139,7 @@ Context 'Post-window run: mailbox grants file (step 6)' {
     It 'creates the pointer, the scope and the three assignments when nothing exists' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Mailbox grant: support@contoso.com -> neo-support' | Should -Be 'Granted (3 role(s) added)'
+        Get-SummaryResult 'Mailbox grant: support@contoso.com for neo-support' | Should -Be 'Granted: 3 role(s) added'
         $script:Writes | Should -Contain "NEW exo sp $($script:Ids.MailboxAppId)"
         $script:Writes | Should -Contain 'NEW exo scope Scope-neo-support'
         @($script:Writes | Where-Object { $_ -like 'NEW exo assignment*' }) | Should -HaveCount 3
@@ -2158,21 +2158,21 @@ Context 'Post-window run: mailbox grants file (step 6)' {
         $code | Should -Be 0
         Should -Invoke New-ManagementScope -Times 0
         Should -Invoke New-ManagementRoleAssignment -Times 3 -ParameterFilter { $CustomResourceScope -eq 'Scope-email-monitor' }
-        ($script:Console -join "`n") | Should -Match 'reusing management scope'
+        ($script:Console -join "`n") | Should -Match 'uses the existing management scope'
     }
 
     It 'reports PENDING while Exchange has not propagated the grant' {
         $script:Tenant.Exchange.InScope = $false
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
         $code | Should -Be 1
-        Get-SummaryResult 'Mailbox grant: support@contoso.com -> neo-support' | Should -Be 'PENDING - re-run to confirm InScope'
+        Get-SummaryResult 'Mailbox grant: support@contoso.com for neo-support' | Should -Be 'PENDING: run the script again to confirm the mailbox grant'
     }
 
     It 'reports PENDING when the authorisation test itself fails, without stopping the run' {
         Mock Test-ServicePrincipalAuthorization { throw 'The service principal was not found' }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
         $code | Should -Be 1
-        Get-SummaryResult 'Mailbox grant: support@contoso.com -> neo-support' | Should -Be 'PENDING - re-run to confirm InScope'
+        Get-SummaryResult 'Mailbox grant: support@contoso.com for neo-support' | Should -Be 'PENDING: run the script again to confirm the mailbox grant'
         $script:ExchangeDisconnected | Should -BeTrue
     }
 
@@ -2188,7 +2188,7 @@ Context 'Post-window run: mailbox grants file (step 6)' {
         Mock New-ManagementRoleAssignment { throw 'The user is not assigned to any management roles' }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
         $code | Should -Be 1
-        (Get-SummaryResult 'Mailbox grant: support@contoso.com -> neo-support') | Should -Match '^FAILED - The user is not assigned'
+        (Get-SummaryResult 'Mailbox grant: support@contoso.com for neo-support') | Should -Match '^FAILED: The user is not assigned'
         $script:ExchangeDisconnected | Should -BeTrue
     }
 
@@ -2196,10 +2196,10 @@ Context 'Post-window run: mailbox grants file (step 6)' {
         Mock Connect-ExchangeOnline { throw 'Device login timed out' }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile); RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }
         $code | Should -Be 1
-        Get-SummaryResult 'Mailbox grant: support@contoso.com -> neo-support' | Should -Be 'SKIPPED - Exchange Online sign-in failed'
-        Get-SummaryResult "Legacy mailbox grant: $($script:Ids.LegacyAppId)" | Should -Be 'SKIPPED - Exchange Online sign-in failed'
+        Get-SummaryResult 'Mailbox grant: support@contoso.com for neo-support' | Should -Be 'SKIPPED: the sign-in to Exchange Online failed'
+        Get-SummaryResult "Mailbox grant to remove: $($script:Ids.LegacyAppId)" | Should -Be 'SKIPPED: the sign-in to Exchange Online failed'
         Should -Invoke Disconnect-ExchangeOnline -Times 0
-        ($script:Console -join "`n") | Should -Match 'Exchange Administrator or Global Administrator'
+        ($script:Console -join "`n") | Should -Match 'an Exchange Administrator or as a Global Administrator'
     }
 
     It 'installs the Exchange module when absent and skips when it cannot be installed' {
@@ -2211,7 +2211,7 @@ Context 'Post-window run: mailbox grants file (step 6)' {
         $script:Installs = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
         $code | Should -Be 1
-        Get-SummaryResult 'Mailbox grant: support@contoso.com -> neo-support' | Should -Be 'SKIPPED - Exchange Online module not available'
+        Get-SummaryResult 'Mailbox grant: support@contoso.com for neo-support' | Should -Be 'SKIPPED: the Exchange Online module is not available'
     }
 
     It 'removes a retired identity''s assignments and pointer, leaving the scope' {
@@ -2222,7 +2222,7 @@ Context 'Post-window run: mailbox grants file (step 6)' {
         $x.Assignments += @{ Name = 'Assignment-email-monitor-MailSend'; Role = 'Application Mail.Send'; RoleAssigneeName = $script:Ids.LegacyObjectId }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile -Entries @()); RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }
         $code | Should -Be 0
-        Get-SummaryResult "Legacy mailbox grant: $($script:Ids.LegacyAppId)" | Should -Be 'Removed (2 assignment(s))'
+        Get-SummaryResult "Mailbox grant to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Removed: 2 role assignment(s)'
         @($x.Assignments) | Should -HaveCount 0
         @($x.ServicePrincipals) | Should -HaveCount 0
         @($x.Scopes) | Should -HaveCount 1
@@ -2237,14 +2237,14 @@ Context 'Post-window run: mailbox grants file (step 6)' {
         $x.Assignments += @{ Name = 'Assignment-other-MailRead'; Role = 'Application Mail.Read'; RoleAssigneeName = 'someone-else' }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile -Entries @()); RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }
         $code | Should -Be 0
-        Get-SummaryResult "Legacy mailbox grant: $($script:Ids.LegacyAppId)" | Should -Be 'Removed (1 assignment(s))'
+        Get-SummaryResult "Mailbox grant to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Removed: 1 role assignment(s)'
         @($x.Assignments) | Should -HaveCount 1
     }
 
     It 'reports a retired identity that is not present' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile -Entries @()); RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }
         $code | Should -Be 0
-        Get-SummaryResult "Legacy mailbox grant: $($script:Ids.LegacyAppId)" | Should -Be 'Not present'
+        Get-SummaryResult "Mailbox grant to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Not present'
         $script:Writes | Should -HaveCount 0
     }
 
@@ -2255,8 +2255,8 @@ Context 'Post-window run: mailbox grants file (step 6)' {
         $file = New-MailboxFile -Entries @() -AdoptedIdentityAppIds @($script:Ids.LegacyAppId.ToUpperInvariant())
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = $file; RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }
         $code | Should -Be 0
-        Get-SummaryResult "Legacy mailbox grant: $($script:Ids.LegacyAppId)" | Should -Be 'Identity adopted by the v5 email channel - assignment kept'
-        ($script:Console -join "`n") | Should -Match 'identity adopted by the v5 email channel - assignment kept'
+        Get-SummaryResult "Mailbox grant to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Kept. An email channel still uses the identity'
+        ($script:Console -join "`n") | Should -Match 'an email channel still uses the identity\. The script keeps the role assignments'
         @($x.Assignments) | Should -HaveCount 1
         @($x.ServicePrincipals) | Should -HaveCount 1
         $script:Writes | Should -HaveCount 0
@@ -2274,8 +2274,8 @@ Context 'Post-window run: mailbox grants file (step 6)' {
         $file = New-MailboxFile -Entries @() -AdoptedIdentityAppIds @($script:Ids.LegacyAppId)
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = $file; RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId, $otherAppId) }
         $code | Should -Be 0
-        Get-SummaryResult "Legacy mailbox grant: $($script:Ids.LegacyAppId)" | Should -Be 'Identity adopted by the v5 email channel - assignment kept'
-        Get-SummaryResult "Legacy mailbox grant: $otherAppId" | Should -Be 'Removed (1 assignment(s))'
+        Get-SummaryResult "Mailbox grant to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Kept. An email channel still uses the identity'
+        Get-SummaryResult "Mailbox grant to remove: $otherAppId" | Should -Be 'Removed: 1 role assignment(s)'
         @($x.Assignments | Where-Object { $_.RoleAssigneeName -eq $script:Ids.LegacyObjectId }) | Should -HaveCount 1
         @($x.ServicePrincipals | Where-Object { $_.AppId -eq $otherAppId }) | Should -HaveCount 0
         $script:ExchangeDisconnected | Should -BeTrue
@@ -2285,8 +2285,8 @@ Context 'Post-window run: mailbox grants file (step 6)' {
         $file = New-MailboxFile -AsObject
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = $file }
         $code | Should -Be 0
-        Get-SummaryResult 'Mailbox grant: support@contoso.com -> neo-support' | Should -Be 'Granted (3 role(s) added)'
-        ($script:Console -join "`n") | Should -Match '1 email channel\(s\), 0 adopted identity'
+        Get-SummaryResult 'Mailbox grant: support@contoso.com for neo-support' | Should -Be 'Granted: 3 role(s) added'
+        ($script:Console -join "`n") | Should -Match 'Email channels: 1\. Identities that an email channel still uses: 0'
     }
 }
 
@@ -2300,7 +2300,7 @@ Context 'Graph resilience' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $script:Sleeps | Should -Contain 3
-        Get-SummaryResult 'Agent blueprint' | Should -Be 'Present'
+        Get-SummaryResult 'Agent identity blueprint' | Should -Be 'Present'
         $script:Writes | Should -HaveCount 0
     }
 
@@ -2308,16 +2308,16 @@ Context 'Graph resilience' {
         $script:Faults += @{ Match = 'GET /applications/[^/]+/owners$'; Status = 503; Code = 'ServiceUnavailable'; Message = 'try later'; Remaining = 2 }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Blueprint owner' | Should -Be 'Already in place'
+        Get-SummaryResult 'Agent identity blueprint owner' | Should -Be 'Already an owner'
         @($script:Sleeps) | Should -HaveCount 2
         $script:Tenant = New-EmptyTenant
         Add-CompliantPreWindowState
         $script:Faults = @(@{ Match = 'GET /applications/[^/]+/owners$'; Status = 500; Code = 'InternalServerError'; Message = 'boom'; Remaining = 99 })
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        (Get-SummaryResult 'Blueprint owner') | Should -Match '^FAILED - Graph GET /v1.0/applications/.+ returned HTTP 500 \(InternalServerError - boom\)'
-        Get-SummaryResult 'Blueprint principal' | Should -Be 'Present'
-        Get-SummaryResult 'Admin consent' | Should -Be 'Present'
+        (Get-SummaryResult 'Agent identity blueprint owner') | Should -Match '^FAILED: Microsoft Graph GET /v1.0/applications/.+ returned HTTP 500\. InternalServerError: boom'
+        Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'Present'
+        Get-SummaryResult 'Administrator consent' | Should -Be 'Present'
     }
 
     It 'retries a not-found right after a create (replication delay)' {
@@ -2326,15 +2326,15 @@ Context 'Graph resilience' {
         $script:Faults += @{ Match = 'GET /applications/[^/]+/owners$'; Status = 404; Code = 'Request_ResourceNotFound'; Message = 'not replicated'; Remaining = 1 }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Agent blueprint' | Should -Be 'Created'
-        Get-SummaryResult 'Blueprint owner' | Should -Be 'Already in place'
+        Get-SummaryResult 'Agent identity blueprint' | Should -Be 'Created'
+        Get-SummaryResult 'Agent identity blueprint owner' | Should -Be 'Already an owner'
     }
 
     It 'does not retry a not-found on a plain read' {
         $script:Faults += @{ Match = 'GET /applications/[^/]+/owners$'; Status = 404; Code = 'Request_ResourceNotFound'; Message = 'gone'; Remaining = 1 }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        (Get-SummaryResult 'Blueprint owner') | Should -Match 'HTTP 404'
+        (Get-SummaryResult 'Agent identity blueprint owner') | Should -Match 'HTTP 404'
         @($script:Sleeps) | Should -HaveCount 0
     }
 
@@ -2348,9 +2348,9 @@ Context 'Graph resilience' {
         $script:Tenant.PageSize = 2
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Blueprint owner' | Should -Be 'Already in place'
-        Get-SummaryResult 'Blueprint principal owner' | Should -Be 'Already in place'
-        Get-SummaryResult 'Blueprint credential: github-oidc-neo-env-config' | Should -Be 'Present'
+        Get-SummaryResult 'Agent identity blueprint owner' | Should -Be 'Already an owner'
+        Get-SummaryResult 'Agent identity blueprint service principal owner' | Should -Be 'Already an owner'
+        Get-SummaryResult 'Agent identity blueprint credential: github-oidc-neo-env-config' | Should -Be 'Present'
         $script:Writes | Should -HaveCount 0
         @($script:GraphCalls | Where-Object { $_ -match 'GET /applications/[^/]+/owners$' }).Count | Should -BeGreaterThan 1
     }
@@ -2368,19 +2368,19 @@ Context 'Graph resilience' {
         }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Blueprint owner' | Should -Be 'Already in place'
+        Get-SummaryResult 'Agent identity blueprint owner' | Should -Be 'Already an owner'
     }
 
     It 'never lets an unexpected exception escape: the run is recorded and the summary written' {
         Mock Set-NeologikAgentBlueprint { throw 'something nobody anticipated' }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        Get-SummaryResult 'Run' | Should -Be 'FAILED - unexpected error: something nobody anticipated'
+        Get-SummaryResult 'Run' | Should -Be 'FAILED: unexpected error. something nobody anticipated'
         @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter '*.json') | Should -HaveCount 1
     }
 }
 
-Context 'Pre-window run: permission reduction (step 4)' {
+Context 'The first run: permission reduction (step 4)' {
     It 'on an already-hardened environment creates only the Cost Management Contributor grant' {
         Add-CompliantPreWindowState
         $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -ne 'Cost Management Contributor' })
@@ -2388,10 +2388,10 @@ Context 'Pre-window run: permission reduction (step 4)' {
         $code | Should -Be 0
         $script:Writes | Should -HaveCount 1
         $script:Writes[0] | Should -Be "NEW az role Cost Management Contributor $script:SubScope"
-        Get-SummaryResult 'RG role: Contributor' | Should -Be 'Already in place'
-        Get-SummaryResult 'subscription role: Reader' | Should -Be 'Already in place'
-        Get-SummaryResult 'subscription role: Cost Management Contributor' | Should -Be 'Created'
-        Get-SummaryResult 'Legacy subscription role: Contributor' | Should -Be 'Not present'
+        Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Already assigned'
+        Get-SummaryResult 'Subscription role: Reader' | Should -Be 'Already assigned'
+        Get-SummaryResult 'Subscription role: Cost Management Contributor' | Should -Be 'Assigned'
+        Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'Not held'
         Get-SummaryResult 'Application Administrator role' | Should -Be 'Not held'
         Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $Tenant -eq $script:Ids.Tenant -and $Subscription -eq $script:Ids.Subscription -and $AccessToken -eq 'eyJ0b2tlbg' }
         # Second run: pure verification.
@@ -2411,8 +2411,8 @@ Context 'Pre-window run: permission reduction (step 4)' {
         $news | Should -HaveCount 9
         $removes | Should -HaveCount 3
         [array]::IndexOf($script:Writes, $removes[0]) | Should -BeGreaterThan ([array]::IndexOf($script:Writes, $news[-1]))
-        Get-SummaryResult 'Legacy subscription role: Contributor' | Should -Be 'Removed'
-        Get-SummaryResult 'Legacy subscription role: User Access Administrator' | Should -Be 'Removed'
+        Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'Removed'
+        Get-SummaryResult 'Subscription role to remove: User Access Administrator' | Should -Be 'Removed'
         Get-SummaryResult 'Application Administrator role' | Should -Be 'Removed'
         @($script:Tenant.AzRoleAssignments | Where-Object { $_.Scope -eq $script:SubScope }).RoleDefinitionName | Should -Be @('Reader', 'Cost Management Contributor')
         @($script:Tenant.DirectoryRoles)[0].members | Should -HaveCount 0
@@ -2423,7 +2423,7 @@ Context 'Pre-window run: permission reduction (step 4)' {
         Add-LegacyAzureState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'RG role: Contributor' | Should -Be 'Created'
+        Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Assigned'
         @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq 'Contributor' -and $_.Scope -eq $script:RgScope }) | Should -HaveCount 1
     }
 
@@ -2433,16 +2433,16 @@ Context 'Pre-window run: permission reduction (step 4)' {
         Mock New-AzRoleAssignment { param($RoleDefinitionName) if ($RoleDefinitionName -eq 'Monitoring Contributor') { throw 'AuthorizationFailed: The client does not have authorization to perform action' }; $script:Tenant.AzRoleAssignments += @{ ObjectId = $ObjectId; RoleDefinitionName = $RoleDefinitionName; Scope = $Scope }; Add-Write "NEW az role $RoleDefinitionName $Scope" }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        (Get-SummaryResult 'RG role: Monitoring Contributor') | Should -Match '^FAILED - insufficient privileges'
-        Get-SummaryResult 'Legacy subscription role: Contributor' | Should -Be 'SKIPPED - narrow roles not all in place'
-        Get-SummaryResult 'Application Administrator role' | Should -Be 'SKIPPED - narrow roles not all in place'
+        (Get-SummaryResult 'Resource group role: Monitoring Contributor') | Should -Match '^FAILED: insufficient privileges'
+        Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'SKIPPED: the deployment identity does not hold all nine Azure roles'
+        Get-SummaryResult 'Application Administrator role' | Should -Be 'SKIPPED: the deployment identity does not hold all nine Azure roles'
         Should -Invoke Remove-AzRoleAssignment -Times 0
         Should -Invoke Remove-MgDirectoryRoleMemberDirectoryObjectByRef -Times 0
         @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
         @($script:Tenant.AzRoleAssignments | Where-Object { $_.Scope -eq $script:SubScope -and $_.RoleDefinitionName -eq 'Contributor' }) | Should -HaveCount 1
-        Get-SummaryResult 'Agent blueprint' | Should -Be 'Present'
-        Get-SummaryResult 'Retired Graph role: Group.Create' | Should -Be 'Not held'
-        Get-SummaryResult 'Admin consent' | Should -Be 'Present'
+        Get-SummaryResult 'Agent identity blueprint' | Should -Be 'Present'
+        Get-SummaryResult 'Deployment identity permission to remove: Group.Create' | Should -Be 'Not held'
+        Get-SummaryResult 'Administrator consent' | Should -Be 'Present'
     }
 
     It 'treats a RoleAssignmentExists race as already in place' {
@@ -2451,7 +2451,7 @@ Context 'Pre-window run: permission reduction (step 4)' {
         Mock New-AzRoleAssignment { throw 'RoleAssignmentExists: The role assignment already exists.' }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'subscription role: Reader' | Should -Be 'Already in place'
+        Get-SummaryResult 'Subscription role: Reader' | Should -Be 'Already assigned'
     }
 
     It 'stops with ACTION REQUIRED when the Azure sign-in fails, touching nothing' {
@@ -2460,9 +2460,9 @@ Context 'Pre-window run: permission reduction (step 4)' {
         Mock Connect-AzAccount { throw 'Device code expired' }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'Owner \(or User Access Administrator\)'
-        Get-SummaryResult 'RG role: Contributor' | Should -Be 'SKIPPED - Azure sign-in failed'
-        Get-SummaryResult 'Application Administrator role' | Should -Be 'SKIPPED - narrow Azure roles not confirmed'
+        ($script:Console -join "`n") | Should -Match 'Owner or User Access Administrator on subscription'
+        Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'SKIPPED: the sign-in to Azure failed'
+        Get-SummaryResult 'Application Administrator role' | Should -Be 'SKIPPED: the script did not confirm the Azure roles of the deployment identity'
         $script:Writes | Should -HaveCount 0
     }
 
@@ -2491,8 +2491,8 @@ Context 'Pre-window run: permission reduction (step 4)' {
         Mock Remove-MgDirectoryRoleMemberDirectoryObjectByRef { throw (New-ForbiddenException) }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        (Get-SummaryResult 'Application Administrator role') | Should -Match '^FAILED - insufficient privileges'
-        Get-SummaryResult 'Legacy subscription role: Contributor' | Should -Be 'Removed'
+        (Get-SummaryResult 'Application Administrator role') | Should -Match '^FAILED: insufficient privileges'
+        Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'Removed'
     }
 
     It 'reports the Application Administrator check as failed when the memberOf read fails, never as not held' {
@@ -2514,7 +2514,7 @@ Context 'Pre-window run: permission reduction (step 4)' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Application Administrator role' | Should -Be 'Removed'
-        Get-SummaryResult 'Undeclared directory role: Agent ID Administrator' | Should -Be 'Removed'
+        Get-SummaryResult 'Other directory role: Agent ID Administrator' | Should -Be 'Removed'
         Should -Invoke Get-MgDirectoryRole -Times 0
         Should -Invoke Get-MgDirectoryRoleMember -Times 0
         @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $script:Ids.AppAdminRole })[0].members | Should -HaveCount 0
@@ -2537,20 +2537,20 @@ Context 'Verify-only run (-Verify)' {
         $code | Should -Be 1
         $script:Writes | Should -HaveCount 0
         @($script:Tenant.Apps | Where-Object { $_.displayName -like 'Neologik Agent Blueprint*' }) | Should -HaveCount 0
-        (Get-SummaryResult 'Agent blueprint') | Should -BeLike 'WOULD CREATE*'
-        Get-SummaryResult 'Blueprint principal' | Should -Be 'WOULD CREATE'
-        Get-SummaryResult 'Blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'WOULD ADD'
-        Get-SummaryResult 'Graph role: Application.ReadWrite.OwnedBy' | Should -Be 'WOULD GRANT'
-        Get-SummaryResult 'Retired Graph role: Application.Read.All' | Should -Be 'WOULD REMOVE'
-        Get-SummaryResult 'NCE group assignment' | Should -Be 'WOULD ASSIGN'
-        Get-SummaryResult 'Admin consent' | Should -Be 'MISSING - consent URL printed'
-        Get-SummaryResult 'RG role: Contributor' | Should -Be 'WOULD CREATE'
-        Get-SummaryResult 'subscription role: Cost Management Contributor' | Should -Be 'WOULD CREATE'
-        Get-SummaryResult 'Legacy subscription role: Contributor' | Should -Be 'WOULD REMOVE'
+        (Get-SummaryResult 'Agent identity blueprint') | Should -BeLike 'WOULD CREATE*'
+        Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'WOULD CREATE'
+        Get-SummaryResult 'Agent identity blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'WOULD ADD'
+        Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'WOULD GRANT'
+        Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'User group assignment' | Should -Be 'WOULD ASSIGN'
+        Get-SummaryResult 'Administrator consent' | Should -Be 'MISSING: the script printed the consent address'
+        Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'WOULD ASSIGN'
+        Get-SummaryResult 'Subscription role: Cost Management Contributor' | Should -Be 'WOULD ASSIGN'
+        Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'WOULD REMOVE'
         Get-SummaryResult 'Application Administrator role' | Should -Be 'WOULD REMOVE'
         @($script:Summary | Where-Object { $_.Result -match '^(FAILED|SKIPPED)' }) | Should -HaveCount 0
-        ($script:Console -join "`n") | Should -Match 'verify-only'
-        ($script:Console -join "`n") | Should -Match 'nothing was written'
+        ($script:Console -join "`n") | Should -Match 'with -Verify'
+        ($script:Console -join "`n") | Should -Match 'The script wrote nothing'
         $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentAccess_PreWindow_*.json')
         $files | Should -HaveCount 1
         $json = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
@@ -2567,10 +2567,10 @@ Context 'Verify-only run (-Verify)' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
         $code | Should -Be 0
         $script:Writes | Should -HaveCount 0
-        ($script:Console -join "`n") | Should -Match 'nothing would change'
+        ($script:Console -join "`n") | Should -Match 'would change nothing'
     }
 
-    It 'reports pending agent-user and mailbox grants in the post-window run without writing' {
+    It 'reports pending agent-user and mailbox grants in the later run without writing' {
         Add-AgentIdentities -NoGrants
         $x = $script:Tenant.Exchange
         $x.ServicePrincipals += @{ Identity = $script:Ids.LegacyObjectId; ObjectId = $script:Ids.LegacyObjectId; AppId = $script:Ids.LegacyAppId; DisplayName = 'email-monitor' }
@@ -2579,9 +2579,9 @@ Context 'Verify-only run (-Verify)' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants; MailboxGrantsFile = (New-MailboxFile); RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId); Verify = $true }
         $code | Should -Be 1
         $script:Writes | Should -HaveCount 0
-        Get-SummaryResult 'Agent-user grant: agent Support Agent' | Should -Be 'WOULD GRANT (Mail.Read User.Read)'
-        (Get-SummaryResult 'Mailbox grant: support@contoso.com -> neo-support') | Should -BeLike 'WOULD GRANT (service principal pointer, management scope Scope-neo-support, assignment*'
-        Get-SummaryResult "Legacy mailbox grant: $($script:Ids.LegacyAppId)" | Should -Be 'WOULD REMOVE (1 assignment(s) and the pointer)'
+        Get-SummaryResult 'Grant to agent user: agent Support Agent' | Should -Be 'WOULD GRANT: Mail.Read User.Read'
+        (Get-SummaryResult 'Mailbox grant: support@contoso.com for neo-support') | Should -BeLike 'WOULD GRANT: Exchange service principal, management scope Scope-neo-support, role assignment*'
+        Get-SummaryResult "Mailbox grant to remove: $($script:Ids.LegacyAppId)" | Should -Be 'WOULD REMOVE: 1 role assignment(s) and the Exchange service principal'
         @((Get-FakeSp -Id $script:Ids.AgentIdentitySp).grants) | Should -HaveCount 0
         @($x.Assignments) | Should -HaveCount 1
         @($x.ServicePrincipals) | Should -HaveCount 1
@@ -2590,8 +2590,8 @@ Context 'Verify-only run (-Verify)' {
 
     It 'the write seams refuse every write in a verify-only run, whatever the caller does' {
         $script:State = @{ Verify = $true }
-        { Invoke-NeologikGraph -Method POST -Uri "$script:GraphV1/oauth2PermissionGrants" -Body '{}' } | Should -Throw -ExpectedMessage '*verify-only run*'
-        { Invoke-NeologikWrite -Command 'New-AzRoleAssignment' -Parameters @{ ObjectId = 'x'; RoleDefinitionName = 'Reader'; Scope = '/subscriptions/x' } } | Should -Throw -ExpectedMessage '*verify-only run*'
+        { Invoke-NeologikGraph -Method POST -Uri "$script:GraphV1/oauth2PermissionGrants" -Body '{}' } | Should -Throw -ExpectedMessage '*The run with -Verify refused the write*'
+        { Invoke-NeologikWrite -Command 'New-AzRoleAssignment' -Parameters @{ ObjectId = 'x'; RoleDefinitionName = 'Reader'; Scope = '/subscriptions/x' } } | Should -Throw -ExpectedMessage '*The run with -Verify refused the write*'
         $script:GraphCalls | Should -HaveCount 0
         $script:Writes | Should -HaveCount 0
         Should -Invoke New-AzRoleAssignment -Times 0
@@ -2623,11 +2623,11 @@ Context 'Parameter surface' {
 
 Context 'Summary and exit code' {
     It 'flags FAILED, UNKNOWN, MISSING, SKIPPED, PENDING, NOT FOUND and WOULD as attention' {
-        foreach ($result in @('FAILED - x', 'UNKNOWN - x', 'MISSING - x', 'SKIPPED - x', 'PENDING - x', 'NOT FOUND - x', 'WOULD GRANT', 'WOULD REMOVE (2 assignment(s))')) {
+        foreach ($result in @('FAILED - x', 'UNKNOWN - x', 'MISSING - x', 'SKIPPED - x', 'PENDING - x', 'NOT FOUND - x', 'WOULD GRANT', 'WOULD REMOVE: 2 role assignment(s)')) {
             $result | Should -Match $script:AttentionPattern
         }
-        foreach ($result in @('Present', 'Created', 'Already granted', 'Granted (User.Read)', 'Removed', 'Not held', 'Not present', 'Not needed', 'Updated (a b)',
-                'Not checked - runs with the agent grants file', 'Identity adopted by the v5 email channel - assignment kept')) {
+        foreach ($result in @('Present', 'Created', 'Already granted', 'Granted: User.Read', 'Removed', 'Not held', 'Not present', 'Not needed', 'Updated: a b',
+                'Not checked. The later run with -AgentGrantsFile makes the check', 'Kept. An email channel still uses the identity')) {
             $result | Should -Not -Match $script:AttentionPattern
         }
     }
@@ -2638,12 +2638,12 @@ Context 'Summary and exit code' {
         Mock Get-NeologikHeldGraphRole { throw 'read failed' }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'could not be read for the summary'
+        ($script:Console -join "`n") | Should -Match 'could not read the permissions of the deployment identity for the summary'
         @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter '*.json') | Should -HaveCount 1
     }
 }
 
-Context 'Pre-window run: Admin User Group membership' {
+Context 'The first run: Admin User Group membership' {
     BeforeEach {
         Add-CompliantDirectoryState
         Add-CompliantAzureState
@@ -2660,10 +2660,10 @@ Context 'Pre-window run: Admin User Group membership' {
         Add-AdminGroupMembership
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Admin User Group membership' | Should -Match '^HELD - kept until every SQL server names the deployment identity'
+        Get-SummaryResult 'Admin User Group membership' | Should -Match '^HELD\. The script keeps the membership until each SQL server names the deployment identity'
         Should -Invoke Remove-MgGroupMemberByRef -Times 0
         @((Get-FakeGroup -Id $script:Ids.AdminGroup).members | ForEach-Object { $_.id }) | Should -Contain $script:Ids.DeploySpId
-        ($script:Console -join "`n") | Should -Match 'run the infrastructure deployment first'
+        ($script:Console -join "`n") | Should -Match 'The deployment by Neologik sets the administrator'
     }
 
     It 'removes the membership once every SQL server names the deployment identity as its administrator' {
@@ -2711,7 +2711,7 @@ Context 'Pre-window run: Admin User Group membership' {
         $cfg = New-ConfigFile -Overrides @{ SecurityGroups = @(@{ Name = "Neologik NCE User Group - $script:ShortName"; Id = $script:Ids.Group }) }
         $code = Invoke-Run @{ ConfigurationFile = $cfg }
         $code | Should -Be 0
-        Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not checked - no Admin User Group id (configuration file SecurityGroups or -AdminGroupId)'
+        Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not checked. The command gives no AdminGroupId'
         Should -Invoke Remove-MgGroupMemberByRef -Times 0
     }
 
@@ -2729,11 +2729,11 @@ Context 'Pre-window run: Admin User Group membership' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         @($script:Imports | Where-Object { $_ -like 'Az.*' }) | Should -Be @('Az.Accounts ', 'Az.Resources ', 'Az.Sql ')
-        Get-SummaryResult 'RG role: Contributor' | Should -Be 'Already in place'
+        Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Already assigned'
         Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not held'
     }
 
-    It 'requests the group-member write scope for the pre-window run' {
+    It 'requests the group-member write scope for the first run' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $request = @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' }) | Select-Object -First 1
@@ -2747,12 +2747,12 @@ Context 'Pre-window run: Admin User Group membership' {
         Mock Remove-MgGroupMemberByRef { throw (New-ForbiddenException) }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        (Get-SummaryResult 'Admin User Group membership') | Should -Match '^FAILED - insufficient privileges'
+        (Get-SummaryResult 'Admin User Group membership') | Should -Match '^FAILED: insufficient privileges'
         @((Get-FakeGroup -Id $script:Ids.AdminGroup).members | ForEach-Object { $_.id }) | Should -Contain $script:Ids.DeploySpId
     }
 }
 
-Context 'Pre-window run: declared set or nothing' {
+Context 'The first run: declared set or nothing' {
     BeforeEach {
         Add-CompliantDirectoryState
         Add-CompliantAzureState
@@ -2761,9 +2761,9 @@ Context 'Pre-window run: declared set or nothing' {
     It 'reports nothing undeclared on a compliant environment' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Undeclared Azure roles' | Should -Be 'None'
-        Get-SummaryResult 'Undeclared directory roles' | Should -Be 'None'
-        Get-SummaryResult 'Undeclared group memberships' | Should -Be 'None'
+        Get-SummaryResult 'Other Azure roles' | Should -Be 'None'
+        Get-SummaryResult 'Other directory roles' | Should -Be 'None'
+        Get-SummaryResult 'Other group memberships' | Should -Be 'None'
         Should -Invoke Remove-AzRoleAssignment -Times 0
         Should -Invoke Remove-MgGroupMemberByRef -Times 0
     }
@@ -2772,13 +2772,13 @@ Context 'Pre-window run: declared set or nothing' {
         Add-UndeclaredState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        foreach ($item in @('Undeclared Azure role: Azure AI Developer @ resource group', 'Undeclared Azure role: Foundry User @ resource group',
-                'Undeclared Azure role: Reader @ resource group', 'Undeclared Azure role: Search Index Data Reader @ resource group',
-                'Undeclared Azure role: Key Vault Secrets Officer @ subscription', "Undeclared Azure role: Search Index Data Reader @ srch-$script:ShortName",
-                'Undeclared directory role: Agent ID Administrator', 'Undeclared group membership: Neologik Dev Team')) {
+        foreach ($item in @('Other Azure role: Azure AI Developer on resource group', 'Other Azure role: Foundry User on resource group',
+                'Other Azure role: Reader on resource group', 'Other Azure role: Search Index Data Reader on resource group',
+                'Other Azure role: Key Vault Secrets Officer on subscription', "Other Azure role: Search Index Data Reader on srch-$script:ShortName",
+                'Other directory role: Agent ID Administrator', 'Other group membership: Neologik Dev Team')) {
             Get-SummaryResult $item | Should -Be 'Removed' -Because "$item must go"
         }
-        Get-SummaryResult 'Undeclared Azure role: Cognitive Services Content Understanding Contributor @ ais-cu-abcprd01' | Should -BeNullOrEmpty -Because 'the Content Understanding role is declared at resource scope'
+        Get-SummaryResult 'Other Azure role: Cognitive Services Content Understanding Contributor on ais-cu-abcprd01' | Should -BeNullOrEmpty -Because 'the Content Understanding role is declared at resource scope'
         $left = @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $script:Ids.DeploySpId })
         @($left | Where-Object { $_.RoleDefinitionName -eq 'Cognitive Services Content Understanding Contributor' }) | Should -HaveCount 1
         @($left | Where-Object { $_.RoleDefinitionName -in @('Azure AI Developer', 'Foundry User') }) | Should -HaveCount 0
@@ -2793,9 +2793,9 @@ Context 'Pre-window run: declared set or nothing' {
         Add-UndeclaredState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
         $code | Should -Be 1
-        Get-SummaryResult 'Undeclared Azure role: Foundry User @ resource group' | Should -Be 'WOULD REMOVE'
-        Get-SummaryResult 'Undeclared directory role: Agent ID Administrator' | Should -Be 'WOULD REMOVE'
-        Get-SummaryResult 'Undeclared group membership: Neologik Dev Team' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'Other Azure role: Foundry User on resource group' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'Other directory role: Agent ID Administrator' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'Other group membership: Neologik Dev Team' | Should -Be 'WOULD REMOVE'
         $script:Writes | Should -HaveCount 0
     }
 
@@ -2805,9 +2805,9 @@ Context 'Pre-window run: declared set or nothing' {
         $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -ne 'Monitoring Contributor' })
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        Get-SummaryResult 'Undeclared Azure roles' | Should -Be 'SKIPPED - narrow roles not all in place'
-        Get-SummaryResult 'Undeclared directory roles' | Should -Be 'SKIPPED - narrow roles not all in place'
-        Get-SummaryResult 'Undeclared group memberships' | Should -Be 'SKIPPED - narrow roles not all in place'
+        Get-SummaryResult 'Other Azure roles' | Should -Be 'SKIPPED: the deployment identity does not hold all nine Azure roles'
+        Get-SummaryResult 'Other directory roles' | Should -Be 'SKIPPED: the deployment identity does not hold all nine Azure roles'
+        Get-SummaryResult 'Other group memberships' | Should -Be 'SKIPPED: the deployment identity does not hold all nine Azure roles'
         Should -Invoke Remove-AzRoleAssignment -Times 0
         Should -Invoke Remove-MgGroupMemberByRef -Times 0
         @((Get-FakeGroup -Id $script:Ids.DevTeamGroup).members | ForEach-Object { $_.id }) | Should -Contain $script:Ids.DeploySpId
@@ -2818,8 +2818,8 @@ Context 'Pre-window run: declared set or nothing' {
         Mock Remove-MgGroupMemberByRef { throw (New-ForbiddenException) }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        (Get-SummaryResult 'Undeclared group memberships') | Should -Match '^FAILED - insufficient privileges'
-        Get-SummaryResult 'Undeclared directory role: Agent ID Administrator' | Should -Be 'Removed'
+        (Get-SummaryResult 'Other group memberships') | Should -Match '^FAILED: insufficient privileges'
+        Get-SummaryResult 'Other directory role: Agent ID Administrator' | Should -Be 'Removed'
     }
 }
 
