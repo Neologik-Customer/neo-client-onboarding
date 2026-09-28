@@ -1,29 +1,50 @@
 # Version History
 
-This document lists the versions of the Neologik onboarding kit and what each version changed for you. From version 5.0.0 the version of the kit follows the version of the Neologik Platform it is issued for.
+## Overview
 
-The onboarding script records the kit version on your resource group, as the tag `NeologikOnboardingKit`. The platform reads the tag before an upgrade.
+This document lists the versions of the Neologik onboarding kit. For each version, this document states what changed for you.
+
+| Subject | Detail |
+|---|---|
+| Version of the onboarding kit | The version of the onboarding kit follows the version of the Neologik Platform |
+| Record on your resource group | The onboarding script and the environment access script record the version of the onboarding kit on your resource group, in the tag `NeologikOnboardingKit`. The Neologik Platform reads the tag before an upgrade |
+| Versions 5.0.4 and 5.0.5 | The onboarding kit has no version 5.0.4 and no version 5.0.5 |
 
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
-2. [Version 5.0.3](#version-503)
-3. [Version 5.0.2](#version-502)
-4. [Version 5.0.1](#version-501)
-5. [Version 5.0.0](#version-500)
-6. [Earlier versions](#earlier-versions)
+2. [Version 5.0.6](#version-506)
+3. [Version 5.0.3](#version-503)
+4. [Version 5.0.2](#version-502)
+5. [Version 5.0.1](#version-501)
+6. [Version 5.0.0](#version-500)
+7. [Earlier versions](#earlier-versions)
 
 ## Scripts in this version
 
-Each script version is shown as the script reports it.
+The table shows the version that each script reports.
 
-| Script | Script version | Purpose |
+| Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.0.1 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Update-NeologikEnvironmentAccess.ps1` | Kit version v5.0.3 | Brings the access of the deployment identity of an existing environment to the model of version 5, and applies the grants for agents and Apps that work unattended |
-| `Export-NeologikCertificate.ps1` | 1.0 | Builds the PFX file for the environment's TLS certificate on the workstation |
+| `Install-NeologikEnvironment.ps1` | v5.0.2 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.6 | Reduces the access of the deployment identity of an existing environment to the access that version 5 of the Neologik Platform needs. Applies the grants for agents and Apps that work unattended |
+| `Export-NeologikCertificate.ps1` | 1.0 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
-| `Upgrade-TeamsAppInstallations.ps1` | v0.2.0 | Upgrades every user's installed Neologik Teams app to the latest version in the catalogue |
+| `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.0.6
+
+**Date**: 2026-09-28
+
+| Item | Change |
+|---|---|
+| Documents | Every document is rewritten in plain English |
+| Scripts | The comments, the help text and the messages of every script are rewritten in plain English. No script behaves differently |
+| `Install-NeologikEnvironment.ps1` | Version v5.0.2. The onboarding script writes the value `NeologikPlatform` to the tag `ApplicationName` of each resource that the onboarding script creates. The deployment by Neologik writes the same value. The question about the host name now reads "Host name of the environment, fully qualified". The onboarding script records the version `v5.0.6` on the resource group |
+| `Update-NeologikEnvironmentAccess.ps1` | The environment access script names each item of the summary in full, for example `Agent identity blueprint owner` instead of `Blueprint owner`. Each result reads `FAILED: <reason>` instead of `FAILED - <reason>`. The environment access script records the version `v5.0.6` on the resource group |
+| `Upgrade-TeamsAppInstallations.ps1` | Version v0.2.1 |
+| `TECHNICAL-REFERENCE.md` | The document lists the value of each standard tag |
+| The zip of the onboarding kit | The zip holds the scripts, the documents and the supporting files only. The zip omits the repository files and the test folder |
 
 ## Version 5.0.3
 
@@ -31,10 +52,10 @@ Each script version is shown as the script reports it.
 
 | Item | Change |
 |---|---|
-| `Install-NeologikEnvironment.ps1` | Version v5.0.1. The script runner managed identity holds Reader, Key Vault Secrets Officer and Azure Bot Service Contributor Role on the resource group, and no role on the subscription. It held Contributor on the subscription. No identity the script creates holds a role that gives control of resources outside the resource group. Records kit version `v5.0.3` on the resource group |
-| `Update-NeologikEnvironmentAccess.ps1` | Records kit version `v5.0.3` on the resource group |
-| Scripts | The comments, the help and the messages of every script revised, and the symbols in the messages replaced by plain text markers such as `[OK]`. The help of every script is shown by `Get-Help`. No script changes what it does, other than the change of role above |
-| Documents | Every guide and reference revised. `FINISHING-STEPS-GUIDE.md` covers the DNS record for both deployment types and the administrator consent. `QUICK-REFERENCE.md` is the security reference of the onboarding script, and `secure-overview.md` its one-page summary |
+| `Install-NeologikEnvironment.ps1` | Version v5.0.1. The script runner managed identity holds three roles on the resource group: Reader, Key Vault Secrets Officer and Azure Bot Service Contributor Role. The script runner managed identity holds no role on the subscription. Before this version, the script runner managed identity held Contributor on the subscription. No identity that the onboarding script creates holds a role that gives control of a resource outside the resource group. The onboarding script records the version `v5.0.3` on the resource group |
+| `Update-NeologikEnvironmentAccess.ps1` | The environment access script records the version `v5.0.3` on the resource group |
+| Scripts | The comments, the help text and the messages of every script are revised. Plain text markers such as `[OK]` replace the symbols in the messages. `Get-Help` shows the help of every script. No script behaves differently, apart from the change of role above |
+| Documents | Every guide and reference is revised. `FINISHING-STEPS-GUIDE.md` covers the DNS record for both deployment types and the administrator consent. `QUICK-REFERENCE.md` is the security reference of the onboarding script. `secure-overview.md` is the summary of `QUICK-REFERENCE.md` on one page |
 
 ## Version 5.0.2
 
@@ -42,8 +63,8 @@ Each script version is shown as the script reports it.
 
 | Item | Change |
 |---|---|
-| `Install-NeologikEnvironment.ps1` | Records the kit version on the resource group as the tag `NeologikOnboardingKit`. Your other tags are kept, and an existing resource group receives the tag too |
-| `Update-NeologikEnvironmentAccess.ps1` | Records the same tag as the last step of the permission reduction |
+| `Install-NeologikEnvironment.ps1` | The onboarding script records the version of the onboarding kit on the resource group, in the tag `NeologikOnboardingKit`. The onboarding script keeps your other tags. An existing resource group receives the tag too |
+| `Update-NeologikEnvironmentAccess.ps1` | The environment access script records the same tag as the last step of the permission reduction |
 
 ## Version 5.0.1
 
@@ -51,41 +72,41 @@ Each script version is shown as the script reports it.
 
 | Item | Change |
 |---|---|
-| `NeologikGuestUsers.txt` | The list of Neologik support accounts updated |
+| `NeologikGuestUsers.txt` | The list of Neologik support accounts is updated |
 
 ## Version 5.0.0
 
 **Date**: 2026-09-25
 
-The first release of the kit for the Neologik Platform version 5.0. The table lists what changed from version 1.10.1.
+Version 5.0.0 is the first release of the onboarding kit for version 5.0 of the Neologik Platform. The table lists what changed from version 1.10.1.
 
 | Item | Change |
 |---|---|
-| Access of the deployment identity | Held on the resource group. On the subscription the identity holds Reader and Cost Management Contributor only. It holds no Microsoft Entra directory role and is a member of no group. In Microsoft Graph it holds `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
-| Agent identity blueprint | The onboarding script creates the agent identity blueprint of the environment, under which the platform creates agent identities and agent user accounts |
-| Platform Sign-in application | The onboarding script creates the application that signs your users in to the Neologik Context Engine and to Apps, and assigns the NCE Contributors and NCE Admins groups to it |
-| Security groups | Four groups: the User Group, the NCE Contributors group, the NCE Admins group and the Admin User Group. The Admin User Group holds its roles on the resource group and none on the subscription |
-| Resource providers | One list, `resource-providers.txt`, registered in full on every run. `Register-NeologikResourceProviders.ps1` confirms the registrations on their own |
-| Answer file | The values of a run can be supplied in `inputs.json`, and every resource name can be set to a name of your own |
-| Accounts for Neologik support | Guest invitation is optional. You can create the accounts in your own tenant instead |
-| Deployment service principal | You can supply a service principal of your own, as described in `CREATE-SP-GUIDE.md` |
-| Subscription | `-SubscriptionName` selects the subscription after sign-in |
-| Unattended run | `-NonInteractive` and `-AcceptTerms` run the script without prompts |
-| `Update-NeologikEnvironmentAccess.ps1` | New. Described in `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` |
-| `Export-NeologikCertificate.ps1` | New. Described in `PFX-CERT-GUIDE.md` |
-| `Upgrade-TeamsAppInstallations.ps1` | New. Described in `TEAMS-APP-UPGRADE-GUIDE.md` |
-| Agents | The onboarding script no longer asks for the agents of the environment. Agents are created in the Neologik Context Engine after deployment |
+| Access of the deployment identity | The deployment identity holds the roles on the resource group. On the subscription the deployment identity holds Reader and Cost Management Contributor only. The deployment identity holds no Microsoft Entra directory role and is a member of no group. In Microsoft Graph the deployment identity holds `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
+| Agent identity blueprint | The onboarding script creates the agent identity blueprint of the environment. The Neologik Platform creates the agent identities and the agent user accounts under the agent identity blueprint |
+| Platform Sign-in application | The onboarding script creates the application that signs your users in to the Neologik Context Engine and to Apps. The onboarding script assigns the groups `Neologik NCE Contributors - <short name>` and `Neologik NCE Admins - <short name>` to the application |
+| Security groups | Four groups: `Neologik User Group - <short name>`, `Neologik NCE Contributors - <short name>`, `Neologik NCE Admins - <short name>` and `Neologik Admin User Group - <short name>`. The Admin User Group holds the roles on the resource group and no role on the subscription |
+| Resource providers | One list, `resource-providers.txt`. The onboarding script registers the whole list on every run. `Register-NeologikResourceProviders.ps1` confirms the registrations |
+| Answer file | The answer file `inputs.json` can hold each value of a run. Each resource name can be a name of your choice |
+| Accounts for Neologik support | Guest invitation is optional. You can create the accounts in your tenant instead |
+| Deployment service principal | You can create the deployment service principal yourself, as described in `CREATE-SP-GUIDE.md` |
+| Subscription | The parameter `-SubscriptionName` selects the subscription after the sign-in |
+| Unattended run | The parameters `-NonInteractive` and `-AcceptTerms` run the onboarding script without questions |
+| `Update-NeologikEnvironmentAccess.ps1` | New script. `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` describes the script |
+| `Export-NeologikCertificate.ps1` | New script. `PFX-CERT-GUIDE.md` describes the script |
+| `Upgrade-TeamsAppInstallations.ps1` | New script. `TEAMS-APP-UPGRADE-GUIDE.md` describes the script |
+| Agents | The onboarding script asks no question about agents. A platform operator creates agents in the Neologik Context Engine after the deployment |
 
 ## Earlier versions
 
 | Version | Date | Change |
 |---|---|---|
-| 1.10.1 | 2026-06-29 | The check of the virtual machine quota corrected |
-| 1.10.0 | 2026-06-25 | The deployment identity and the Admin User Group no longer hold Contributor on the subscription |
-| 1.9.1 | 2026-06-18 | Documents brought into line with the script |
-| 1.9.0 | 2026-01-15 | The Azure region is validated against the regions available to the subscription |
-| 1.8.0 | 2026-01-12 | The Neologik support accounts are read from `NeologikGuestUsers.txt`. The host name of the environment is collected |
-| 1.7.0 to 1.7.5 | 2025-11-17 | Corrections to resource provider registration, error messages and the handling of newly created directory objects |
-| 1.6.5 to 1.6.9 | 2025-11-17 | Corrections to guest invitation and logging |
-| 1.4.0 to 1.4.2 | 2025-11-17 | Acceptance of the Terms of Use and the Privacy Policy before the script runs |
+| 1.10.1 | 2026-06-29 | The check of the virtual machine quota is corrected |
+| 1.10.0 | 2026-06-25 | The deployment identity and the Admin User Group hold no Contributor role on the subscription |
+| 1.9.1 | 2026-06-18 | The documents match the onboarding script |
+| 1.9.0 | 2026-01-15 | The onboarding script checks the Azure region against the regions that the subscription can use |
+| 1.8.0 | 2026-01-12 | The onboarding script reads the Neologik support accounts from `NeologikGuestUsers.txt`. The onboarding script asks for the host name of the environment |
+| 1.7.0 to 1.7.5 | 2025-11-17 | Corrections to the resource provider registration, to the error messages and to the handling of new directory objects |
+| 1.6.5 to 1.6.9 | 2025-11-17 | Corrections to the guest invitation and to the log |
+| 1.4.0 to 1.4.2 | 2025-11-17 | The onboarding script asks for the acceptance of the Terms of Use and the Privacy Policy before the run |
 | 1.0.0 | 2025-11-15 | The first release |

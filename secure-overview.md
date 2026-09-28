@@ -2,59 +2,78 @@
 
 ## Overview
 
-This page summarises the access that `Install-NeologikEnvironment.ps1` grants. It is for a reader who needs the position on one page. [QUICK-REFERENCE.md](QUICK-REFERENCE.md) gives the full description, with every call the script makes.
+This page summarises the access that the onboarding script, `Install-NeologikEnvironment.ps1`, grants. This page is for approvers who need the security position on one page. [QUICK-REFERENCE.md](QUICK-REFERENCE.md) gives the full description, with each call that the onboarding script makes.
 
-The script is run once, by a Global Administrator who is also Owner of the subscription. It prepares one resource group and the directory objects of one Neologik Platform environment. Access is granted on the resource group. The only roles on the subscription are Reader and Cost Management Contributor, held by the deployment identity; neither gives control of a resource.
+A Global Administrator who is also Owner of the subscription runs the onboarding script once. The onboarding script prepares one resource group and the directory objects of one Neologik Platform environment.
 
-## What the script creates
+The onboarding script grants access on the resource group. The onboarding script grants only two roles on the subscription: Reader and Cost Management Contributor. The deployment identity holds both roles. Neither role allows a change to an Azure resource.
+
+## Contents
+
+1. [What the onboarding script creates](#what-the-onboarding-script-creates)
+2. [What the onboarding script grants](#what-the-onboarding-script-grants)
+3. [Why the onboarding script grants each wider permission](#why-the-onboarding-script-grants-each-wider-permission)
+4. [What the onboarding script does not grant](#what-the-onboarding-script-does-not-grant)
+5. [Secrets](#secrets)
+
+## What the onboarding script creates
 
 | Object | Name | Purpose |
 |---|---|---|
 | Resource group | `rg-<solution name>` | Holds every Azure resource of the environment |
-| Security groups | `Neologik User Group - <short name>`, `Neologik NCE Contributors - <short name>`, `Neologik NCE Admins - <short name>`, `Neologik Admin User Group - <short name>` | Access to the agents, to the Neologik Context Engine and to the Azure resources |
-| Guest invitations | The accounts in `NeologikGuestUsers.txt` | The Neologik support accounts. Invitation is optional: you can create the accounts in your own tenant instead |
-| Deployment identity | `Neologik GitHub Service Connection - <short name>` | The service principal under which Neologik deploys the platform. You can supply a service principal of your own instead |
-| Platform Sign-in application | `Neologik Platform Sign-in - <short name>` | Signs your users in to the Neologik Context Engine and to Apps |
-| Agent identity blueprint | `Neologik Agent Blueprint - default - <short name>` | The parent of the agent identities and agent user accounts the platform creates |
-| Key Vault | `kv<short name>`, or the name you give | Holds the two client secrets |
-| Storage account | Three private containers: `certificate`, `json` and `logs` | Holds the TLS certificate, the configuration file and the log |
-| Managed identities | `neologik-script-runner-service-connection-<short name>`, `neologik-sql-managed-identity-<short name>` | Used by the deployment and by Azure SQL |
-| Resource provider registrations | The list in `resource-providers.txt` | The Azure services the platform uses |
-| Configuration file | `Neologik_<org><index>_Configuration_<timestamp>.json` | The names and ids of what was created. It contains no secret |
+| Security groups | `Neologik User Group - <short name>`<br>`Neologik NCE Contributors - <short name>`<br>`Neologik NCE Admins - <short name>`<br>`Neologik Admin User Group - <short name>` | Give access to the agents, to the Neologik Context Engine and to the Azure resources |
+| Guest invitations | The accounts in `NeologikGuestUsers.txt` | The Neologik support accounts. Invitation is optional. You can create the accounts in your tenant instead |
+| Deployment identity | `Neologik GitHub Service Connection - <short name>` | Neologik deploys the Neologik Platform as this service principal. You can create the service principal yourself instead |
+| Platform Sign-in application | `Neologik Platform Sign-in - <short name>` | Signs users in to the Neologik Context Engine and to Apps |
+| Agent identity blueprint | `Neologik Agent Blueprint - default - <short name>` | The parent of the agent identities and the agent user accounts that the Neologik Platform creates |
+| Key Vault | `kv<short name>`, or the name that you give | Holds the two client secrets |
+| Deployment storage account | `stneodeploy<org><env><region><index>`, cut to 24 characters | Holds the TLS certificate, the configuration file and the log. Three private containers: `certificate`, `json` and `logs` |
+| Managed identities | `neologik-script-runner-service-connection-<short name>` and `neologik-sql-managed-identity-<short name>` | The deployment uses the script runner managed identity. Azure SQL uses the SQL managed identity |
+| Resource provider registrations | The list in `resource-providers.txt` | The Azure services that the Neologik Platform uses |
+| Configuration file | `Neologik_<org><index>_Configuration_<timestamp>.json` | The name and the id of each object that the onboarding script created. The configuration file contains no secret |
 
-## What the script grants
+## What the onboarding script grants
 
-| Principal | Scope | Access |
+| Who receives the access | Scope | Access |
 |---|---|---|
-| Deployment identity | Subscription | Reader; Cost Management Contributor |
-| Deployment identity | Resource group | Contributor; Key Vault Certificates Officer; Key Vault Secrets Officer; Storage Blob Data Contributor; Azure Kubernetes Service RBAC Cluster Admin; Monitoring Contributor; Role Based Access Control Administrator |
-| Deployment identity | Microsoft Graph application permissions | `Application.ReadWrite.OwnedBy`; `AgentIdentityBlueprint.AddRemoveCreds.All` |
-| Deployment identity | Ownership | The Platform Sign-in application, the agent identity blueprint and the service principal of each |
-| Agent identity blueprint principal | Microsoft Graph application permissions | `AgentIdUser.ReadWrite.IdentityParentedBy` |
-| Neologik Admin User Group | Resource group | Contributor; Azure Kubernetes Service Cluster Admin Role; Azure Kubernetes Service RBAC Cluster Admin; Key Vault Administrator; Key Vault Secrets Officer; Key Vault Certificates Officer; Storage Blob Data Owner; Storage Blob Data Contributor; Storage Table Data Contributor; Cognitive Services Data Reader; Cognitive Services OpenAI Contributor; Search Index Data Reader; Azure AI Developer |
-| Script runner managed identity | Resource group | Reader; Key Vault Secrets Officer; Azure Bot Service Contributor Role |
+| Deployment identity | Subscription | Reader<br>Cost Management Contributor |
+| Deployment identity | Resource group | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator |
+| Deployment identity | Microsoft Graph application permissions | `Application.ReadWrite.OwnedBy`<br>`AgentIdentityBlueprint.AddRemoveCreds.All` |
+| Deployment identity | Ownership | The Platform Sign-in application<br>The service principal of the Platform Sign-in application<br>The agent identity blueprint<br>The service principal of the agent identity blueprint |
+| Service principal of the agent identity blueprint | Microsoft Graph application permissions | `AgentIdUser.ReadWrite.IdentityParentedBy` |
+| The group `Neologik Admin User Group - <short name>` | Resource group | Contributor<br>Azure Kubernetes Service Cluster Admin Role<br>Azure Kubernetes Service RBAC Cluster Admin<br>Key Vault Administrator<br>Key Vault Secrets Officer<br>Key Vault Certificates Officer<br>Storage Blob Data Owner<br>Storage Blob Data Contributor<br>Storage Table Data Contributor<br>Cognitive Services Data Reader<br>Cognitive Services OpenAI Contributor<br>Search Index Data Reader<br>Azure AI Developer |
+| Script runner managed identity | Resource group | Reader<br>Key Vault Secrets Officer<br>Azure Bot Service Contributor Role |
 | SQL managed identity | Microsoft Entra directory role | Directory Readers |
-| The signed-in operator | Resource group | Key Vault Secrets Officer; Storage Blob Data Contributor |
+| The signed-in administrator | Resource group | Key Vault Secrets Officer<br>Storage Blob Data Contributor |
 
-## Why each wider permission is held
+## Why the onboarding script grants each wider permission
 
 | Permission | Reason |
 |---|---|
-| Reader on the subscription | The deployment reads the sizes and quotas available in the region before it deploys |
-| Cost Management Contributor on the subscription | The deployment creates and maintains the scheduled cost report of the subscription. The role covers cost configuration only |
-| Role Based Access Control Administrator on the resource group | The deployment assigns roles to the identities of the workloads it creates, inside the resource group |
-| `Application.ReadWrite.OwnedBy` | The deployment manages the application registrations it owns, and no others |
-| `AgentIdentityBlueprint.AddRemoveCreds.All` | The deployment adds and removes the credentials of the agent identity blueprint |
-| `AgentIdUser.ReadWrite.IdentityParentedBy` | The blueprint creates the agent user accounts of its own agent identities, and no others |
-| Directory Readers | Azure SQL resolves Microsoft Entra sign-ins through the SQL managed identity |
+| Reader on the subscription | Before a deployment, the deployment by Neologik reads the sizes and the quotas that are available in the Azure region |
+| Cost Management Contributor on the subscription | The deployment by Neologik creates and maintains the scheduled cost report of the subscription. The role covers cost configuration only |
+| Role Based Access Control Administrator on the resource group | The deployment by Neologik creates workloads inside the resource group. The deployment by Neologik assigns roles to the identities of those workloads, inside the resource group |
+| `Application.ReadWrite.OwnedBy` | The deployment by Neologik manages the application registrations that the deployment identity owns. The permission covers no other application registration |
+| `AgentIdentityBlueprint.AddRemoveCreds.All` | The deployment by Neologik adds and removes the credentials of the agent identity blueprint |
+| `AgentIdUser.ReadWrite.IdentityParentedBy` | The agent identity blueprint creates the agent user accounts of the agent identities of that agent identity blueprint. The permission covers no other agent user account |
+| Directory Readers | Azure SQL looks up Microsoft Entra accounts at sign-in through the SQL managed identity |
 
-## What the script does not grant
+## What the onboarding script does not grant
 
-- No Microsoft Entra directory role to the deployment identity.
-- No role on the subscription to a group or to a managed identity.
-- No group membership to the deployment identity or to a managed identity.
-- No administrator consent and no permission grant. Your Global Administrator gives consent after deployment, as described in [FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md).
+- The onboarding script grants no Microsoft Entra directory role to the deployment identity.
+- The onboarding script grants no role on the subscription to a security group or to a managed identity.
+- The onboarding script adds neither the deployment identity nor a managed identity to a security group.
+- The onboarding script gives no administrator consent and creates no permission grant.
+
+A Global Administrator gives the consent after the deployment, as described in [FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md).
 
 ## Secrets
 
-The script creates two client secrets, each valid for 365 days, and stores both in your Key Vault: `neologik-deployment-service-principle-secret` and `sp-admin-<solution name>-auth-secret`. Neither is printed, logged or written to a file.
+The onboarding script creates two client secrets. Each client secret is valid for 365 days. The onboarding script stores both client secrets in your Key Vault.
+
+| Client secret | Name of the secret in the Key Vault |
+|---|---|
+| Client secret of the deployment identity | `neologik-deployment-service-principle-secret` |
+| Client secret of the Platform Sign-in application | `sp-admin-<solution name>-auth-secret` |
+
+The onboarding script never prints a client secret. The onboarding script never writes a client secret to the log or to a file.
