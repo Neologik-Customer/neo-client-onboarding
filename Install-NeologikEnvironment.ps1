@@ -145,7 +145,7 @@
         -AnswerFile .\inputs.json -SkipPowerShellUpdate -SkipModuleInstall
 
 .NOTES
-    Version: v5.0.2
+    Version: v5.0.3
     Requires: PowerShell 7.4 or later
     Requires: Owner on the subscription and Global Administrator in the tenant
 #>
@@ -216,10 +216,10 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v5.0.2'
+$script:Version = 'v5.0.3'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.0.6'
+$script:KitVersion = 'v5.0.7'
 
 # The time stamp of the run. The names of the log and of the configuration file hold the time stamp.
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
