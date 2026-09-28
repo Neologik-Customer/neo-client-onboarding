@@ -342,7 +342,7 @@ Creates two User Assigned Managed Identities with retry logic for replication de
 
 1. **`neologik-script-runner-service-connection-<short-name>`**
    - Display Name: `Neologik Script Runner Service Connection - <short-name>`
-   - Contributor (Subscription); Key Vault Secrets Officer and Azure Bot Service Contributor Role (Resource Group)
+   - Reader, Key Vault Secrets Officer and Azure Bot Service Contributor Role (Resource Group). No role on the subscription
 
 2. **`neologik-sql-managed-identity-<short-name>`**
    - Display Name: `Neologik SQL Managed Identity - <short-name>`

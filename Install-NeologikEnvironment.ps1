@@ -14,7 +14,7 @@
     - Configuration output and logging
 
 .VERSION
-    v5.0.0
+    v5.0.1
 
 .PARAMETER OrganizationCode
     3-character organization code (e.g., 'ABC'). Default: 'ORG'
@@ -130,7 +130,7 @@
 
 .NOTES
     Author: Neologik
-    Version: v5.0.0 (keep in step with $script:Version below)
+    Version: v5.0.1 (keep in step with $script:Version below)
     Requires: PowerShell 7.4+ (script will update if needed)
     Requires: Subscription Owner and Global Administrator roles
 #>
@@ -203,12 +203,12 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v5.0.0'
+$script:Version = 'v5.0.1'
 
 # The kit version: the git tag of this kit release (both editions carry the same tag).
 # Recorded on the resource group as the tag NeologikOnboardingKit (project#2922); bumped
 # with every kit release, and checked against VERSION_HISTORY.md by the static test.
-$script:KitVersion = 'v5.0.2'
+$script:KitVersion = 'v5.0.3'
 
 # Initialize with timestamp - will be updated after org code and environment type are collected
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -3611,8 +3611,11 @@ function New-NeologikManagedIdentities {
             @{
                 Name = $scriptRunnerName
                 DisplayName = "Neologik Script Runner Service Connection$displaySuffix"
-                Roles = @('Contributor')
-                RGRoles = @('Key Vault Secrets Officer', 'Azure Bot Service Contributor Role')
+                # The deployment runs its scripts under this identity. They read the cluster and
+                # the runner virtual machine, and read and write secrets in the Key Vault, all in
+                # the resource group. The identity holds no role on the subscription.
+                Roles = @()
+                RGRoles = @('Reader', 'Key Vault Secrets Officer', 'Azure Bot Service Contributor Role')
                 # No GraphAppRoles: the Script Runner UAMI no longer manages app registrations
                 # — that work runs as the deploy service connection (ensure-app-regs.sh) — so
                 # Application.Read.All / ReadWrite.OwnedBy on the UAMI would be surplus.

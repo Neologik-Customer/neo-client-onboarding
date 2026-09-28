@@ -516,7 +516,7 @@ $script:State = @{}
 # The kit version: the git tag of this kit release. Recorded on the resource group as the
 # tag NeologikOnboardingKit once the permission reduction is complete (project#2922);
 # bumped with every kit release, and checked against VERSION_HISTORY.md by the tests.
-$script:KitVersion = 'v5.0.2'
+$script:KitVersion = 'v5.0.3'
 
 # ----- console + summary helpers ---------------------------------------------
 
