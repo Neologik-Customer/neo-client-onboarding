@@ -9,6 +9,16 @@ This document tracks the version history of the Neologik customer onboarding scr
 
 ---
 
+## Version 5.0.3
+**Built**: September 28, 2026
+**Git Tag**: v5.0.3
+
+### Script runner managed identity: Reader on the resource group, no role on the subscription
+**Date**: 2026-09-28
+
+- `Install-NeologikEnvironment.ps1` v5.0.1: the script runner managed identity holds Reader, Key Vault Secrets Officer and Azure Bot Service Contributor Role on the resource group, and no role on the subscription. It held Contributor on the subscription. The deployment runs two scripts under the identity, which read the cluster and the runner virtual machine and read and write secrets in the Key Vault, all inside the resource group. https://github.com/Neologik-AI/project/issues/2954
+- `TECHNICAL-REFERENCE.md` lists the roles by scope. The same change is made in the delegated provisioning mode edition.
+
 ## Version 5.0.2
 **Built**: September 27, 2026
 **Git Tag**: v5.0.2
