@@ -1,8 +1,7 @@
 #Requires -Version 7.4
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
-    Test harness for Update-NeologikEnvironmentAccess.ps1 (project#2217,
-    project#2234: the single-session migration model).
+    Tests of Update-NeologikEnvironmentAccess.ps1.
 
     Every external call is replaced: Microsoft Graph (the SDK cmdlets and the
     raw request seam), Azure (Az.Accounts / Az.Resources), Exchange Online,
@@ -163,9 +162,9 @@ BeforeAll {
             PrincipalCreateDelays = 0
             GrantRefusals         = @()
             SqlServers            = @()
-            # project#2922: the resource group's tags (the kit version tag lives here).
+            # the resource group's tags (the kit version tag lives here).
             ResourceGroupTags     = @{}
-            # The signed-in administrator (project#2306 rights preflight): a
+            # The signed-in administrator: a
             # Global Administrator who owns the subscription.
             MeDirectoryRoles      = @(@{ id = 'role-ga'; displayName = 'Global Administrator'; roleTemplateId = '62e90394-69f5-4237-9190-012177145e10' })
         }
@@ -174,7 +173,7 @@ BeforeAll {
         $t.ServicePrincipals += New-FakeSp -Id $script:Ids.GraphSpId -AppId '00000003-0000-0000-c000-000000000000' -DisplayName 'Microsoft Graph'
         $t.ServicePrincipals += New-FakeSp -Id $script:Ids.DeploySpId -AppId $script:Ids.DeployAppId -DisplayName "Neologik GitHub Service Connection - $script:ShortName"
         $t.ServicePrincipals += New-FakeSp -Id $script:Ids.SignInSpId -AppId $script:Ids.SignInAppId -DisplayName "Neologik Platform Sign-in - $script:ShortName"
-        # project#1012: the sign-in app registration as the onboarding
+        # the sign-in app registration as the onboarding
         # created it - owned by the administrator and the deployment
         # identity, carrying the uniqueName the deployment finds it by.
         $signInApp = New-FakeApp -Id $script:Ids.SignInAppObj -AppId $script:Ids.SignInAppId -DisplayName "Neologik Platform Sign-in - $script:ShortName"
@@ -184,7 +183,7 @@ BeforeAll {
         $signInSp = @($t.ServicePrincipals | Where-Object { $_.id -eq $script:Ids.SignInSpId })[0]
         $signInSp.owners = @($script:Ids.Me, $script:Ids.DeploySpId)
         $t.Groups += @{ id = $script:Ids.Group; displayName = "Neologik NCE User Group - $script:ShortName"; members = @(@{ id = $script:Ids.Me }); appRoleAssignments = @() }
-        # project#2269: the Admin User Group (human administrators) and the
+        # the Admin User Group (human administrators) and the
         # environment's SQL server, whose Entra administrator is the group
         # until the platform infrastructure deployment declares the
         # deployment identity.
@@ -194,8 +193,8 @@ BeforeAll {
     }
 
     function Add-CompliantDirectoryState {
-        # Everything the pre-window run verifies in the directory (steps
-        # 1-3), already in place.
+        # Everything the first run verifies in the directory (steps 1 to 3),
+        # already in place.
         $t = $script:Tenant
         $app = New-FakeApp -Id $script:Ids.BlueprintAppObj -AppId $script:Ids.BlueprintAppId -DisplayName "Neologik Agent Blueprint - default - $script:ShortName"
         $app.owners = @($script:Ids.Me, $script:Ids.DeploySpId)
@@ -251,26 +250,27 @@ BeforeAll {
             $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = $roleName; Scope = $script:SubScope }
         }
         $t.DirectoryRoles += @{ Id = $script:Ids.AppAdminRole; RoleTemplateId = $script:AppAdminRoleTemplateId; members = @() }
-        # project#2922: an environment kept with this kit carries its version tag.
+        # an environment kept with this kit carries its version tag.
         $t.ResourceGroupTags = @{ NeologikOnboardingKit = $script:KitVersion }
     }
 
     function Add-LegacyAzureState {
-        # The broad grants of a v4 environment: subscription Contributor and
-        # User Access Administrator, Application Administrator held.
+        # The wide access of an environment onboarded before version 5:
+        # Contributor and User Access Administrator on the subscription, and
+        # the Application Administrator directory role.
         $t = $script:Tenant
         foreach ($roleName in @('Contributor', 'User Access Administrator')) {
             $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = $roleName; Scope = $script:SubScope }
         }
         $t.DirectoryRoles += @{ Id = $script:Ids.AppAdminRole; RoleTemplateId = $script:AppAdminRoleTemplateId; members = @($script:Ids.DeploySpId) }
-        # project#2269: a pre-v5 onboarding added the deployment identity to
+        # a pre-v5 onboarding added the deployment identity to
         # the Admin User Group (its only SQL access while the group is the
         # server administrator).
         Add-AdminGroupMembership
     }
 
     function Add-UndeclaredState {
-        # project#2297: what the audit found beyond the declared set - the
+        # what the audit found beyond the declared set - the
         # evals self-grants at resource-group scope, a subscription-scope
         # leftover, an undeclared resource-scoped role, the declared
         # resource-scoped Content Understanding role (kept), a directory role
@@ -311,8 +311,8 @@ BeforeAll {
     }
 
     function Add-CompliantPreWindowState {
-        # Everything the pre-window run verifies, directory and Azure,
-        # already in place: a pure verification pass.
+        # Everything the first run verifies, in the directory and in Azure,
+        # already in place: the run changes nothing.
         Add-CompliantDirectoryState
         Add-CompliantAzureState
     }
@@ -648,7 +648,7 @@ BeforeAll {
     Mock Import-NeologikModule { param($Name, $RequiredVersion) $script:Imports += "$Name $RequiredVersion" }
     Mock Test-NeologikCommand { $true }
     Mock Invoke-NeologikAzureCli { @{ ExitCode = 0; Output = @('eyJ0b2tlbg') } }
-    # project#2306: every endpoint answers, and the script's own device code
+    # every endpoint answers, and the script's own device code
     # completes on the first poll (the identity platform is never contacted).
     Mock Test-NeologikEndpoint { $true }
     Mock Invoke-NeologikTokenRequest {
@@ -720,10 +720,10 @@ BeforeAll {
         @($sp.grants | ForEach-Object { [pscustomobject]@{ Id = $_.id; ConsentType = $_.consentType; Scope = $_.scope; ResourceId = $_.resourceId } })
     }
     # Graph's directoryRoles/{id}/members omits service principals (verified on
-    # the dev tenant 2026-09-08, project#2297): the script never reads a role's
+    # the dev tenant 2026-09-08): the script never reads a role's
     # member list, and these two throw so any return to that read fails a test.
-    Mock Get-MgDirectoryRole { throw 'Get-MgDirectoryRole is not used: read the identity''s memberOf list (project#2297)' }
-    Mock Get-MgDirectoryRoleMember { throw 'Get-MgDirectoryRoleMember omits service principals: read the identity''s memberOf list (project#2297)' }
+    Mock Get-MgDirectoryRole { throw 'Get-MgDirectoryRole is not used: read the identity''s memberOf list' }
+    Mock Get-MgDirectoryRoleMember { throw 'Get-MgDirectoryRoleMember omits service principals: read the identity''s memberOf list' }
     Mock Get-MgServicePrincipalMemberOf {
         param($ServicePrincipalId)
         $groups = @($script:Tenant.Groups | Where-Object { @($_.members | Where-Object { $_.id -eq $ServicePrincipalId }).Count -gt 0 } |
@@ -1273,7 +1273,7 @@ Context 'Modules and sign-in' {
     }
 }
 
-Context 'Sign-in and preflight (project#2306)' {
+Context 'Sign-in and preflight' {
     It 'prints the sign-in address and code itself, waits, and signs in to Graph and Azure with the tokens' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
@@ -1402,7 +1402,7 @@ Context 'Sign-in and preflight (project#2306)' {
     }
 }
 
-Context 'Blueprint short name (project#2329)' {
+Context 'Blueprint short name' {
     It 'adopts the one blueprint the deployment identity owns under another short name instead of creating a second one' {
         # The neoprd shape: the principal is named '... - neo-prd', the pipeline
         # blueprint is '... - neoneoprdsdc01'; the operator passes the pipeline's name.
@@ -1455,7 +1455,7 @@ Context 'Blueprint short name (project#2329)' {
 }
 
 Context 'Pre-window run on a compliant environment' {
-    It 'records the kit version on the resource group once the reduction is complete, and leaves it when in place (project#2922)' {
+    It 'records the kit version on the resource group once the reduction is complete, and leaves it when in place' {
         Add-CompliantPreWindowState
         $script:Tenant.ResourceGroupTags = @{ Vendor = 'Neologik' }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
@@ -1471,7 +1471,7 @@ Context 'Pre-window run on a compliant environment' {
         $script:Writes | Should -HaveCount 0
     }
 
-    It 'reports an older kit version tag as a pending change in verify-only (project#2922)' {
+    It 'reports an older kit version tag as a pending change in verify-only' {
         Add-CompliantPreWindowState
         $script:Tenant.ResourceGroupTags = @{ NeologikOnboardingKit = 'v5.0.1' }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
@@ -1481,7 +1481,7 @@ Context 'Pre-window run on a compliant environment' {
         $script:Tenant.ResourceGroupTags['NeologikOnboardingKit'] | Should -Be 'v5.0.1'
     }
 
-    It 'declares the kit version the version history opens with (project#2922)' {
+    It 'declares the kit version the version history opens with' {
         $history = Get-Content -Raw (Join-Path (Split-Path -Parent $script:ScriptPath) 'VERSION_HISTORY.md')
         $top = [regex]::Match($history, '(?m)^## Version (\d+\.\d+\.\d+)').Groups[1].Value
         $script:KitVersion | Should -Be "v$top"
@@ -1557,7 +1557,7 @@ Context 'Pre-window run on a compliant environment' {
         ($script:Console -join "`n") | Should -Match 'trying the next location'
     }
 
-    It 'takes the short name from -SolutionShortName when no configuration file is given (project#2329)' {
+    It 'takes the short name from -SolutionShortName when no configuration file is given' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 0
@@ -1566,7 +1566,7 @@ Context 'Pre-window run on a compliant environment' {
         $script:Writes | Should -HaveCount 0
     }
 
-    It 'refuses the pre-window run without a short name rather than guessing it from a display name (project#2329)' {
+    It 'refuses the pre-window run without a short name rather than guessing it from a display name' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 1
@@ -1583,7 +1583,7 @@ Context 'Pre-window run on a compliant environment' {
         Get-SummaryResult 'Admin consent' | Should -BeNullOrEmpty
     }
 
-    It 'refuses the pre-window run without the sign-in app client id or the solution name (project#2355)' {
+    It 'refuses the pre-window run without the sign-in app client id or the solution name' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SolutionName = $script:SolutionName; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 1
@@ -1754,7 +1754,7 @@ Context 'Pre-window run on an environment with missing state' {
 
     It 'reports a missing group and a missing sign-in application as MISSING, not as a crash' {
         Add-CompliantPreWindowState
-        # an id no object in the fake tenant carries (the Admin User Group id is a real group since project#2269)
+        # an id no object in the fake tenant carries
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Overrides @{ SecurityGroups = @(@{ Name = "Neologik NCE User Group - $script:ShortName"; Id = '55555555-ffff-5555-5555-555555555555' }) }) }
         $code | Should -Be 1
         Get-SummaryResult 'NCE group assignment' | Should -Be 'MISSING - group not found (check the id)'
@@ -1798,7 +1798,7 @@ Context 'Pre-window run on an environment with missing state' {
     }
 }
 
-Context 'Platform app ownership (project#1012)' {
+Context 'Platform app ownership' {
     It 'verifies the sign-in app and reports no SharePoint app and no bots listed on a compliant environment' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
@@ -1812,7 +1812,7 @@ Context 'Platform app ownership (project#1012)' {
         $script:Writes | Should -HaveCount 0
     }
 
-    It 'adopts exactly the listed registrations and only reports the rest (project#2355)' {
+    It 'adopts exactly the listed registrations and only reports the rest' {
         Add-CompliantPreWindowState
         $t = $script:Tenant
         $spAppId = 'b1b1b1b1-0000-4000-8000-000000000001'
@@ -1830,7 +1830,8 @@ Context 'Platform app ownership (project#1012)' {
         $spPrincipal = New-FakeSp -Id 'spsp-obj' -AppId $spAppId -DisplayName $sp.displayName
         $spPrincipal.owners = @($script:Ids.Me)
         $t.ServicePrincipals += $spPrincipal
-        # A hand-named v4 bot app registration, listed by id; a foreign secret the deployment will remove.
+        # An agent registration named by hand, listed by client id, with a secret
+        # the deployment did not create and will remove.
         $bot = New-FakeApp -Id 'bot-obj' -AppId $botAppId -DisplayName 'ABC Chat Bot'
         $bot.owners = @($script:Ids.Me)
         $bot.passwordCredentials = @(@{ displayName = 'legacy-manual' })
@@ -1862,7 +1863,7 @@ Context 'Platform app ownership (project#1012)' {
         ($script:Console -join "`n") | Should -Match 'removes every credential on this app'
         @($script:Writes | Where-Object { $_ -match 'look-obj|other-obj' }) | Should -HaveCount 0
 
-        # Second run: everything already in place; the bot credential still needs attention.
+        # Second run: everything already in place; the secret still needs attention.
         $script:Writes = @()
         $script:Summary = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); SharePointAppClientId = $spAppId; BotAppClientIds = @($botAppId) }
@@ -1931,7 +1932,7 @@ Context 'Platform app ownership (project#1012)' {
 
 Context 'Post-window run: agent grants file (step 5)' {
     It 'touches nothing else: no blueprint, no roles, no group assignment, no reduction' {
-        # A tenant where every pre-window item is missing or legacy.
+        # A tenant where every item of the first run is absent or no longer needed.
         Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.Read.All'
         Add-LegacyAzureState
         Add-AgentIdentities -NoGrants
@@ -2505,8 +2506,8 @@ Context 'Pre-window run: permission reduction (step 4)' {
     }
 
     It 'finds the directory roles through the identity''s memberOf list, never through a role''s member list' {
-        # directoryRoles/{id}/members omits service principals: on dev03 the
-        # Agent ID Administrator role read as "none" through it (2026-09-08).
+        # The member list of a directory role omits service principals, so a role
+        # the identity holds would read as not held through it.
         Add-CompliantDirectoryState
         Add-LegacyAzureState
         Add-UndeclaredState
@@ -2642,7 +2643,7 @@ Context 'Summary and exit code' {
     }
 }
 
-Context 'Pre-window run: Admin User Group membership (step 4d, project#2269)' {
+Context 'Pre-window run: Admin User Group membership' {
     BeforeEach {
         Add-CompliantDirectoryState
         Add-CompliantAzureState
@@ -2751,7 +2752,7 @@ Context 'Pre-window run: Admin User Group membership (step 4d, project#2269)' {
     }
 }
 
-Context 'Pre-window run: declared set or nothing (steps 4e-4g, project#2297)' {
+Context 'Pre-window run: declared set or nothing' {
     BeforeEach {
         Add-CompliantDirectoryState
         Add-CompliantAzureState

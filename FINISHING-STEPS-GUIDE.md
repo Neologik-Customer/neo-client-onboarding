@@ -1,430 +1,213 @@
-# Neologik Post-Deployment Steps
+# Finishing Steps After Deployment
 
 ## Overview
 
-After Neologik has deployed the environment to your Azure resource group, you need to complete these final configuration steps to make the application accessible to your users.
+When Neologik has deployed the platform to your resource group, the steps below remain before your users can work with it. Complete them in the order given: the consent in step 2 returns to the environment by its host name, so the DNS record in step 1 comes first.
 
-⏱️ **Estimated time:** 30-45 minutes
+| Step | Who | Purpose |
+|---|---|---|
+| [1. Create the DNS record](#step-1-create-the-dns-record) | Your DNS administrator | Points the environment's host name at the deployment |
+| [2. Give administrator consent](#step-2-give-administrator-consent) | Your Global Administrator | Lets the sign-in applications sign your users in |
+| [3. Publish the Teams app](#step-3-publish-the-teams-app) | Your Teams administrator | Makes the agent available in Microsoft Teams |
+| [4. Give users access](#step-4-give-users-access) | Your Microsoft Entra administrator | Adds users to the access groups |
+| [5. Give agent accounts access](#step-5-give-agent-accounts-access) | Your Microsoft 365 administrators | Needed only when an agent works unattended |
 
----
+## Contents
 
-## Prerequisites
+1. [What you need](#what-you-need)
+2. [Step 1: Create the DNS record](#step-1-create-the-dns-record)
+3. [Step 2: Give administrator consent](#step-2-give-administrator-consent)
+4. [Step 3: Publish the Teams app](#step-3-publish-the-teams-app)
+5. [Step 4: Give users access](#step-4-give-users-access)
+6. [Step 5: Give agent accounts access](#step-5-give-agent-accounts-access)
+7. [Checklist](#checklist)
+8. [Later changes](#later-changes)
+9. [Troubleshooting](#troubleshooting)
+10. [Help](#help)
 
-Before starting these steps, ensure:
-- ✅ Neologik has completed the deployment to your resource group
-- ✅ You have received from Neologik:
-  - Public IP address for your deployment
-  - Two URLs for tenant access consent (Bot and Admin Tool)
-  - Microsoft Teams app package file (.zip)
-- ✅ You have the necessary permissions:
-  - DNS management access for your domain
-  - Global Administrator or Privileged Role Administrator role in Azure AD (Entra ID)
-  - Teams Administrator role in Microsoft 365 Admin Center
+## What you need
 
----
+From Neologik:
 
-## Step 1: Create DNS A Record
+| Item | Used in |
+|---|---|
+| Confirmation that the deployment is complete | All steps |
+| The target of the DNS record: a public IP address, or a host name | Step 1 |
+| A consent link for each sign-in application: the Platform Sign-in application and each agent with a Teams or web chat channel | Step 2 |
+| The Teams app package (a `.zip` file) for each agent with a Teams channel | Step 3 |
 
-Configure your domain's DNS to point to the Neologik deployment.
+Roles in your organisation:
 
-### What You Need
-- **Hostname:** The fully qualified domain name (FQDN) you agreed with Neologik (e.g., `app.yourcompany.com`)
-- **IP Address:** Provided by Neologik after deployment
+| Role | Used in |
+|---|---|
+| Management of the DNS zone of your domain | Step 1 |
+| Global Administrator | Step 2 |
+| Teams Administrator | Step 3 |
+| Groups Administrator or Global Administrator | Step 4 |
 
-### Instructions
+`<short name>` is the short name of the environment, shown in the completion summary of the onboarding script, for example `abcprd01`.
 
-1. **Access your DNS provider** (e.g., GoDaddy, Cloudflare, Azure DNS, etc.)
+## Step 1: Create the DNS record
 
-2. **Navigate to DNS management** for your domain
+Neologik gives you the target of the record. Its form depends on your deployment type:
 
-3. **Create a new A record:**
-   - **Type:** A
-   - **Name/Host:** `app` (or the subdomain you chose)
-   - **Value/Points to:** [IP address provided by Neologik]
-   - **TTL:** 3600 (or your preferred value)
+| Target supplied | Record type | Value |
+|---|---|---|
+| A public IP address | A | The IP address |
+| A host name | CNAME | The host name |
 
-4. **Save the record**
+1. Sign in to your DNS provider and open the zone of your domain.
+2. Create the record:
 
-5. **Verify DNS propagation** (may take 5-60 minutes):
+   | Field | Value |
+   |---|---|
+   | Type | A or CNAME, as above |
+   | Name | The host part of the environment's host name. For `neologik.contoso.com`, enter `neologik` |
+   | Value | The target Neologik supplied |
+   | TTL | 3600, or your organisation's standard |
+
+3. Save the record.
+4. Confirm that the name resolves:
+
    ```powershell
-   # In PowerShell, run:
-   nslookup app.yourcompany.com
+   nslookup neologik.contoso.com
    ```
-   You should see the IP address you configured.
 
-**Example A Record:**
-```
-Type: A
-Name: app
-Value: 203.0.113.45
-TTL: 3600
-```
+   The answer shows the target you entered. A new record usually resolves within minutes; allow up to 48 hours for it to reach every resolver.
 
-⚠️ **Note:** DNS changes can take up to 48 hours to fully propagate globally, though typically it's much faster.
+5. Open `https://<your host name>/nce` in a browser. The Neologik Context Engine opens and asks you to sign in, which confirms that the host name and the certificate are in place.
 
----
+## Step 2: Give administrator consent
 
-## Step 2: Grant Tenant Access to Applications
+Each sign-in application asks for delegated Microsoft Graph permissions, which it uses on behalf of the signed-in user. A Global Administrator consents to them once, for the whole tenant, so that your users are not asked one by one.
 
-Allow the Bot and Admin Tool applications to access your Azure AD (Entra ID) tenant.
+For each link Neologik supplies:
 
-### What You Need
-- **Two URLs** provided by Neologik for:
-  1. Bot application consent
-  2. Admin Tool application consent
-- **Required Entra ID Roles** (any one of the following):
-  - ✅ **Global Administrator** (recommended)
-  - ✅ **Privileged Role Administrator**
+1. Open the link in a browser. It has this form:
 
-> **Note**: Global Administrator has the broadest permissions and is recommended for initial setup.
+   ```
+   https://login.microsoftonline.com/<tenant id>/adminconsent?client_id=<application id>&redirect_uri=https://<your host name>/nce/consent-complete
+   ```
 
-### Instructions
+2. Sign in as a Global Administrator.
+3. Read the permissions the page lists. The page lists every permission the application requests.
+4. Select **Accept**.
 
-#### A. Grant Access to Bot Application
+The browser returns to the confirmation page of the environment, which reports success or the message from Microsoft.
 
-1. **Open the Bot consent URL** provided by Neologik in your browser
-   - Format: `https://login.microsoftonline.com/common/adminconsent?client_id={bot-id}&redirect_uri=https://{hostName}/nce/consent-complete`
-   - `{hostName}` = Your full qualified hostname
-   - `{bot-id}` = Bot application ID provided by Neologik
+To confirm the consent afterwards, open **Microsoft Entra ID**, then **Enterprise applications**, open the application and select **Permissions**.
 
-2. **Sign in** with your Global Administrator or Privileged Role Administrator account
+## Step 3: Publish the Teams app
 
-3. **Review the requested permissions:**
-   - Read user profiles
-   - Send messages on behalf of the bot
-   - Other bot-specific permissions
+### Upload the app
 
-4. **Click "Accept"** to grant tenant-wide consent
+1. Sign in to the Teams admin centre, https://admin.teams.microsoft.com, as a Teams Administrator.
+2. Open **Teams apps**, then **Manage apps**.
+3. Select **Upload new app** and select the `.zip` file.
+4. Open the app and confirm its name, description and permissions. Check that its status reads **Allowed**.
 
-5. **Confirmation:** the browser lands on the consent confirmation page
-   (`https://{hostName}/nce/consent-complete`), which reports success or the
-   Microsoft error message
+Repeat for each package if Neologik supplied more than one.
 
-#### B. Grant Access to NCE Admin Tool Application
+### Allow the app
 
-1. **Open the Admin Tool consent URL** provided by Neologik in your browser
-   - Format: `https://login.microsoftonline.com/common/adminconsent?client_id={nce-admin-id}&redirect_uri=https://{hostName}/nce/consent-complete`
-   - `{hostName}` = Your full qualified hostname (same as above)
-   - `{nce-admin-id}` = NCE Admin Tool application ID provided by Neologik
+1. Open **Teams apps**, then **Permission policies**.
+2. Edit the **Global (Org-wide default)** policy, or create a policy of your own.
+3. Under **Custom apps**, allow all apps, or allow specific apps and add the Neologik app.
+4. If you created a policy of your own, assign it to the users or to the group `Neologik User Group - <short name>`.
 
-2. **Sign in** with your Global Administrator or Privileged Role Administrator account
+### Make the app available to users
 
-3. **Review the requested permissions:**
-   - Manage application settings
-   - Read user and group information
-   - Other admin tool permissions
+Choose one of the two methods:
 
-4. **Click "Accept"** to grant tenant-wide consent
+| Method | Steps |
+|---|---|
+| Users add the app themselves | In **Manage apps**, open the app. Under **Available to**, choose everyone in your organisation or specific groups, and select `Neologik User Group - <short name>`. Save |
+| The app is installed for users | Open **Teams apps**, then **Setup policies**. Edit or create a policy. Under **Installed apps**, select **Add apps**, find the Neologik app and add it. Save, then assign the policy to `Neologik User Group - <short name>` |
 
-5. **Confirmation:** the browser lands on the consent confirmation page
-   (`https://{hostName}/nce/consent-complete`), which reports success or the
-   Microsoft error message
+### Tell your users
 
-### Verify Consent
+Tell your users that the app is available, the name to search for under **Apps** in Microsoft Teams, and how to pin it.
 
-To verify the applications have been granted consent:
+## Step 4: Give users access
 
-1. Go to **Azure Portal** (portal.azure.com)
-2. Navigate to **Azure Active Directory** > **Enterprise applications**
-3. Search for the application names provided by Neologik
-4. Check that **Admin consent** shows as "Granted"
+Access to each agent is controlled by a security group in your Microsoft Entra tenant. Only members of the agent's group can use it; a user outside the group is refused even when the app is visible in Teams.
 
----
+Every agent uses the group the onboarding script created, `Neologik User Group - <short name>`, unless you ask for another. To use a different group, or one group per agent, tell Neologik which existing group to attach. The platform does not create groups.
 
-## Step 3: Upload and Deploy Teams App
+### Add a user
 
-Make the Neologik application available to your users in Microsoft Teams.
+1. In the Azure portal, open **Microsoft Entra ID**, then **Groups**.
+2. Search for `Neologik User Group` and open the group.
+3. Select **Members**, then **Add members**.
+4. Find the user, select them and confirm.
 
-### What You Need
-- **Teams app package file** (.zip) provided by Neologik
-- **Teams Administrator** role in Microsoft 365 Admin Center
+The user has access within a few minutes. No restart or redeployment is needed. If the user is still refused, ask them to close and reopen the agent in Teams.
 
-### Instructions
+### Remove a user
 
-#### A. Upload the Teams App
+Open the group, select **Members**, select the user and select **Remove**.
 
-1. **Open Microsoft Teams Admin Center**
-   - Go to [https://admin.teams.microsoft.com](https://admin.teams.microsoft.com)
-   - Sign in with your Teams Administrator account
+### The other groups
 
-2. **Navigate to Teams apps:**
-   - Click **Teams apps** in the left navigation
-   - Click **Manage apps**
+The onboarding script created three further groups. Add your own staff to them only where they need the role:
 
-3. **Upload the custom app:**
-   - Click **Upload** or **Upload new app**
-   - Select the Teams app package file (.zip) provided by Neologik
-   - Wait for the upload to complete
+| Group | Role |
+|---|---|
+| `Neologik NCE Contributors - <short name>` | Configures agents and Apps in the Neologik Context Engine |
+| `Neologik NCE Admins - <short name>` | Administers the Neologik Context Engine |
+| `Neologik Admin User Group - <short name>` | Administers the Azure resources in the resource group |
 
-4. **Review app details:**
-   - Verify the app name, description, and permissions
-   - Note the app status (should be "Allowed")
+Group membership is yours to manage as people join, move and leave.
 
-#### B. Configure App Availability
+## Step 5: Give agent accounts access
 
-1. **Set up app permissions policy:**
-   - Go to **Teams apps** > **Permission policies**
-   - Either edit the **Global (Org-wide default)** policy or create a new policy
-   - Under **Custom apps**, ensure "Allow specific apps and block all others" or "Allow all apps" is selected
-   - If using specific apps, add the Neologik app to the allowed list
+This step applies only when an agent works unattended: it runs on a schedule, reads files from a SharePoint library, or reads or sends email from a shared mailbox. Such an agent has an agent account in your directory. Your administrators license the account and share the mailbox, site or team with it.
 
-2. **Assign to Neologik User Group:**
-   - If you created a custom permission policy, assign it to users:
-     - Go to **Users** > **Manage users**
-     - Select users or groups (e.g., Neologik User Group)
-     - Click **Edit settings** > **Policies**
-     - Assign your Teams app permission policy
+Follow [AGENT-ACCOUNT-ACCESS-GUIDE.md](AGENT-ACCOUNT-ACCESS-GUIDE.md).
 
-#### C. Make App Available to Users
+## Checklist
 
-**Option 1: Add to org-wide app catalog (Recommended)**
-1. In **Manage apps**, find the Neologik app
-2. Click on the app name
-3. Under **Available to**, select **Everyone in your organization** or **Specific users/groups**
-4. If selecting specific groups, choose the **Neologik User Group** (created during setup)
-5. Click **Save**
+| Check | Done |
+|---|---|
+| The host name resolves to the target Neologik supplied | |
+| `https://<your host name>/nce` opens and asks for a sign-in | |
+| Administrator consent is given for the Platform Sign-in application | |
+| Administrator consent is given for each agent's sign-in application | |
+| The Teams app is uploaded and allowed | |
+| The Teams app is available to `Neologik User Group - <short name>` | |
+| At least one test user is a member of each agent's access group | |
+| The test user can find the app in Teams, send a message and receive a reply | |
 
-**Option 2: Pre-install for users (Optional)**
-1. Go to **Teams apps** > **Setup policies**
-2. Edit or create a policy
-3. Under **Installed apps**, click **Add apps**
-4. Search for and select the Neologik app
-5. Click **Add** > **Save**
-6. Assign this policy to the Neologik User Group
+When the checklist is complete, tell Neologik, test with a small group of users, and then plan the wider rollout.
 
-#### D. Notify Users
+## Later changes
 
-After deployment, inform your users:
-- The app is available in Microsoft Teams
-- How to find it: **Apps** > Search for "[Your Neologik App Name]"
-- How to add it to their Teams sidebar
+After onboarding, Neologik may ask your Global Administrator to run `Update-NeologikEnvironmentAccess.ps1`, on one of two occasions:
 
-### Verify Deployment
+| Occasion | What the script does |
+|---|---|
+| Before the environment moves to Neologik Platform version 5 | Reduces the access of the deployment identity to the roles it needs, and confirms the directory objects the platform uses |
+| When an agent or App is to work unattended in Microsoft 365 | Applies the grants listed in the files Neologik supplies |
 
-1. **Test as a user:**
-   - Open Microsoft Teams as a user in the Neologik User Group
-   - Click **Apps** in the left sidebar
-   - Search for the Neologik app
-   - The app should appear in the search results
-   - Click to open and verify it loads correctly
-
-2. **Check usage analytics** (after a few days):
-   - Teams Admin Center > **Teams apps** > **Manage apps**
-   - Click on the Neologik app
-   - View **Analytics** tab for usage statistics
-
----
-
-## Step 4: Grant Users Access to the Bot
-
-Bot access is controlled by security groups in your Entra ID. Each bot (agent) is attached to an access group — **only users who are members of that group can use it.** Users who are not in the group will be denied access even if they can see the app in Teams.
-
-By default every agent uses the group created during onboarding, named `Neologik User Group - <short name>` (e.g., `Neologik User Group - neokad01`). If you want a different or per-agent group, tell Neologik which existing Entra group to attach — the platform never creates groups itself. **Your Entra ID administrator is responsible for managing membership on an ongoing basis.**
-
-### What You Need
-- **Group name(s)** confirmed with Neologik — the default `Neologik User Group - <short name>`, or the group(s) you chose per agent
-- **Global Administrator** or **Groups Administrator** role in Entra ID
-
-### Instructions
-
-#### A. Find the Bot Access Group
-
-1. Go to **Azure Portal** (portal.azure.com)
-2. Navigate to **Microsoft Entra ID** > **Groups**
-3. Search for `Neologik User Group` — you will see the default access group (and any other groups you chose per agent)
-4. Click the group for the bot you want to manage
-
-#### B. Add Users to the Group
-
-1. In the group, click **Members** in the left sidebar
-2. Click **Add members**
-3. Search for the user by name or email address
-4. Select the user and click **Select**
-
-Repeat for each user who needs access. Users are granted access immediately — no restart or redeployment is required.
-
-#### C. Remove Users from the Group
-
-To revoke access, follow the same steps and use **Remove** on the Members page.
-
-> **Note:** If a user was recently added and is still seeing "Unauthorized", ask them to close and reopen the bot in Teams. Group membership changes can occasionally take a few minutes to reflect.
-
-### Ongoing Responsibility
-
-Managing group membership is an **ongoing administrative task**. When new employees join or roles change, your Entra ID administrator should update group membership accordingly. Neologik does not manage this on your behalf.
-
----
-
-## Step 5: Give agent accounts access to your resources (only when an agent works on its own)
-
-An agent that runs on a schedule, reads files from a SharePoint library or emails from a shared mailbox has an agent account in your directory. Your administrators licence it and share the mailbox, site or team with it; the portals' pickers cannot find these accounts, so each step is a short command. The admin tool shows a chip per resource that turns green once the step is done.
-
-📋 **See: [AGENT-ACCOUNT-ACCESS-GUIDE.md](AGENT-ACCOUNT-ACCESS-GUIDE.md)** for the commands and how to check them.
-
----
-
-## Verification Checklist
-
-Before considering the deployment complete, verify:
-
-- [ ] DNS A record is created and resolving to the correct IP address
-- [ ] Bot application has tenant-wide admin consent granted
-- [ ] Admin Tool application has tenant-wide admin consent granted
-- [ ] Both applications appear in Enterprise applications with "Admin consent granted"
-- [ ] Teams app is uploaded to Teams Admin Center
-- [ ] Teams app is available to the Neologik User Group
-- [ ] At least one test user has been added to each agent's access group in Entra ID
-- [ ] Test user can find and open the app in Microsoft Teams
-- [ ] Test user can send a message and receive a response (confirms group access is working)
-- [ ] Application loads correctly when accessed via the FQDN (https://app.yourcompany.com)
-
----
+Neologik sends the complete command with every value filled in. [ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md](ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md) explains what the script checks and changes, what the sign-in asks you to approve, and what you receive at the end.
 
 ## Troubleshooting
 
-### DNS Issues
-**Problem:** DNS not resolving
-- **Solution:** Check TTL settings, verify with DNS provider, wait for propagation (up to 48 hours)
+| Symptom | Cause | Action |
+|---|---|---|
+| The host name does not resolve | The record has not reached your resolver, or it was created in the wrong zone | Check the record with your DNS provider and wait for the TTL to pass. On Windows, `ipconfig /flushdns` clears the local cache |
+| The host name resolves to a different target | The record value is wrong | Correct the record |
+| The browser reports a certificate error | The certificate was issued for a different host name, or its chain is incomplete | Check the certificate against [PFX-CERT-GUIDE.md](PFX-CERT-GUIDE.md) and tell Neologik |
+| A user sees "Need admin approval" | Administrator consent has not been given for that application | Open the consent link for the application, as in step 2 |
+| A consent link reports an error | The link was opened before the host name resolved, or in the wrong tenant | Complete step 1, check the tenant you signed in to, and open the link again |
+| A user is refused by the agent | The user is not a member of the agent's access group | Add the user to the group, as in step 4 |
+| A user added a few minutes ago is still refused | The membership change has not reached the user's session | Ask the user to close and reopen the agent in Teams |
+| The app does not appear in Teams | The app is not allowed by the permission policy, or is not available to the user's group | Check the policy and the availability, as in step 3 |
 
-**Problem:** Wrong IP address returned
-- **Solution:** Verify A record value, clear DNS cache: `ipconfig /flushdns` (Windows) or `sudo dscacheutil -flushcache` (Mac)
+## Help
 
-### Consent Issues
-**Problem:** "Need admin approval" error when users try to access
-- **Solution:** Ensure admin consent was granted by a Global Admin, check Enterprise Applications in Azure Portal
+Email support@neologik.ai with:
 
-**Problem:** Consent URLs not working
-- **Solution:** Verify you're using the correct tenant ID and client IDs, contact Neologik support
-
-### Bot Access Issues
-**Problem:** User sees "You do not have permission to use this bot" or "Unauthorized"
-- **Solution:** The user is not a member of the bot's access group in Entra ID. Go to **Microsoft Entra ID** > **Groups** > find the agent's access group (default `Neologik User Group - <short name>`) > **Members** > **Add members**. Access is granted immediately.
-
-**Problem:** User was just added to the group but still sees "Unauthorized"
-- **Solution:** Ask the user to close and reopen the bot in Teams. Group changes can take a few minutes to propagate.
-
-### Teams App Issues
-**Problem:** App not appearing in search
-- **Solution:** Check app permission policies, verify app is set to "Allowed", ensure user is in the correct group
-
-**Problem:** App won't load or shows error
-- **Solution:** Verify app was uploaded correctly, check for any blocking policies, try removing and re-adding the app
-
----
-
-## Later changes and migration windows
-
-After onboarding, the one script a Global Administrator ever runs again is
-`Update-NeologikEnvironmentAccess.ps1` (in this repository). It verifies
-before it writes, changes nothing on a compliant environment and is safe
-to re-run; with `-Verify` it only reports what it would change (as
-`WOULD ...` items in its summary) and writes nothing, exiting 1 when
-anything would change. Neologik supplies the files it reads, and the files
-you give it select the run:
-
-- **Pre-window run** - the command line Neologik sends you, with no grants
-  file. What the script checks and changes, and why, is explained step by
-  step in [ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md](ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md). Neologik fills in every value, so you type nothing but your
-  sign-in, and the configuration file from your original onboarding is not
-  needed. Download the latest `Update-NeologikEnvironmentAccess.ps1` from
-  this repository, run the command exactly as sent, and return the summary
-  JSON it writes. Every customer has this one run, any time before the
-  migration window. It verifies or applies everything only a Global
-  Administrator can change: the agent identity blueprint and its principal
-  role, the deployment identity's two retained Microsoft Graph roles (its
-  retired tenant-wide roles are removed once those are in place), the NCE
-  user group assignment on the sign-in application, the sign-in
-  application's tenant-wide admin consent, the SharePoint `Sites.Selected`
-  consent where SharePoint ingestion is in use, ownership of your Neologik
-  application registrations by the deployment identity (exactly the ones
-  named on the command line; any other registration whose name starts
-  with "Neologik" is only reported, never changed), and then the
-  permission reduction: the deployment identity receives the narrow
-  resource-group role set and the two retained subscription roles (Reader,
-  Cost Management Contributor) BEFORE its broad subscription roles
-  (Contributor, User Access Administrator) and its Application
-  Administrator directory role are removed. If any narrow role could not
-  be applied, nothing is removed. The account you sign in with needs
-  Global Administrator in Entra ID and Owner (or User Access
-  Administrator) on the subscription.
-
-  The values Neologik fills in:
-
-  | Parameter | What it is |
-  |---|---|
-  | `-TenantId` | your Entra ID tenant |
-  | `-SubscriptionId`, `-ResourceGroupName` | the subscription and resource group Neologik deploys into |
-  | `-DeploySpClientId` | the deployment identity (the "Neologik GitHub Service Connection" application) |
-  | `-SolutionName`, `-SolutionShortName` | the names Neologik's deployment uses for your environment |
-  | `-SignInAppClientId` | the "Neologik Platform Sign-in" application that controls who can open the Neologik Context Engine |
-  | `-SharePointAppClientId` | the "Neologik SharePoint Access" application, only where you ingest from SharePoint |
-  | `-BotAppClientIds` | the application registration of each Neologik bot in your tenant |
-  | `-NceUserGroupId`, `-AdminGroupId` | your Neologik NCE User Group and Admin User Group |
-- **Post-window run** - the same script with `-AgentGrantsFile <json>`
-  and/or `-MailboxGrantsFile <json>`, files Neologik exports from the
-  platform. Needed only once an agent or App works unattended on your
-  organisation's behalf in Microsoft 365 - an autonomy-adoption event, not
-  a migration step; a customer with no unattended work never has this
-  run. It applies exactly what the files list and nothing else: the
-  agent-user delegated grants for the agents and Apps with enabled
-  permission packs, and/or the Exchange Online mailbox grants for email
-  channels. `-RemoveLegacyGrantAppIds` (with `-MailboxGrantsFile`) removes
-  a retired identity's mailbox assignments; an identity the file lists as
-  adopted by the v5 email channel keeps its assignment.
-
-Every run prints any consent URL you still need to open, writes a JSON
-summary beside itself (or in the current folder when that location is
-read-only) for Neologik's ticket, never stops on the first problem, lists
-anything that needs you in the summary with the reason, and exits 0 only
-when everything is in the expected state. Full parameter help:
-`Get-Help ./Update-NeologikEnvironmentAccess.ps1 -Detailed`.
-
-### What the sign-in asks you to approve
-
-The script signs in to Microsoft Graph under your own account (device
-code). On first use Microsoft shows a consent screen listing the
-delegated permissions the script requests. All of them are delegated:
-they let the script act as you for this session only and grant nothing
-to any application.
-
-| Permission | Why the script needs it |
-|---|---|
-| `Application.ReadWrite.All` | Read and adopt the agent identity blueprint and its principal; add the pipeline's federated credentials |
-| `AppRoleAssignment.ReadWrite.All` | Grant and remove the deployment identity's Microsoft Graph application roles; assign the NCE user group to the sign-in application |
-| `Directory.Read.All` | Read the service principals, groups and directory roles the checks compare against (read-only) |
-| `User.Read` | Resolve your own account as the sponsor when the agent identity blueprint has to be created (read-only) |
-| `DelegatedPermissionGrant.Read.All` | Read the sign-in application's tenant-wide admin consent |
-| `AgentIdentityBlueprint.Create`, `AgentIdentityBlueprint.AddRemoveCreds.All`, `AgentIdentityBlueprintPrincipal.Create` | Create the agent identity blueprint, its principal and its credentials when they do not exist yet |
-| `RoleManagement.ReadWrite.Directory` (pre-window run only) | Remove the deployment identity's Application Administrator directory role membership |
-| `DelegatedPermissionGrant.ReadWrite.All` (post-window run with `-AgentGrantsFile` only) | Create the agent-user delegated grants the file lists |
-
-`Directory.Read.All` and `User.Read` are read-only: the script can change
-nothing with them, and without them the group, consent and directory-role
-checks fail on a tenant where no earlier consent exists. The Azure sign-in
-(pre-window run) and the Exchange Online sign-in (post-window run with
-`-MailboxGrantsFile`) use the same account. A `-Verify` run signs in the
-same way and shows the same screen.
-
----
-
-## Need Help?
-
-If you encounter any issues during these steps, contact Neologik support:
-- 📧 Email: support@neologik.ai
-- 📱 Include in your message:
-  - Step where you're experiencing issues
-  - Error messages or screenshots
-  - Your organization name and deployment details
-
----
-
-## Next Steps
-
-Once all steps are complete:
-1. ✅ Inform Neologik that post-deployment configuration is complete
-2. ✅ Conduct user acceptance testing (UAT) with a small group
-3. ✅ Provide feedback to Neologik on the deployment
-4. ✅ Plan broader rollout to all users
-5. ✅ Schedule training sessions for end users (if needed)
-
-Congratulations! Your Neologik environment is now fully deployed and ready for use! 🎉
+- the step you have reached;
+- the error message, or a screenshot of it;
+- your organisation name and the environment's host name.

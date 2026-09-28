@@ -2,10 +2,8 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
     Static checks on Install-NeologikEnvironment.ps1: every Neologik function
-    the script calls is defined in the script. A refactor once removed
-    New-NeologikNceAuthApp and left its call behind, so every fresh
-    onboarding failed at the Platform Sign-in registration step
-    (https://github.com/Neologik-AI/project/issues/2528).
+    the script calls is defined in the script, so that a run cannot stop at a
+    call to a function that does not exist.
 
     Run: pwsh -NoProfile -Command "Invoke-Pester -Path tests -CI"
 #>
@@ -32,7 +30,7 @@ It 'defines every Neologik function it calls' {
 }
 
 It 'selects the subscription named by -SubscriptionName on a fresh run' {
-    # project#2579: a supplied name is resolved and set as the context; the
+    # a supplied name is resolved and set as the context; the
     # login context is the fallback only when the parameter is absent.
     $text = Get-Content -Raw $script:ScriptPath
     $text | Should -Match ([regex]::Escape('[string]::IsNullOrWhiteSpace($SubscriptionName)'))
@@ -45,7 +43,7 @@ It 'creates the Platform Sign-in registration' {
     $script:Called | Should -Contain 'New-NeologikNceAuthApp'
 }
 
-It 'records the kit version on the resource group, at the version the version history opens with (project#2922)' {
+It 'records the kit version on the resource group, at the version the version history opens with' {
     $script:Defined | Should -Contain 'Set-NeologikKitVersionTag'
     $script:Called | Should -Contain 'Set-NeologikKitVersionTag'
     $text = Get-Content -Raw $script:ScriptPath
