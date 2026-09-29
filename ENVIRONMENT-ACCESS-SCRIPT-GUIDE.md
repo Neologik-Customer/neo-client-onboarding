@@ -32,7 +32,7 @@ The environment access script reads the current state before each change. The en
 | Requirement | Reason |
 |---|---|
 | PowerShell 7.4 or later | The environment access script stops on an earlier version |
-| A browser, on any device | The environment access script signs in with a device code. The environment access script prints a web address and a code. You complete the sign-in in the browser |
+| A workstation with a desktop and a browser | The environment access script opens the sign-in page in the browser of the workstation. You complete the sign-in in the browser |
 | A Global Administrator account in your tenant | Only a Global Administrator can grant and remove Microsoft Graph application permissions and directory roles |
 | Owner or User Access Administrator on the subscription, for the first run | The same account changes the Azure role assignments of the deployment identity |
 | Exchange Administrator or Global Administrator, for a later run with mailbox grants | The mailbox grants are made in Exchange Online |
@@ -60,9 +60,11 @@ The first run makes one more check before the first run changes an Azure role. T
 1. Place `Update-NeologikEnvironmentAccess.ps1` in a folder on your workstation.
 2. Open PowerShell 7 in that folder.
 3. Paste the command from Neologik and press Enter.
-4. The environment access script prints a web address and a code. Open the web address in a browser, enter the code and sign in as a Global Administrator. The environment access script waits for up to 15 minutes.
-5. In the first run, the environment access script signs in a second time, to Azure. Enter the second code in the same way. In a later run with mailbox grants, the environment access script signs in to Exchange Online in the same way.
+4. The environment access script opens the sign-in page in your browser. Sign in as a Global Administrator. The environment access script waits for up to 5 minutes.
+5. In the first run, the environment access script signs in a second time, to Azure. The browser uses the same account and does not usually ask again. In a later run with mailbox grants, the environment access script signs in to Exchange Online in the same way.
 6. Read the summary table on screen. Send the summary file to Neologik.
+
+When the browser sign-in does not complete, the environment access script prints a web address and a code. Open the web address in a browser on any device, enter the code and sign in. The environment access script waits for up to 15 minutes. Some organisations block this sign-in with a Conditional Access policy. The environment access script then says so and tries the next method.
 
 To see what a run would change, add `-Verify` to the end of the command. The sign-ins are the same. The environment access script reports each pending change as `WOULD` and writes nothing.
 

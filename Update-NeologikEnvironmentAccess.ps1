@@ -288,14 +288,23 @@
 .NOTES
     Requires PowerShell 7.4 or later.
 
-    Sign-in. The script prints a web address and a code. Open the web address in a
-    browser on any device, enter the code and sign in as a Global Administrator.
-    The script waits while the code is valid, for 15 minutes at most. The script
-    reports every 30 seconds that the script still waits.
+    Sign-in. The script opens the sign-in page in the browser of this computer.
+    Sign in as a Global Administrator. The script waits for 5 minutes at most. The
+    script reports every 30 seconds that the script still waits.
 
-    When that sign-in does not complete, the script tries the Azure CLI session of
-    the workstation, when the workstation has an Azure CLI session. The script then
-    tries the device code prompt of Microsoft Graph PowerShell.
+    When the browser sign-in does not complete, the script prints a web address and
+    a code. Open the web address in a browser on any device, enter the code and sign
+    in. The script waits while the code is valid, for 15 minutes at most. Some
+    organisations block this sign-in with a Conditional Access policy. The script
+    then says so and tries the next method.
+
+    When that sign-in does not complete either, the script tries the Azure CLI
+    session of the workstation, when the workstation has an Azure CLI session. The
+    script then tries the device code prompt of Microsoft Graph PowerShell.
+
+    The sign-in to Azure and the sign-in to Exchange Online follow the same order.
+    The browser signs in with the same account, so the browser does not usually ask
+    again.
 
     Checks. Before the script changes anything, the script confirms three facts.
       1. The workstation can reach each Microsoft address that the script uses.
@@ -463,20 +472,26 @@ $script:GuidPattern = '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
 # to 1. The pattern includes each 'WOULD' change that a run with -Verify reports.
 $script:AttentionPattern = 'MISSING|SKIPPED|NOT FOUND|PENDING|FAILED|UNKNOWN|WOULD'
 
-# Sign-in. The script runs the device code sign-in. The script prints the
-# address and the code, waits while the code is valid, and tries the next method when
-# a method fails. The sign-in uses the public client ids of two Microsoft
-# applications: Microsoft Graph Command Line Tools for Microsoft Graph, and Microsoft
-# Azure PowerShell for Azure Resource Manager. The sign-in uses no Neologik application.
+# Sign-in. The script runs the sign-in itself. The first method is a sign-in in the
+# browser of this computer. The second method is a device code. The script prints what
+# the script waits for, waits for a limited time, and tries the next method when a
+# method fails. Many organisations block the device code with a Conditional Access
+# policy, so the device code is not the first method. The sign-in uses the public
+# client ids of two Microsoft applications: Microsoft Graph Command Line Tools for
+# Microsoft Graph, and Microsoft Azure PowerShell for Azure Resource Manager. The
+# sign-in uses no Neologik application.
 $script:GraphPublicClientId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
 $script:AzurePublicClientId = '1950a258-227b-4e31-a9cf-717495945fc2'
 $script:LoginEndpoint = 'https://login.microsoftonline.com'
 # Azure requires multi-factor authentication for each write. The script requests the
-# authentication context claim 'p1' with the device code for Azure.
+# authentication context claim 'p1' with each sign-in to Azure.
 $script:AzureMfaClaims = '{"access_token":{"acrs":{"essential":true,"values":["p1"]}}}'
+# The longest time that the script waits for the browser sign-in, in seconds.
+$script:BrowserMaximumWaitSeconds = 300
 # The longest time that the script waits for one device code, in seconds.
 $script:DeviceCodeMaximumWaitSeconds = 900
-$script:DeviceCodeReportEverySeconds = 30
+# How often the script reports that the script still waits for a sign-in, in seconds.
+$script:SignInReportEverySeconds = 30
 # The role template of Global Administrator. The script checks the signed-in account
 # against the role template.
 $script:GlobalAdministratorTemplateId = '62e90394-69f5-4237-9190-012177145e10'
@@ -758,6 +773,31 @@ function Get-NeologikTokenError {
     return 'The Microsoft identity platform gave no answer'
 }
 
+function Test-NeologikConditionalAccessBlock {
+    # Returns true when the Microsoft identity platform refused a sign-in because of a
+    # Conditional Access policy of the tenant. The error codes 53000 to 53099 name a
+    # Conditional Access refusal. 53003 is the refusal that a block policy gives.
+    param($Body)
+    foreach ($code in @(Get-NeologikProperty $Body 'error_codes' @())) {
+        if ([string]$code -match '^530\d\d$') { return $true }
+    }
+    $description = [string](Get-NeologikProperty $Body 'error_description' '')
+    return ($description -match 'AADSTS530\d\d')
+}
+
+function Write-NeologikSignInFailure {
+    # Logs why a sign-in did not complete, on one line. A refusal by a Conditional
+    # Access policy gets its own line, so the administrator knows that a policy of the
+    # tenant blocks the method. The caller then tries the next method.
+    param([string]$Label, [string]$Method, $Body)
+    if (Test-NeologikConditionalAccessBlock $Body) {
+        Write-Log "A Conditional Access policy of the tenant refused the sign-in to $Label with $Method. $(Get-NeologikTokenError $Body)" -Level Warning
+    }
+    else {
+        Write-Log "The sign-in to $Label did not complete. $(Get-NeologikTokenError $Body)" -Level Warning
+    }
+}
+
 function Get-NeologikDeviceCodeToken {
     <#
     Runs the device code sign-in. The function prints the address and the code. The
@@ -807,7 +847,7 @@ function Get-NeologikDeviceCodeToken {
     Write-Host "  1. Open $verificationUri in a browser on any device."
     Write-Host "  2. Enter the code: $userCode" -ForegroundColor Yellow
     Write-Host '  3. Sign in as a Global Administrator. Approve the permissions when the browser lists permissions.'
-    Write-Host "  The code is valid for $minutes minutes. The script waits for the sign-in and reports every $($script:DeviceCodeReportEverySeconds) seconds."
+    Write-Host "  The code is valid for $minutes minutes. The script waits for the sign-in and reports every $($script:SignInReportEverySeconds) seconds."
     Write-Host ''
     # The loop asks at once and then after each interval, until the lifetime of the code
     # ends. The count of intervals limits the loop. The loop reads no clock.
@@ -841,14 +881,14 @@ function Get-NeologikDeviceCodeToken {
         if ($reason -eq 'authorization_pending') { }
         elseif ($reason -eq 'slow_down') { $interval += 5 }
         else {
-            Write-Log "The sign-in to $Label did not complete. $(Get-NeologikTokenError $poll.Body)" -Level Warning
+            Write-NeologikSignInFailure -Label $Label -Method 'a device code' -Body $poll.Body
             return $null
         }
         if ($elapsed -ge $lifetime) { break }
         Start-Sleep -Seconds $interval
         $elapsed += $interval
         $sinceReport += $interval
-        if ($sinceReport -ge $script:DeviceCodeReportEverySeconds) {
+        if ($sinceReport -ge $script:SignInReportEverySeconds) {
             $left = [int][Math]::Ceiling(($lifetime - $elapsed) / 60)
             Write-Host "  The script still waits for the sign-in to $Label. Code $userCode. About $left minute(s) remain."
             $sinceReport = 0
@@ -856,6 +896,258 @@ function Get-NeologikDeviceCodeToken {
     }
     Write-Log "The sign-in to $Label did not complete. The code expired after $minutes minutes" -Level Warning
     return $null
+}
+
+function ConvertTo-NeologikBase64Url {
+    # Encodes bytes as base64url without padding, as the proof key of the browser
+    # sign-in requires.
+    param([byte[]]$Bytes)
+    return [System.Convert]::ToBase64String($Bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
+function New-NeologikRandomValue {
+    # Returns a random value of 32 bytes, encoded as base64url.
+    $bytes = [byte[]]::new(32)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    return (ConvertTo-NeologikBase64Url $bytes)
+}
+
+function ConvertFrom-NeologikQueryString {
+    # Returns the parameters of a query string as a hashtable.
+    param([string]$Query)
+    $result = @{}
+    foreach ($pair in ($Query.TrimStart('?') -split '&')) {
+        if (-not $pair) { continue }
+        $name, $value = $pair -split '=', 2
+        $name = [System.Uri]::UnescapeDataString($name.Replace('+', ' '))
+        $value = if ($null -ne $value) { [System.Uri]::UnescapeDataString($value.Replace('+', ' ')) } else { '' }
+        $result[$name] = $value
+    }
+    return $result
+}
+
+function Start-NeologikLoopbackListener {
+    <#
+    Starts a listener on the loopback addresses of this computer, on a free port. The
+    browser returns the result of the sign-in to the listener. Only this computer can
+    reach a loopback address. The listener answers on 127.0.0.1 and, when this
+    computer has IPv6, on ::1. A browser can resolve localhost to either address.
+    Returns the port, the listeners and a Stop method.
+    #>
+    $ipv4 = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    $ipv4.Start()
+    $port = $ipv4.LocalEndpoint.Port
+    $listeners = @($ipv4)
+    if ([System.Net.Sockets.Socket]::OSSupportsIPv6) {
+        try {
+            $ipv6 = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::IPv6Loopback, $port)
+            $ipv6.Start()
+            $listeners += $ipv6
+        }
+        catch { Write-Verbose "The listener on ::1 did not start. $($_.Exception.Message)" }
+    }
+    $loopback = [pscustomobject]@{ Port = $port; Listeners = $listeners }
+    $loopback | Add-Member -MemberType ScriptMethod -Name Stop -Value { foreach ($item in $this.Listeners) { $item.Stop() } }
+    return $loopback
+}
+
+function Test-NeologikDesktop {
+    # Returns true when this computer has a desktop on which a browser can open.
+    return -not (($IsLinux -and -not $env:DISPLAY -and -not $env:WAYLAND_DISPLAY) -or -not [Environment]::UserInteractive)
+}
+
+function Open-NeologikBrowser {
+    # Opens the address in the default browser of this computer. Returns $false when
+    # this computer has no desktop or no browser opens.
+    param([string]$Uri)
+    if (-not (Test-NeologikDesktop)) {
+        Write-Log '  This computer has no desktop, so the script cannot open a browser' -Level Info
+        return $false
+    }
+    try {
+        Start-Process -FilePath $Uri -ErrorAction Stop | Out-Null
+        return $true
+    }
+    catch {
+        Write-Log "  The browser did not open. $(Get-NeologikErrorText $_)" -Level Info
+        return $false
+    }
+}
+
+function Read-NeologikLoopbackRequest {
+    <#
+    Reads one HTTP request from the browser and answers the request. Returns the
+    parameters of the query string. The answer tells the administrator to return to
+    the PowerShell window. A request with no result of the sign-in, for example a
+    request for an icon, gets the answer 404 and an empty result.
+    #>
+    param($Client)
+    $stream = $Client.GetStream()
+    $stream.ReadTimeout = 5000
+    $buffer = [byte[]]::new(16384)
+    $received = [System.Text.StringBuilder]::new()
+    while ($received.Length -lt 65536) {
+        $count = $stream.Read($buffer, 0, $buffer.Length)
+        if ($count -le 0) { break }
+        [void]$received.Append([System.Text.Encoding]::ASCII.GetString($buffer, 0, $count))
+        if ($received.ToString().Contains("`r`n`r`n")) { break }
+    }
+    $requestLine = ($received.ToString() -split "`r`n")[0]
+    $query = @{}
+    if ($requestLine -match '^GET\s+(\S+)\s+HTTP/') {
+        $target = $Matches[1]
+        $index = $target.IndexOf('?')
+        if ($index -ge 0) { $query = ConvertFrom-NeologikQueryString $target.Substring($index + 1) }
+    }
+    if ($query.ContainsKey('code')) {
+        $status = '200 OK'
+        $text = 'The sign-in is complete. Return to the PowerShell window.'
+    }
+    elseif ($query.ContainsKey('error')) {
+        $status = '200 OK'
+        $text = 'The sign-in did not complete. Return to the PowerShell window.'
+    }
+    else {
+        $status = '404 Not Found'
+        $text = 'Not found.'
+    }
+    $html = "<!DOCTYPE html><html><head><meta charset=`"utf-8`"><title>Neologik sign-in</title></head><body><p>$text</p></body></html>"
+    $body = [System.Text.Encoding]::UTF8.GetBytes($html)
+    $header = "HTTP/1.1 $status`r`nContent-Type: text/html; charset=utf-8`r`nContent-Length: $($body.Length)`r`nConnection: close`r`n`r`n"
+    $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($header)
+    $stream.Write($headerBytes, 0, $headerBytes.Length)
+    $stream.Write($body, 0, $body.Length)
+    $stream.Flush()
+    return $query
+}
+
+function Wait-NeologikLoopbackRequest {
+    <#
+    Waits for the browser to return the result of the sign-in to the listener. The
+    function waits for TimeoutSeconds at most. The function reports every 30 seconds
+    that the script still waits. Returns the parameters of the query string, or $null
+    when the time ends first.
+    #>
+    param($Listener, [int]$TimeoutSeconds, [string]$Label)
+    $elapsed = 0
+    $sinceReport = 0
+    $sockets = @($Listener.Listeners)
+    $accepts = [System.Threading.Tasks.Task[]]@($sockets | ForEach-Object { $_.AcceptTcpClientAsync() })
+    while ($true) {
+        $ready = [System.Threading.Tasks.Task]::WaitAny($accepts, 1000)
+        if ($ready -ge 0) {
+            $client = $accepts[$ready].Result
+            $query = @{}
+            try { $query = Read-NeologikLoopbackRequest -Client $client }
+            catch { $query = @{} }
+            finally { $client.Dispose() }
+            if ($query.ContainsKey('code') -or $query.ContainsKey('error')) { return $query }
+            $accepts[$ready] = $sockets[$ready].AcceptTcpClientAsync()
+            continue
+        }
+        $elapsed += 1
+        $sinceReport += 1
+        if ($elapsed -ge $TimeoutSeconds) { return $null }
+        if ($sinceReport -ge $script:SignInReportEverySeconds) {
+            $left = [int][Math]::Ceiling(($TimeoutSeconds - $elapsed) / 60)
+            Write-Host "  The script still waits for the sign-in to $Label in the browser. About $left minute(s) remain."
+            $sinceReport = 0
+        }
+    }
+}
+
+function Get-NeologikBrowserToken {
+    <#
+    Runs the sign-in in the browser of this computer. The sign-in uses an
+    authorisation code with a proof key, and a listener on the loopback address. The
+    function prints what the function waits for. The function waits for
+    BrowserMaximumWaitSeconds at most. Returns the tokens. When the sign-in does not
+    complete, the function logs the reason and returns $null. The caller then tries
+    the next method.
+    #>
+    param([string]$ClientId, [string[]]$Scopes, [string]$Label, [string]$Claims, [string]$LoginHint)
+    $state = $script:State
+    $base = "$($script:LoginEndpoint)/$($state.TenantId)/oauth2/v2.0"
+    try { $listener = Start-NeologikLoopbackListener }
+    catch {
+        Write-Log "The sign-in to $Label in the browser did not start. The script could not open a port on this computer. $(Get-NeologikErrorText $_)" -Level Warning
+        return $null
+    }
+    try {
+        $redirectUri = "http://localhost:$($listener.Port)/"
+        $verifier = New-NeologikRandomValue
+        $challenge = ConvertTo-NeologikBase64Url ([System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::ASCII.GetBytes($verifier)))
+        $expectedState = New-NeologikRandomValue
+        $parameters = [ordered]@{
+            client_id             = $ClientId
+            response_type         = 'code'
+            redirect_uri          = $redirectUri
+            response_mode         = 'query'
+            scope                 = ($Scopes -join ' ')
+            state                 = $expectedState
+            code_challenge        = $challenge
+            code_challenge_method = 'S256'
+        }
+        if ($LoginHint) { $parameters['login_hint'] = $LoginHint } else { $parameters['prompt'] = 'select_account' }
+        if ($Claims) { $parameters['claims'] = $Claims }
+        $query = ($parameters.Keys | ForEach-Object { "$_=$([System.Uri]::EscapeDataString([string]$parameters[$_]))" }) -join '&'
+        $authorizeUri = "$base/authorize?$query"
+        $minutes = [int][Math]::Ceiling($script:BrowserMaximumWaitSeconds / 60)
+        Write-Host ''
+        Write-Host "  Sign-in to $Label" -ForegroundColor Cyan
+        Write-Host '  The script opens the sign-in page in the browser of this computer.'
+        Write-Host '  Sign in as a Global Administrator. Approve the permissions when the browser lists permissions.'
+        Write-Host "  The script waits for $minutes minutes at most and reports every $($script:SignInReportEverySeconds) seconds. The script then tries a device code."
+        Write-Host ''
+        if (-not (Open-NeologikBrowser -Uri $authorizeUri)) {
+            Write-Log "The sign-in to $Label in the browser did not start. The script tries a device code" -Level Warning
+            return $null
+        }
+        $result = Wait-NeologikLoopbackRequest -Listener $listener -TimeoutSeconds $script:BrowserMaximumWaitSeconds -Label $Label
+    }
+    catch {
+        Write-Log "The sign-in to $Label in the browser did not complete. $(Get-NeologikErrorText $_)" -Level Warning
+        return $null
+    }
+    finally { $listener.Stop() }
+    if (-not $result) {
+        Write-Log "The sign-in to $Label in the browser did not complete within $minutes minutes" -Level Warning
+        return $null
+    }
+    if ([string](Get-NeologikProperty $result 'state' '') -ne $expectedState) {
+        Write-Log "The sign-in to $Label in the browser returned an answer that this run did not request. The script ignores the answer" -Level Warning
+        return $null
+    }
+    if ($result.ContainsKey('error')) {
+        Write-NeologikSignInFailure -Label $Label -Method 'the browser' -Body $result
+        return $null
+    }
+    $request = @{
+        grant_type    = 'authorization_code'
+        client_id     = $ClientId
+        code          = [string]$result['code']
+        redirect_uri  = $redirectUri
+        code_verifier = $verifier
+        scope         = ($Scopes -join ' ')
+    }
+    if ($Claims) { $request['claims'] = $Claims }
+    try { $answer = Invoke-NeologikTokenRequest -Uri "$base/token" -Body $request }
+    catch {
+        Write-Log "The sign-in to $Label did not complete. $(Get-NeologikErrorText $_)" -Level Warning
+        return $null
+    }
+    $accessToken = [string](Get-NeologikProperty $answer.Body 'access_token' '')
+    if ($answer.StatusCode -ne 200 -or -not $accessToken) {
+        Write-NeologikSignInFailure -Label $Label -Method 'the browser' -Body $answer.Body
+        return $null
+    }
+    $account = Get-NeologikTokenAccountId -Token $accessToken
+    Write-Log "The sign-in to $Label completed$(if ($account) { ", account $account" })" -Level Success
+    return @{
+        AccessToken  = $accessToken
+        RefreshToken = [string](Get-NeologikProperty $answer.Body 'refresh_token' '')
+        Account      = $account
+    }
 }
 
 function Test-NeologikPreflightEndpoint {
@@ -1365,19 +1657,25 @@ function Connect-NeologikGraph {
             $cli = Invoke-NeologikAzureCli -Arguments @('account', 'get-access-token', '--resource-type', 'ms-graph', '--tenant', $state.TenantId, '--query', 'accessToken', '-o', 'tsv')
             $cliToken = [string](@($cli.Output) | Where-Object { $_ -and $_.Trim() } | Select-Object -Last 1)
             if ($cli.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($cliToken)) {
-                Write-ActionRequired "The Azure CLI gave no token for tenant $($state.TenantId).`nSign in with this command:`n  az login --tenant $($state.TenantId) --scope https://graph.microsoft.com//.default`nThen run the script again. Or run the script without -UseAzureCliToken, to sign in with a device code."
+                Write-ActionRequired "The Azure CLI gave no token for tenant $($state.TenantId).`nSign in with this command:`n  az login --tenant $($state.TenantId) --scope https://graph.microsoft.com//.default`nThen run the script again. Or run the script without -UseAzureCliToken, to sign in in the browser."
                 return $false
             }
             Connect-MgGraph -AccessToken (ConvertTo-SecureString -String $cliToken.Trim() -AsPlainText -Force) -NoWelcome -ErrorAction Stop
         }
         else {
-            # The order of the methods: the device code of the script, then the Azure CLI session
-            # of the workstation, then the device code prompt of Microsoft Graph PowerShell.
+            # The order of the methods: the browser sign-in of the script, then the device code
+            # of the script, then the Azure CLI session of the workstation, then the device code
+            # prompt of Microsoft Graph PowerShell.
             $connected = $false
             Write-Log 'The script signs in to Microsoft Graph. Sign in as a Global Administrator' -Level Info
-            $token = Get-NeologikDeviceCodeToken -ClientId $script:GraphPublicClientId -Label 'Microsoft Graph' `
-                -Scopes @(@($scopes) + @('openid', 'profile', 'offline_access'))
+            $graphScopes = @(@($scopes) + @('openid', 'profile', 'offline_access'))
+            $token = Get-NeologikBrowserToken -ClientId $script:GraphPublicClientId -Label 'Microsoft Graph' -Scopes $graphScopes
+            if (-not $token) {
+                $token = Get-NeologikDeviceCodeToken -ClientId $script:GraphPublicClientId -Label 'Microsoft Graph' -Scopes $graphScopes
+            }
             if ($token) {
+                # The sign-in to Azure names the same account, so the browser does not ask again.
+                $state.SignInAccount = [string]$token.Account
                 try {
                     Connect-MgGraph -AccessToken (ConvertTo-SecureString -String $token.AccessToken -AsPlainText -Force) -NoWelcome -ErrorAction Stop
                     $connected = $true
@@ -1407,7 +1705,7 @@ function Connect-NeologikGraph {
     }
     catch {
         Write-Log "The sign-in to Microsoft Graph failed. $(Get-NeologikErrorText $_)" -Level Error
-        Write-ActionRequired "The sign-in to Microsoft Graph did not complete. The script tried three methods:`n  1. The device code of the script.`n  2. The Azure CLI session.`n  3. The device code of Microsoft Graph PowerShell.`nRun the script again. Open the sign-in address in a browser on any device.`nSign in as a Global Administrator of tenant $($state.TenantId) and approve the permissions."
+        Write-ActionRequired "The sign-in to Microsoft Graph did not complete. The script tried four methods:`n  1. The browser of this computer.`n  2. The device code of the script.`n  3. The Azure CLI session.`n  4. The device code of Microsoft Graph PowerShell.`nRun the script again on a computer with a desktop and a browser.`nSign in as a Global Administrator of tenant $($state.TenantId) and approve the permissions."
         return $false
     }
     $context = $null
@@ -2656,17 +2954,35 @@ function Set-NeologikMailboxGrant {
         foreach ($item in $items) { Add-Summary $item 'SKIPPED: the Exchange Online module is not available' }
         return
     }
+    # The order of the methods: the browser sign-in of the Exchange Online module, then the
+    # device code of the Exchange Online module. Many organisations block the device code
+    # with a Conditional Access policy, so the device code is not the first method.
     $connected = $false
-    try {
-        Write-Log '  The script signs in to Exchange Online with a device code. Sign in as an Exchange Administrator or as a Global Administrator' -Level Info
-        Connect-ExchangeOnline -Device -ShowBanner:$false -ErrorAction Stop
-        $connected = $true
+    if (Test-NeologikDesktop) {
+        try {
+            Write-Log '  The script signs in to Exchange Online in the browser of this computer. Sign in as an Exchange Administrator or as a Global Administrator' -Level Info
+            $exchangeParameters = @{ ShowBanner = $false; ErrorAction = 'Stop' }
+            $signInAccount = [string](Get-NeologikProperty $state 'SignInAccount' '')
+            if ($signInAccount) { $exchangeParameters['UserPrincipalName'] = $signInAccount }
+            Connect-ExchangeOnline @exchangeParameters
+            $connected = $true
+        }
+        catch {
+            Write-Log "  The sign-in to Exchange Online in the browser did not complete. $(Get-NeologikErrorText $_). The script tries a device code" -Level Warning
+        }
     }
-    catch {
-        Write-Log "  The sign-in to Exchange Online failed. $(Get-NeologikErrorText $_)" -Level Error
-        Write-ActionRequired "The sign-in to Exchange Online did not complete.`nRun the script again. Sign in as an Exchange Administrator or as a Global Administrator of tenant $($state.TenantId)."
-        foreach ($item in $items) { Add-Summary $item 'SKIPPED: the sign-in to Exchange Online failed' }
-        return
+    if (-not $connected) {
+        try {
+            Write-Log '  The script signs in to Exchange Online with a device code. Sign in as an Exchange Administrator or as a Global Administrator' -Level Info
+            Connect-ExchangeOnline -Device -ShowBanner:$false -ErrorAction Stop
+            $connected = $true
+        }
+        catch {
+            Write-Log "  The sign-in to Exchange Online failed. $(Get-NeologikErrorText $_)" -Level Error
+            Write-ActionRequired "The sign-in to Exchange Online did not complete. The script tried the browser of this computer and a device code.`nRun the script again on a computer with a desktop and a browser. Sign in as an Exchange Administrator or as a Global Administrator of tenant $($state.TenantId)."
+            foreach ($item in $items) { Add-Summary $item 'SKIPPED: the sign-in to Exchange Online failed' }
+            return
+        }
     }
     try {
         try {
@@ -2727,7 +3043,7 @@ function Connect-NeologikAzure {
     # $false after the function prints what to do. With -UseAzureCliToken the Azure CLI
     # session gives the token for Azure Resource Manager. The same Azure CLI session
     # signed in to Microsoft Graph. Without -UseAzureCliToken the function uses the
-    # device code prompt. The device code prompt requests the multi-factor
+    # browser sign-in, then the device code. Each method requests the multi-factor
     # authentication claim that a role assignment needs.
     $state = $script:State
     if ($state.UseAzureCliToken) {
@@ -2739,7 +3055,7 @@ function Connect-NeologikAzure {
         $cliToken = if ($cli.ExitCode -eq 0) { [string]($cli.Output | Select-Object -Last 1) } else { '' }
         if (-not $cliToken.Trim()) {
             Write-Log 'The sign-in to Azure failed. The Azure CLI gave no token for the subscription' -Level Error
-            Write-ActionRequired "The Azure CLI gave no token for subscription $($state.SubscriptionId) in tenant $($state.TenantId).`nSign in with this command:`n  az login --tenant $($state.TenantId)`nThen run the script again. Or run the script without -UseAzureCliToken, to sign in with a device code."
+            Write-ActionRequired "The Azure CLI gave no token for subscription $($state.SubscriptionId) in tenant $($state.TenantId).`nSign in with this command:`n  az login --tenant $($state.TenantId)`nThen run the script again. Or run the script without -UseAzureCliToken, to sign in in the browser."
             return $false
         }
         $accountId = Get-NeologikTokenAccountId -Token $cliToken.Trim()
@@ -2749,19 +3065,23 @@ function Connect-NeologikAzure {
         }
         catch {
             Write-Log "The sign-in to Azure failed. $(Get-NeologikErrorText $_)" -Level Error
-            Write-ActionRequired "The sign-in to Azure with the token of the Azure CLI session did not complete.`nSign in with this command:`n  az login --tenant $($state.TenantId)`nThen run the script again. Or run the script without -UseAzureCliToken, to sign in with a device code."
+            Write-ActionRequired "The sign-in to Azure with the token of the Azure CLI session did not complete.`nSign in with this command:`n  az login --tenant $($state.TenantId)`nThen run the script again. Or run the script without -UseAzureCliToken, to sign in in the browser."
             return $false
         }
         Write-Log '  The token of the Azure CLI session holds no multi-factor authentication claim. When Azure refuses a role assignment with a claims error, run the script again without -UseAzureCliToken' -Level Info
     }
     else {
-        # The order of the methods: the device code of the script, with the claim that a role
-        # assignment needs, then the Azure CLI session of the workstation, then the device
-        # code prompt of Az PowerShell.
+        # The order of the methods: the browser sign-in of the script, then the device code of
+        # the script, each with the claim that a role assignment needs, then the Azure CLI
+        # session of the workstation, then the device code prompt of Az PowerShell.
         $connected = $false
         Write-Log 'The script signs in to Azure. Sign in with the same account' -Level Info
-        $token = Get-NeologikDeviceCodeToken -ClientId $script:AzurePublicClientId -Label 'Azure' -Claims $script:AzureMfaClaims `
-            -Scopes @('https://management.azure.com/.default', 'openid', 'profile', 'offline_access')
+        $azureScopes = @('https://management.azure.com/.default', 'openid', 'profile', 'offline_access')
+        $token = Get-NeologikBrowserToken -ClientId $script:AzurePublicClientId -Label 'Azure' -Claims $script:AzureMfaClaims `
+            -Scopes $azureScopes -LoginHint ([string](Get-NeologikProperty $state 'SignInAccount' ''))
+        if (-not $token) {
+            $token = Get-NeologikDeviceCodeToken -ClientId $script:AzurePublicClientId -Label 'Azure' -Claims $script:AzureMfaClaims -Scopes $azureScopes
+        }
         if ($token) {
             $accountId = if ($token.Account) { $token.Account } else { 'device-code' }
             try {
@@ -2781,7 +3101,7 @@ function Connect-NeologikAzure {
                 try {
                     Connect-AzAccount -AccessToken $cliToken.Trim() -AccountId $accountId -Tenant $state.TenantId -Subscription $state.SubscriptionId -ErrorAction Stop | Out-Null
                     $connected = $true
-                    Write-Log '  The token of the Azure CLI session holds no multi-factor authentication claim. When Azure refuses a role assignment with a claims error, run the script again and complete the sign-in with the device code' -Level Info
+                    Write-Log '  The token of the Azure CLI session holds no multi-factor authentication claim. When Azure refuses a role assignment with a claims error, run the script again and complete the sign-in in the browser' -Level Info
                 }
                 catch { Write-Log "The script could not open the Azure session with the token of the Azure CLI session. $(Get-NeologikErrorText $_)" -Level Warning }
             }
@@ -2802,7 +3122,7 @@ function Connect-NeologikAzure {
             }
             catch {
                 Write-Log "The sign-in to Azure failed. $(Get-NeologikErrorText $_)" -Level Error
-                Write-ActionRequired "The sign-in to Azure did not complete. The script tried three methods:`n  1. The device code of the script.`n  2. The Azure CLI session.`n  3. The device code of Az PowerShell.`nRun the script again. Open the sign-in address in a browser on any device.`nSign in with an account that holds Owner or User Access Administrator on subscription $($state.SubscriptionId) in tenant $($state.TenantId)."
+                Write-ActionRequired "The sign-in to Azure did not complete. The script tried four methods:`n  1. The browser of this computer.`n  2. The device code of the script.`n  3. The Azure CLI session.`n  4. The device code of Az PowerShell.`nRun the script again on a computer with a desktop and a browser.`nSign in with an account that holds Owner or User Access Administrator on subscription $($state.SubscriptionId) in tenant $($state.TenantId)."
                 return $false
             }
         }
