@@ -489,7 +489,9 @@ BeforeAll {
                 }
                 Add-Write "POST blueprint principal $($json.appId)"
                 $sp = New-FakeSp -Id ([guid]::NewGuid().ToString()) -AppId $json.appId -DisplayName $app.displayName
-                $sp.owners = @($t.Me)
+                # Microsoft Graph gives a new blueprint service principal no owner, apart from
+                # each owner bound in the request.
+                $sp.owners = @(@($json['owners@odata.bind']) | Where-Object { $_ } | ForEach-Object { ([string]$_ -split '/')[-1] })
                 $t.ServicePrincipals += $sp
                 return @{ StatusCode = 201; Headers = @{}; Body = @{ id = $sp.id; appId = $sp.appId } }
             }
@@ -1190,6 +1192,7 @@ Context 'Modules and sign-in' {
         $scopes | Should -Contain 'User.Read'
         $scopes | Should -Contain 'AppRoleAssignment.ReadWrite.All'
         $scopes | Should -Contain 'RoleManagement.ReadWrite.Directory'
+        $scopes | Should -Contain 'AgentIdentityBlueprintPrincipal.ReadWrite.All'
         $scopes | Should -Not -Contain 'DelegatedPermissionGrant.ReadWrite.All'
         $scopes | Should -Contain 'offline_access'
         Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $AccessToken -is [securestring] -and -not $UseDeviceCode }
@@ -1205,6 +1208,7 @@ Context 'Modules and sign-in' {
         $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
         (& $graphScopes) | Should -Contain 'DelegatedPermissionGrant.ReadWrite.All'
         (& $graphScopes) | Should -Not -Contain 'RoleManagement.ReadWrite.Directory'
+        (& $graphScopes) | Should -Not -Contain 'AgentIdentityBlueprintPrincipal.ReadWrite.All'
         Add-CompliantExchangeState
         $script:TokenRequests = @()
         $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
@@ -1658,7 +1662,10 @@ Context 'The first run on an environment with missing state' {
         Get-SummaryResult 'Agent identity blueprint' | Should -Be 'Created'
         Get-SummaryResult 'Agent identity blueprint owner' | Should -Be 'Already an owner' -Because 'owners@odata.bind set the deployment identity at creation'
         Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'Created'
-        Get-SummaryResult 'Agent identity blueprint service principal owner' | Should -Be 'Added'
+        Get-SummaryResult 'Agent identity blueprint service principal owner' | Should -Be 'Already an owner' -Because 'owners@odata.bind set the deployment identity at creation'
+        @($script:Writes | Where-Object { $_ -like 'POST sp owner*' }) | Should -HaveCount 0 -Because 'Microsoft Graph refuses a later owner call without AgentIdentityBlueprintPrincipal.ReadWrite.All'
+        $blueprintSp = @($script:Tenant.ServicePrincipals | Where-Object { $_.displayName -like 'Neologik Agent Blueprint*' })[0]
+        $blueprintSp.owners | Should -Be @($script:Ids.DeploySpId)
         Get-SummaryResult 'Agent identity blueprint service principal permission: AgentIdUser.ReadWrite.IdentityParentedBy' | Should -Be 'Granted'
         Get-SummaryResult 'Agent identity blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'Added'
         @($script:Writes | Where-Object { $_ -like 'POST credential*' }) | Should -HaveCount 3
@@ -2660,6 +2667,7 @@ Context 'Verify-only run (-Verify)' {
         @($script:Tenant.Apps | Where-Object { $_.displayName -like 'Neologik Agent Blueprint*' }) | Should -HaveCount 0
         (Get-SummaryResult 'Agent identity blueprint') | Should -BeLike 'WOULD CREATE*'
         Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'WOULD CREATE'
+        Get-SummaryResult 'Agent identity blueprint service principal owner' | Should -Be 'WOULD ADD at creation'
         Get-SummaryResult 'Agent identity blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'WOULD ADD'
         Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'WOULD GRANT'
         Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -Be 'WOULD REMOVE'

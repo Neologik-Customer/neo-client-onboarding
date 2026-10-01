@@ -176,6 +176,7 @@
       Every run                    AgentIdentityBlueprintPrincipal.Create
       The first run                RoleManagement.ReadWrite.Directory
       The first run                GroupMember.ReadWrite.All
+      The first run                AgentIdentityBlueprintPrincipal.ReadWrite.All
       A run with -AgentGrantsFile  DelegatedPermissionGrant.ReadWrite.All
 
     OUTPUT
@@ -1357,6 +1358,10 @@ function Get-NeologikGraphScope {
         # identity.
         $scopes += 'RoleManagement.ReadWrite.Directory'
         $scopes += 'GroupMember.ReadWrite.All'
+        # Microsoft Graph accepts a new owner on an existing service principal of an agent
+        # identity blueprint only with this permission. Application.ReadWrite.All does not
+        # cover that object.
+        $scopes += 'AgentIdentityBlueprintPrincipal.ReadWrite.All'
     }
     return $scopes
 }
@@ -1955,7 +1960,7 @@ function Set-NeologikAgentBlueprint {
             Add-NeologikPendingChange 'Agent identity blueprint' "CREATE: $blueprintName"
             Add-NeologikPendingChange 'Agent identity blueprint owner' 'ADD at creation'
             Add-NeologikPendingChange 'Agent identity blueprint service principal' 'CREATE'
-            Add-NeologikPendingChange 'Agent identity blueprint service principal owner' 'ADD'
+            Add-NeologikPendingChange 'Agent identity blueprint service principal owner' 'ADD at creation'
             foreach ($roleName in $script:BlueprintPrincipalGraphRoles) { Add-NeologikPendingChange "Agent identity blueprint service principal permission: $roleName" 'GRANT' }
             foreach ($repo in $script:PipelineRepositories) { Add-NeologikPendingChange "Agent identity blueprint credential: github-oidc-$($repo.Name)" 'ADD' }
             return
@@ -2040,11 +2045,13 @@ function Set-NeologikAgentBlueprint {
         elseif (Test-NeologikVerifyOnly) {
             $principalPending = $true
             Add-NeologikPendingChange 'Agent identity blueprint service principal' 'CREATE'
-            Add-NeologikPendingChange 'Agent identity blueprint service principal owner' 'ADD'
+            Add-NeologikPendingChange 'Agent identity blueprint service principal owner' 'ADD at creation'
             foreach ($roleName in $script:BlueprintPrincipalGraphRoles) { Add-NeologikPendingChange "Agent identity blueprint service principal permission: $roleName" 'GRANT' }
         }
         else {
-            $body = @{ appId = $blueprintAppId } | ConvertTo-Json -Compress
+            # The request binds the deployment identity as an owner. Microsoft Graph accepts
+            # an owner in the request that creates the service principal.
+            $body = @{ appId = $blueprintAppId; 'owners@odata.bind' = @("$graph/directoryObjects/$($deploySp.Id)") } | ConvertTo-Json -Compress
             for ($attempt = 1; $attempt -le 10; $attempt++) {
                 try {
                     $principal = Invoke-NeologikGraph -Method POST -Uri "$graph/servicePrincipals/microsoft.graph.agentIdentityBlueprintPrincipal" `

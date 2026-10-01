@@ -179,6 +179,7 @@ The environment access script signs in to Microsoft Graph with your account. At 
 | `AgentIdentityBlueprint.Create`<br>`AgentIdentityBlueprint.AddRemoveCreds.All`<br>`AgentIdentityBlueprintPrincipal.Create` | Every run | To create the agent identity blueprint, the service principal and the federated credentials when each is absent |
 | `RoleManagement.ReadWrite.Directory` | The first run | To remove directory roles from the deployment identity |
 | `GroupMember.ReadWrite.All` | The first run | To remove the deployment identity from groups |
+| `AgentIdentityBlueprintPrincipal.ReadWrite.All` | The first run | To add the deployment identity as an owner of the service principal of the agent identity blueprint. The environment access script adds the owner when that service principal has none |
 | `DelegatedPermissionGrant.ReadWrite.All` | A later run with `-AgentGrantsFile` | To create the grants to agent users |
 
 The sign-in to Azure and the sign-in to Exchange Online use the same account and show no list of permissions.
