@@ -92,6 +92,8 @@ BeforeAll {
         SharePointAppId  = 'bbbbbbbb-2222-bbbb-bbbb-bbbbbbbbbbbb'
         SharePoint2SpId  = 'bbbbbbbb-3333-bbbb-bbbb-bbbbbbbbbbbb'
         SharePoint2AppId = 'bbbbbbbb-4444-bbbb-bbbb-bbbbbbbbbbbb'
+        EarlierSpId      = 'bbbbbbbb-5555-bbbb-bbbb-bbbbbbbbbbbb'
+        EarlierAppId     = 'bbbbbbbb-6666-bbbb-bbbb-bbbbbbbbbbbb'
         AppAdminRole     = 'cccccccc-1111-cccc-cccc-cccccccccccc'
         AgentIdAdminRole = 'cccccccc-2222-cccc-cccc-cccccccccccc'
         DevTeamGroup     = '55555555-bbbb-5555-5555-555555555555'
@@ -110,7 +112,7 @@ BeforeAll {
     foreach ($roleName in @('Application.ReadWrite.OwnedBy', 'AgentIdentityBlueprint.AddRemoveCreds.All', 'Application.Read.All',
             'AgentIdentityBlueprint.Create', 'AgentIdentityBlueprint.UpdateAuthProperties.All', 'AgentIdentityBlueprintPrincipal.Create',
             'AgentIdentity.Create.All', 'AgentIdUser.ReadWrite.All', 'Group.Create', 'AgentIdUser.ReadWrite.IdentityParentedBy',
-            'Sites.Selected', 'User.Read.All')) {
+            'Sites.Selected', 'Sites.FullControl.All', 'User.Read.All')) {
         $script:AppRoleIds[$roleName] = [guid]::NewGuid().ToString()
     }
 
@@ -237,6 +239,15 @@ BeforeAll {
         if ($Second) {
             $t.ServicePrincipals += New-FakeSp -Id $script:Ids.SharePoint2SpId -AppId $script:Ids.SharePoint2AppId -DisplayName 'Neologik SharePoint Access - other01'
         }
+    }
+
+    function Add-EarlierSharePointApp {
+        # A hand-made SharePoint application. The customer gave the consent to this
+        # application before the deployment created the SharePoint application of
+        # the environment.
+        param([string]$RoleName = 'Sites.Selected')
+        $script:Tenant.ServicePrincipals += New-FakeSp -Id $script:Ids.EarlierSpId -AppId $script:Ids.EarlierAppId -DisplayName 'Neologik SharePoint API Access'
+        Add-FakeAppRole -SpId $script:Ids.EarlierSpId -RoleName $RoleName
     }
 
     function Add-CompliantAzureState {
@@ -478,7 +489,9 @@ BeforeAll {
                 }
                 Add-Write "POST blueprint principal $($json.appId)"
                 $sp = New-FakeSp -Id ([guid]::NewGuid().ToString()) -AppId $json.appId -DisplayName $app.displayName
-                $sp.owners = @($t.Me)
+                # Microsoft Graph gives a new blueprint service principal no owner, apart from
+                # each owner bound in the request.
+                $sp.owners = @(@($json['owners@odata.bind']) | Where-Object { $_ } | ForEach-Object { ([string]$_ -split '/')[-1] })
                 $t.ServicePrincipals += $sp
                 return @{ StatusCode = 201; Headers = @{}; Body = @{ id = $sp.id; appId = $sp.appId } }
             }
@@ -1189,6 +1202,7 @@ Context 'Modules and sign-in' {
         $scopes | Should -Contain 'User.Read'
         $scopes | Should -Contain 'AppRoleAssignment.ReadWrite.All'
         $scopes | Should -Contain 'RoleManagement.ReadWrite.Directory'
+        $scopes | Should -Contain 'AgentIdentityBlueprintPrincipal.ReadWrite.All'
         $scopes | Should -Not -Contain 'DelegatedPermissionGrant.ReadWrite.All'
         $scopes | Should -Contain 'offline_access'
         Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $AccessToken -is [securestring] -and -not $UseDeviceCode }
@@ -1204,6 +1218,7 @@ Context 'Modules and sign-in' {
         $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
         (& $graphScopes) | Should -Contain 'DelegatedPermissionGrant.ReadWrite.All'
         (& $graphScopes) | Should -Not -Contain 'RoleManagement.ReadWrite.Directory'
+        (& $graphScopes) | Should -Not -Contain 'AgentIdentityBlueprintPrincipal.ReadWrite.All'
         Add-CompliantExchangeState
         $script:TokenRequests = @()
         $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
@@ -1704,7 +1719,7 @@ Context 'The first run on a compliant environment' {
         Get-SummaryResult 'Deployment identity permission to remove: Group.Create' | Should -Be 'Not held'
         Get-SummaryResult 'User group assignment' | Should -Be 'Already assigned'
         Get-SummaryResult 'Administrator consent' | Should -Be 'Present'
-        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'Not checked. The later run with -AgentGrantsFile makes the check'
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'Not needed. No SharePoint application of Neologik holds a SharePoint permission'
         Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Already assigned'
         Get-SummaryResult 'Subscription role: Cost Management Contributor' | Should -Be 'Already assigned'
         Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'Not held'
@@ -1847,7 +1862,10 @@ Context 'The first run on an environment with missing state' {
         Get-SummaryResult 'Agent identity blueprint' | Should -Be 'Created'
         Get-SummaryResult 'Agent identity blueprint owner' | Should -Be 'Already an owner' -Because 'owners@odata.bind set the deployment identity at creation'
         Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'Created'
-        Get-SummaryResult 'Agent identity blueprint service principal owner' | Should -Be 'Added'
+        Get-SummaryResult 'Agent identity blueprint service principal owner' | Should -Be 'Already an owner' -Because 'owners@odata.bind set the deployment identity at creation'
+        @($script:Writes | Where-Object { $_ -like 'POST sp owner*' }) | Should -HaveCount 0 -Because 'Microsoft Graph refuses a later owner call without AgentIdentityBlueprintPrincipal.ReadWrite.All'
+        $blueprintSp = @($script:Tenant.ServicePrincipals | Where-Object { $_.displayName -like 'Neologik Agent Blueprint*' })[0]
+        $blueprintSp.owners | Should -Be @($script:Ids.DeploySpId)
         Get-SummaryResult 'Agent identity blueprint service principal permission: AgentIdUser.ReadWrite.IdentityParentedBy' | Should -Be 'Granted'
         Get-SummaryResult 'Agent identity blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'Added'
         @($script:Writes | Where-Object { $_ -like 'POST credential*' }) | Should -HaveCount 3
@@ -1995,6 +2013,116 @@ Context 'The first run on an environment with missing state' {
         Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'SKIPPED: the agent identity blueprint is not available'
         Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Already granted'
         Get-SummaryResult 'Administrator consent' | Should -Be 'Present'
+    }
+}
+
+Context 'SharePoint consent and an earlier SharePoint application' {
+    It 'grants Sites.Selected to the SharePoint application when an earlier application holds the consent' {
+        Add-CompliantPreWindowState
+        Add-SharePointApp
+        Add-EarlierSharePointApp
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be "Granted to 'Neologik SharePoint Access - $script:ShortName'"
+        $script:Writes | Should -HaveCount 1
+        $script:Writes[0] | Should -Be "NEW approle $($script:Ids.SharePointSpId) $($script:AppRoleIds['Sites.Selected'])"
+        ($script:Console -join "`n") | Should -Match 'A site administrator grants access to each site separately'
+        # A second run finds the consent and writes nothing.
+        $script:Writes = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'Present'
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'grants Sites.Selected only, when the earlier application holds a wider SharePoint permission' {
+        Add-CompliantPreWindowState
+        Add-SharePointApp
+        Add-EarlierSharePointApp -RoleName 'Sites.FullControl.All'
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be "Granted to 'Neologik SharePoint Access - $script:ShortName'"
+        $script:Writes | Should -HaveCount 1
+        $script:Writes[0] | Should -Be "NEW approle $($script:Ids.SharePointSpId) $($script:AppRoleIds['Sites.Selected'])"
+    }
+
+    It 'reports the grant as WOULD GRANT in a run with -Verify and writes nothing' {
+        Add-CompliantPreWindowState
+        Add-SharePointApp
+        Add-EarlierSharePointApp
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 1
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be "WOULD GRANT Sites.Selected to 'Neologik SharePoint Access - $script:ShortName'"
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'asks for a second run when the SharePoint application of the environment does not exist yet' {
+        Add-CompliantPreWindowState
+        Add-EarlierSharePointApp
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be "MISSING: the SharePoint application of this environment does not exist. The earlier application 'Neologik SharePoint API Access' holds a SharePoint permission. Run the script again after the deployment by Neologik"
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'changes nothing when the SharePoint application already holds the consent' {
+        Add-CompliantPreWindowState
+        Add-SharePointApp -WithConsent
+        Add-EarlierSharePointApp
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'Present'
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'grants nothing and prints no consent address when no Neologik application holds a SharePoint permission' {
+        Add-CompliantPreWindowState
+        Add-SharePointApp
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'Not needed. No SharePoint application of Neologik holds a SharePoint permission'
+        $script:Writes | Should -HaveCount 0
+        ($script:Console -join "`n") | Should -Not -Match 'adminconsent\?client_id='
+    }
+
+    It 'does not treat the SharePoint application of another environment as an earlier application' {
+        Add-CompliantPreWindowState
+        Add-SharePointApp -Second
+        Add-FakeAppRole -SpId $script:Ids.SharePoint2SpId -RoleName 'Sites.Selected'
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'Not needed. No SharePoint application of Neologik holds a SharePoint permission'
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'finds the SharePoint application by the client id that the command names' {
+        Add-CompliantPreWindowState
+        $script:Tenant.ServicePrincipals += New-FakeSp -Id $script:Ids.SharePointSpId -AppId $script:Ids.SharePointAppId -DisplayName 'Contoso document access'
+        Add-EarlierSharePointApp
+        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); SharePointAppClientId = $script:Ids.SharePointAppId }
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be "Granted to 'Contoso document access'"
+        @($script:Writes | Where-Object { $_ -eq "NEW approle $($script:Ids.SharePointSpId) $($script:AppRoleIds['Sites.Selected'])" }) | Should -HaveCount 1
+    }
+
+    It 'grants in the later run in place of the consent address' {
+        Add-SharePointApp
+        Add-EarlierSharePointApp
+        $grants = New-GrantsFile -Grants @() -SharePoint $true
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AgentGrantsFile = $grants }
+        $code | Should -Be 0
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be "Granted to 'Neologik SharePoint Access - $script:ShortName'"
+        ($script:Console -join "`n") | Should -Not -Match 'adminconsent\?client_id='
+    }
+
+    It 'reports a refused grant as FAILED and continues' {
+        Add-CompliantPreWindowState
+        Add-SharePointApp
+        Add-EarlierSharePointApp
+        Mock New-MgServicePrincipalAppRoleAssignment { throw 'Authorization_RequestDenied: Insufficient privileges to complete the operation.' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'FAILED: insufficient privileges. Sign in as a Global Administrator'
+        Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Already assigned'
     }
 }
 
@@ -2739,6 +2867,7 @@ Context 'Verify-only run (-Verify)' {
         @($script:Tenant.Apps | Where-Object { $_.displayName -like 'Neologik Agent Blueprint*' }) | Should -HaveCount 0
         (Get-SummaryResult 'Agent identity blueprint') | Should -BeLike 'WOULD CREATE*'
         Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'WOULD CREATE'
+        Get-SummaryResult 'Agent identity blueprint service principal owner' | Should -Be 'WOULD ADD at creation'
         Get-SummaryResult 'Agent identity blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'WOULD ADD'
         Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'WOULD GRANT'
         Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -Be 'WOULD REMOVE'

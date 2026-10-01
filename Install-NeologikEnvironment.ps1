@@ -145,7 +145,7 @@
         -AnswerFile .\inputs.json -SkipPowerShellUpdate -SkipModuleInstall
 
 .NOTES
-    Version: v5.0.5
+    Version: v5.0.6
     Requires: PowerShell 7.4 or later
     Requires: Owner on the subscription and Global Administrator in the tenant
 #>
@@ -216,10 +216,10 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v5.0.5'
+$script:Version = 'v5.0.6'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.0.7'
+$script:KitVersion = 'v5.0.8'
 
 # The time stamp of the run. The names of the log and of the configuration file hold the time stamp.
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -1045,7 +1045,7 @@ function Connect-AzureEnvironment {
                 Write-Log "Microsoft Graph did not accept the token from the Azure session. Consent may be required. The script now makes an interactive sign-in: $_" -Level Warning
                 Write-Host "`n[i]  A browser window opens for the sign-in to Microsoft Graph.`n" -ForegroundColor Cyan
                 Connect-MgGraph -TenantId $script:ConfigData['TenantId'] `
-                    -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory", "AppRoleAssignment.ReadWrite.All", "AgentIdentityBlueprint.Create", "AgentIdentityBlueprint.AddRemoveCreds.All", "AgentIdentityBlueprintPrincipal.Create" `
+                    -Scopes "User.ReadWrite.All", "User.Invite.All", "Group.ReadWrite.All", "Application.ReadWrite.All", "Directory.ReadWrite.All", "RoleManagement.ReadWrite.Directory", "AppRoleAssignment.ReadWrite.All", "AgentIdentityBlueprint.Create", "AgentIdentityBlueprint.AddRemoveCreds.All", "AgentIdentityBlueprintPrincipal.Create", "AgentIdentityBlueprintPrincipal.ReadWrite.All" `
                     -ErrorAction Stop
                 Write-Log "Signed in to Microsoft Graph with an interactive sign-in" -Level Success
             }
@@ -2773,7 +2773,9 @@ function New-NeologikAgentBlueprint {
             Write-Log "The service principal of the agent identity blueprint already exists" -Level Info
         }
         else {
-            $body = @{ appId = $blueprintAppId } | ConvertTo-Json -Compress
+            # The request binds the deployment identity as an owner. Microsoft Graph accepts an owner in the
+            # request that creates the service principal.
+            $body = @{ appId = $blueprintAppId; 'owners@odata.bind' = @("$graph/directoryObjects/$DeploySpObjectId") } | ConvertTo-Json -Compress
             for ($attempt = 1; $attempt -le 10; $attempt++) {
                 try {
                     $principal = Invoke-MgGraphRequest -Method POST -Uri "$graph/servicePrincipals/microsoft.graph.agentIdentityBlueprintPrincipal" `

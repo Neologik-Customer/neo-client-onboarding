@@ -87,7 +87,7 @@ The onboarding script uses the sign-in to Microsoft Graph for eight kinds of wri
 - the group assignments
 - one membership of a directory role
 
-The interactive sign-in requests ten permission scopes of Microsoft Graph:
+The interactive sign-in requests eleven permission scopes of Microsoft Graph:
 
 | Permission scope |
 |---|
@@ -101,6 +101,7 @@ The interactive sign-in requests ten permission scopes of Microsoft Graph:
 | `AgentIdentityBlueprint.Create` |
 | `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | `AgentIdentityBlueprintPrincipal.Create` |
+| `AgentIdentityBlueprintPrincipal.ReadWrite.All` |
 
 A permission scope works only while the administrator is signed in. With a permission scope, the onboarding script works as the signed-in administrator.
 
