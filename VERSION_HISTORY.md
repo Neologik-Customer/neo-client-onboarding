@@ -13,13 +13,14 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
-2. [Version 5.0.7](#version-507)
-3. [Version 5.0.6](#version-506)
-4. [Version 5.0.3](#version-503)
-5. [Version 5.0.2](#version-502)
-6. [Version 5.0.1](#version-501)
-7. [Version 5.0.0](#version-500)
-8. [Earlier versions](#earlier-versions)
+2. [Version 5.0.8](#version-508)
+3. [Version 5.0.7](#version-507)
+4. [Version 5.0.6](#version-506)
+5. [Version 5.0.3](#version-503)
+6. [Version 5.0.2](#version-502)
+7. [Version 5.0.1](#version-501)
+8. [Version 5.0.0](#version-500)
+9. [Earlier versions](#earlier-versions)
 
 ## Scripts in this version
 
@@ -27,11 +28,23 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.0.3 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.7 | Reduces the access of the deployment identity of an existing environment to the access that version 5 of the Neologik Platform needs. Applies the grants for agents and Apps that work unattended |
+| `Install-NeologikEnvironment.ps1` | v5.0.4 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.8 | Reduces the access of the deployment identity of an existing environment to the access that version 5 of the Neologik Platform needs. Applies the grants for agents and Apps that work unattended |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.0.8
+
+**Date**: 2026-10-01
+
+| Item | Change |
+|---|---|
+| `Update-NeologikEnvironmentAccess.ps1` | The first run now reads the SharePoint permissions in your tenant. When an earlier SharePoint application of Neologik holds a SharePoint permission, the environment access script grants `Sites.Selected` to the SharePoint application of the environment. When the SharePoint application of the environment already holds `Sites.Selected`, the environment access script changes nothing. When no application holds a SharePoint permission, the environment access script grants nothing. The environment access script records the version `v5.0.8` on the resource group |
+| `Update-NeologikEnvironmentAccess.ps1` | The environment access script creates the service principal of the agent identity blueprint with the deployment identity as an owner. The first run requests the permission `AgentIdentityBlueprintPrincipal.ReadWrite.All`. With that permission, the environment access script adds the owner to a service principal that exists with no owner. Before this version, Microsoft Graph refused the owner and the summary reported `FAILED` |
+| `Install-NeologikEnvironment.ps1` | Version v5.0.4. The onboarding script creates the service principal of the agent identity blueprint with the deployment identity as an owner. The interactive sign-in requests the permission `AgentIdentityBlueprintPrincipal.ReadWrite.All`. The onboarding script records the version `v5.0.8` on the resource group |
+| `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` | The document describes the grant of `Sites.Selected` and lists the new permission |
+| `QUICK-REFERENCE.md` | The document lists the new permission of the interactive sign-in |
 
 ## Version 5.0.7
 

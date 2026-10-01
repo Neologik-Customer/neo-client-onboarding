@@ -73,8 +73,17 @@
       the permissions and gives the consent. The script never gives consent.
 
     Step 3a. SharePoint consent.
-      The script checks the consent of the SharePoint application when the
-      configuration file records that the solution uses SharePoint ingestion.
+      The SharePoint application of the environment needs the Microsoft Graph
+      application permission Sites.Selected. A consent belongs to one application.
+      When the SharePoint application holds Sites.Selected, the script changes
+      nothing. When an earlier SharePoint application of Neologik in the tenant
+      holds a SharePoint permission, the script grants Sites.Selected to the
+      SharePoint application of the environment. When the SharePoint application
+      does not exist yet, run the script again after the deployment by Neologik.
+      When no application holds a SharePoint permission, the script grants
+      nothing. When the configuration file records SharePoint ingestion, the
+      script then prints the consent address. A site administrator grants access
+      to each SharePoint site separately.
 
     Step 3b. Ownership of the application registrations.
       The deployment identity can manage only an application registration that the
@@ -167,6 +176,7 @@
       Every run                    AgentIdentityBlueprintPrincipal.Create
       The first run                RoleManagement.ReadWrite.Directory
       The first run                GroupMember.ReadWrite.All
+      The first run                AgentIdentityBlueprintPrincipal.ReadWrite.All
       A run with -AgentGrantsFile  DelegatedPermissionGrant.ReadWrite.All
 
     OUTPUT
@@ -451,8 +461,10 @@ $script:DeclaredResourceRoles = @('Cognitive Services Content Understanding Cont
 
 $script:GraphSpAppId = '00000003-0000-0000-c000-000000000000'
 # The start of the name of the SharePoint application. The SharePoint application
-# holds the permission Sites.Selected. The script checks the consent when the
-# configuration file or the agent grants file records SharePoint ingestion.
+# holds the permission Sites.Selected. The script checks the consent in the first
+# run. The script also checks the consent in the later run, when the agent grants
+# file records SharePoint ingestion. The script grants Sites.Selected when an
+# earlier SharePoint application of Neologik holds a SharePoint permission.
 $script:SharePointAppDisplayNamePrefix = 'Neologik SharePoint Access - '
 $script:AppAdminRoleTemplateId = '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3'
 $script:GraphV1 = 'https://graph.microsoft.com/v1.0'
@@ -506,7 +518,7 @@ $script:Summary = @()
 $script:State = @{}
 # The version of the onboarding kit. The script records the version on the resource
 # group, in the tag NeologikOnboardingKit, when the permission reduction is complete.
-$script:KitVersion = 'v5.0.7'
+$script:KitVersion = 'v5.0.8'
 
 # ----- Console and summary -----------------------------------------------------
 
@@ -1346,6 +1358,10 @@ function Get-NeologikGraphScope {
         # identity.
         $scopes += 'RoleManagement.ReadWrite.Directory'
         $scopes += 'GroupMember.ReadWrite.All'
+        # Microsoft Graph accepts a new owner on an existing service principal of an agent
+        # identity blueprint only with this permission. Application.ReadWrite.All does not
+        # cover that object.
+        $scopes += 'AgentIdentityBlueprintPrincipal.ReadWrite.All'
     }
     return $scopes
 }
@@ -1944,7 +1960,7 @@ function Set-NeologikAgentBlueprint {
             Add-NeologikPendingChange 'Agent identity blueprint' "CREATE: $blueprintName"
             Add-NeologikPendingChange 'Agent identity blueprint owner' 'ADD at creation'
             Add-NeologikPendingChange 'Agent identity blueprint service principal' 'CREATE'
-            Add-NeologikPendingChange 'Agent identity blueprint service principal owner' 'ADD'
+            Add-NeologikPendingChange 'Agent identity blueprint service principal owner' 'ADD at creation'
             foreach ($roleName in $script:BlueprintPrincipalGraphRoles) { Add-NeologikPendingChange "Agent identity blueprint service principal permission: $roleName" 'GRANT' }
             foreach ($repo in $script:PipelineRepositories) { Add-NeologikPendingChange "Agent identity blueprint credential: github-oidc-$($repo.Name)" 'ADD' }
             return
@@ -2029,11 +2045,13 @@ function Set-NeologikAgentBlueprint {
         elseif (Test-NeologikVerifyOnly) {
             $principalPending = $true
             Add-NeologikPendingChange 'Agent identity blueprint service principal' 'CREATE'
-            Add-NeologikPendingChange 'Agent identity blueprint service principal owner' 'ADD'
+            Add-NeologikPendingChange 'Agent identity blueprint service principal owner' 'ADD at creation'
             foreach ($roleName in $script:BlueprintPrincipalGraphRoles) { Add-NeologikPendingChange "Agent identity blueprint service principal permission: $roleName" 'GRANT' }
         }
         else {
-            $body = @{ appId = $blueprintAppId } | ConvertTo-Json -Compress
+            # The request binds the deployment identity as an owner. Microsoft Graph accepts
+            # an owner in the request that creates the service principal.
+            $body = @{ appId = $blueprintAppId; 'owners@odata.bind' = @("$graph/directoryObjects/$($deploySp.Id)") } | ConvertTo-Json -Compress
             for ($attempt = 1; $attempt -le 10; $attempt++) {
                 try {
                     $principal = Invoke-NeologikGraph -Method POST -Uri "$graph/servicePrincipals/microsoft.graph.agentIdentityBlueprintPrincipal" `
@@ -2317,63 +2335,150 @@ function Set-NeologikSignInGroupAssignment {
     }
 }
 
-function Test-NeologikSharePointConsent {
-    # Checks the administrator consent for Sites.Selected of the SharePoint application
-    # of this environment.
+function Get-NeologikSharePointApplication {
+    <#
+    Finds the service principal of the SharePoint application of this environment.
+    The function looks first for the client id that the command names. One tenant
+    can hold several environments. The function then looks for the exact name of the
+    SharePoint application of this environment. The function last looks for the start
+    of the name, and accepts the result only when one application matches. The result
+    records the service principal, and whether the tenant holds several candidates.
+    #>
     $state = $script:State
     $graph = $script:GraphV1
+    $result = @{ Sp = $null; Ambiguous = $false }
+    $clientId = [string](Get-NeologikProperty $state 'SharePointAppClientId' '')
+    if ($clientId) {
+        $result.Sp = @(Get-NeologikGraphCollection -Uri "$graph/servicePrincipals?`$filter=appId eq '$clientId'&`$select=id,appId,displayName") | Select-Object -First 1
+        if ($result.Sp) { return $result }
+    }
+    if ($state.ShortName) {
+        $exact = ("$script:SharePointAppDisplayNamePrefix$($state.ShortName)") -replace "'", "''"
+        $result.Sp = @(Get-NeologikGraphCollection -Uri "$graph/servicePrincipals?`$filter=displayName eq '$exact'&`$select=id,appId,displayName") | Select-Object -First 1
+    }
+    if (-not $result.Sp) {
+        $prefix = $script:SharePointAppDisplayNamePrefix -replace "'", "''"
+        $candidates = @(Get-NeologikGraphCollection -Uri "$graph/servicePrincipals?`$filter=startswith(displayName,'$prefix')&`$select=id,appId,displayName")
+        if ($candidates.Count -eq 1) { $result.Sp = $candidates[0] }
+        elseif ($candidates.Count -gt 1) { $result.Ambiguous = $true }
+    }
+    return $result
+}
+
+function Get-NeologikEarlierSharePointApplication {
+    <#
+    Finds each earlier SharePoint application of Neologik that holds a SharePoint
+    permission of Microsoft Graph. An earlier SharePoint application is a service
+    principal whose name begins 'Neologik' and holds the word 'SharePoint'. The
+    function leaves out the SharePoint application of every environment. The result
+    lists each earlier application with the SharePoint permissions that the
+    application holds.
+    #>
+    param([string]$ExcludeId)
+    $graph = $script:GraphV1
+    $graphSp = $script:State.GraphSp
+    $siteRoles = @{}
+    foreach ($role in @($graphSp.AppRoles | Where-Object { [string]$_.Value -like 'Sites.*' })) {
+        $siteRoles[[string]$role.Id] = [string]$role.Value
+    }
+    $earlier = @()
+    if ($siteRoles.Count -eq 0) { return $earlier }
+    foreach ($candidate in @(Get-NeologikGraphCollection -Uri "$graph/servicePrincipals?`$filter=startswith(displayName,'Neologik')&`$select=id,appId,displayName")) {
+        $name = [string](Get-NeologikProperty $candidate 'displayName' '')
+        $id = [string](Get-NeologikProperty $candidate 'id' '')
+        if ($id -eq $ExcludeId -or $name -notmatch '(?i)sharepoint' -or $name -like "$script:SharePointAppDisplayNamePrefix*") { continue }
+        $held = @(Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $id -All -ErrorAction Stop |
+            Where-Object { $_.ResourceId -eq $graphSp.Id -and $siteRoles.ContainsKey([string]$_.AppRoleId) } |
+            ForEach-Object { $siteRoles[[string]$_.AppRoleId] })
+        if ($held.Count -gt 0) {
+            $earlier += @{ Name = $name; AppId = [string](Get-NeologikProperty $candidate 'appId' ''); Roles = @($held | Sort-Object -Unique) }
+        }
+    }
+    return $earlier
+}
+
+function Test-NeologikSharePointConsent {
+    <#
+    Checks the consent for Sites.Selected of the SharePoint application of this
+    environment. A consent belongs to one application. An earlier SharePoint
+    application of Neologik that holds a SharePoint permission shows that the
+    solution uses SharePoint ingestion. The function then grants Sites.Selected to
+    the SharePoint application of this environment. -IngestionRecorded states that
+    a file records SharePoint ingestion. The function then prints the consent
+    address when no application holds a SharePoint permission.
+    #>
+    param([switch]$IngestionRecorded)
+    $state = $script:State
     $graphSp = $state.GraphSp
-    Write-Log '  The solution uses SharePoint ingestion. The script checks the consent for Sites.Selected' -Level Info
+    $item = 'SharePoint Sites.Selected consent'
     try {
-        # One tenant can hold several environments. The function first looks for the exact
-        # name of the SharePoint application of this environment. The function then looks for
-        # the start of the name, and accepts the result only when one application matches.
-        $spApp = $null
-        $ambiguous = $false
-        if ($state.ShortName) {
-            $exact = ("$script:SharePointAppDisplayNamePrefix$($state.ShortName)") -replace "'", "''"
-            $spApp = @(Get-NeologikGraphCollection -Uri "$graph/servicePrincipals?`$filter=displayName eq '$exact'&`$select=id,appId,displayName") | Select-Object -First 1
-        }
-        if (-not $spApp) {
-            $prefix = $script:SharePointAppDisplayNamePrefix -replace "'", "''"
-            $spCandidates = @(Get-NeologikGraphCollection -Uri "$graph/servicePrincipals?`$filter=startswith(displayName,'$prefix')&`$select=id,appId,displayName")
-            if ($spCandidates.Count -eq 1) { $spApp = $spCandidates[0] }
-            elseif ($spCandidates.Count -gt 1) {
-                Write-Log "  This tenant holds $($spCandidates.Count) SharePoint applications. The script cannot choose without the short name of the environment. Add -SolutionShortName or -ConfigurationFile to the command" -Level Warning
-                Add-Summary 'SharePoint Sites.Selected consent' 'UNKNOWN: the tenant holds several SharePoint applications. Add -SolutionShortName or -ConfigurationFile to the command'
-                $ambiguous = $true
-            }
-        }
-        if ($ambiguous) { return }
-        if (-not $spApp) {
-            Write-Log '  This tenant holds no SharePoint application. The deployment by Neologik creates the SharePoint application' -Level Warning
-            Add-Summary 'SharePoint Sites.Selected consent' 'MISSING: the tenant holds no SharePoint application'
+        $found = Get-NeologikSharePointApplication
+        if ($found.Ambiguous) {
+            Write-Log '  This tenant holds several SharePoint applications. The script cannot choose without the short name of the environment. Add -SolutionShortName or -ConfigurationFile to the command' -Level Warning
+            Add-Summary $item 'UNKNOWN: the tenant holds several SharePoint applications. Add -SolutionShortName or -ConfigurationFile to the command'
             return
         }
+        $spApp = $found.Sp
+        $spName = [string](Get-NeologikProperty $spApp 'displayName' '')
+        $spId = [string](Get-NeologikProperty $spApp 'id' '')
         $sitesSelected = Get-NeologikGraphAppRole -RoleName 'Sites.Selected'
-        $spAppId = [string](Get-NeologikProperty $spApp 'id')
-        $held = @()
-        if ($sitesSelected) {
-            $held = @(Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $spAppId -All -ErrorAction Stop |
+        if ($spApp -and $sitesSelected) {
+            $held = @(Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $spId -All -ErrorAction Stop |
                 Where-Object { $_.ResourceId -eq $graphSp.Id -and $_.AppRoleId -eq $sitesSelected.Id })
+            if ($held.Count -gt 0) {
+                Write-Log "  '$spName' holds Sites.Selected and the consent exists. A site administrator grants access to each site separately" -Level Success
+                Add-Summary $item 'Present'
+                return
+            }
         }
-        if ($held.Count -gt 0) {
-            Write-Log "  '$(Get-NeologikProperty $spApp 'displayName')' holds Sites.Selected and the consent exists. A site administrator grants access to each site separately" -Level Success
-            Add-Summary 'SharePoint Sites.Selected consent' 'Present'
+        $earlier = @(Get-NeologikEarlierSharePointApplication -ExcludeId $spId)
+        if ($earlier.Count -gt 0) {
+            $earlierNames = @($earlier | ForEach-Object { "'$($_.Name)'" }) -join ', '
+            Write-Log "  An earlier SharePoint application of Neologik holds a SharePoint permission: $earlierNames. The solution uses SharePoint ingestion" -Level Info
+            if (-not $spApp) {
+                Write-Log '  The SharePoint application of this environment does not exist. The deployment by Neologik creates the SharePoint application. Run the script again after the deployment' -Level Warning
+                Add-Summary $item "MISSING: the SharePoint application of this environment does not exist. The earlier application $earlierNames holds a SharePoint permission. Run the script again after the deployment by Neologik"
+                return
+            }
+            if (-not $sitesSelected) {
+                Write-Log "  Microsoft Graph does not publish the permission 'Sites.Selected' in this cloud. Report this message to Neologik" -Level Warning
+                Add-Summary $item 'NOT FOUND: report to Neologik'
+                return
+            }
+            Write-Log "  '$spName' does not hold Sites.Selected. A consent belongs to one application. The consent of the earlier application does not reach '$spName'" -Level Info
+            if (Test-NeologikVerifyOnly) {
+                Add-NeologikPendingChange $item "GRANT Sites.Selected to '$spName'"
+                return
+            }
+            Invoke-NeologikWrite -Command 'New-MgServicePrincipalAppRoleAssignment' -Parameters @{
+                ServicePrincipalId = $spId; PrincipalId = $spId; ResourceId = $graphSp.Id; AppRoleId = $sitesSelected.Id
+            } | Out-Null
+            Write-Log "  Sites.Selected: granted to '$spName'. A site administrator grants access to each site separately" -Level Success
+            Add-Summary $item "Granted to '$spName'"
+            return
         }
-        else {
-            $spConsentUrl = "https://login.microsoftonline.com/$($state.TenantId)/adminconsent?client_id=$(Get-NeologikProperty $spApp 'appId')"
-            Write-Log '  The consent for Sites.Selected does NOT exist. Open this address in a browser, sign in as a Global Administrator and give the consent:' -Level Warning
-            Write-Host ''
-            Write-Host "    $spConsentUrl" -ForegroundColor Cyan
-            Write-Host ''
-            Add-Summary 'SharePoint Sites.Selected consent' 'MISSING: the script printed the consent address'
+        if (-not $IngestionRecorded) {
+            Write-Log '  No SharePoint application of Neologik holds a SharePoint permission. The solution does not use SharePoint ingestion. The script grants nothing' -Level Info
+            Add-Summary $item 'Not needed. No SharePoint application of Neologik holds a SharePoint permission'
+            return
         }
+        if (-not $spApp) {
+            Write-Log '  This tenant holds no SharePoint application. The deployment by Neologik creates the SharePoint application' -Level Warning
+            Add-Summary $item 'MISSING: the tenant holds no SharePoint application'
+            return
+        }
+        $spConsentUrl = "https://login.microsoftonline.com/$($state.TenantId)/adminconsent?client_id=$(Get-NeologikProperty $spApp 'appId')"
+        Write-Log '  The consent for Sites.Selected does NOT exist. Open this address in a browser, sign in as a Global Administrator and give the consent:' -Level Warning
+        Write-Host ''
+        Write-Host "    $spConsentUrl" -ForegroundColor Cyan
+        Write-Host ''
+        Add-Summary $item 'MISSING: the script printed the consent address'
     }
     catch {
         $reason = Get-NeologikErrorText $_
-        Write-Log "  The consent for Sites.Selected: FAILED. The script could not read the consent. $reason" -Level Error
-        Add-Summary 'SharePoint Sites.Selected consent' "FAILED: $reason"
+        if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges. Sign in as a Global Administrator' }
+        Write-Log "  The consent for Sites.Selected: FAILED. $reason" -Level Error
+        Add-Summary $item "FAILED: $reason"
     }
 }
 
@@ -2381,19 +2486,21 @@ function Test-NeologikPreWindowSharePointConsent {
     <#
     Step 3a of the first run. The configuration file can record whether the
     solution uses SharePoint ingestion, in the field "SharePointIngestion". When
-    the configuration file does not hold the field, the later run makes the check
-    with the agent grants file. The summary then records that fact, and the item
-    needs no attention.
+    the configuration file does not hold the field, the script reads the SharePoint
+    permissions in the directory. An earlier SharePoint application of Neologik
+    that holds a SharePoint permission shows that the solution uses SharePoint
+    ingestion.
     #>
     $state = $script:State
     Write-Log 'Step 3a of 4: the consent of the SharePoint application for Sites.Selected' -Level Info
     if (-not $state.Config -or -not (Test-NeologikProperty $state.Config 'SharePointIngestion')) {
-        Write-Log '  The configuration file does not record whether the solution uses SharePoint ingestion. The later run makes the check with the agent grants file' -Level Info
-        Add-Summary 'SharePoint Sites.Selected consent' 'Not checked. The later run with -AgentGrantsFile makes the check'
+        Write-Log '  No file records whether the solution uses SharePoint ingestion. The script reads the SharePoint permissions in the directory' -Level Info
+        Test-NeologikSharePointConsent
         return
     }
     if ([bool](Get-NeologikProperty $state.Config 'SharePointIngestion' $false)) {
-        Test-NeologikSharePointConsent
+        Write-Log '  The solution uses SharePoint ingestion. The script checks the consent for Sites.Selected' -Level Info
+        Test-NeologikSharePointConsent -IngestionRecorded
     }
     else {
         Write-Log '  The solution does not use SharePoint ingestion. The script does not check the consent for Sites.Selected' -Level Info
@@ -2618,7 +2725,8 @@ function Set-NeologikAgentUserGrant {
             -RoleName $roleName -ScopeType ([string](Get-NeologikProperty $role 'scopeType' ''))
     }
     if ([bool](Get-NeologikProperty $grantsFile 'sharePointIngestion' $false)) {
-        Test-NeologikSharePointConsent
+        Write-Log '  The solution uses SharePoint ingestion. The script checks the consent for Sites.Selected' -Level Info
+        Test-NeologikSharePointConsent -IngestionRecorded
     }
     else {
         Write-Log '  The solution does not use SharePoint ingestion. The script does not check the consent for Sites.Selected' -Level Info
