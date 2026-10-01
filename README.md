@@ -81,6 +81,7 @@ The onboarding kit includes each script in full. Approvers can read each script 
 | [ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md](ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md) | What the environment access script, `Update-NeologikEnvironmentAccess.ps1`, checks and changes |
 | [TEAMS-APP-UPGRADE-GUIDE.md](TEAMS-APP-UPGRADE-GUIDE.md) | How to upgrade the Teams app for your users |
 | [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md) | The onboarding script in detail: parameters, names, steps and output files |
+| [ANALYTICS-REPORTING-GUIDE.md](ANALYTICS-REPORTING-GUIDE.md) | For Approvers. What the environment reports to Neologik, what the environment never reports, how long Neologik keeps the statistics and how to withdraw |
 | [VERSION_HISTORY.md](VERSION_HISTORY.md) | The versions of the onboarding kit |
 
 ### Supporting files
