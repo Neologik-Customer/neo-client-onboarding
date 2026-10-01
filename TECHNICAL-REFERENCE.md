@@ -17,7 +17,7 @@ This document describes the onboarding script, `Install-NeologikEnvironment.ps1`
 | Item | Value |
 |---|---|
 | Version of the onboarding script | v5.0.3 |
-| Version of the onboarding kit | v5.0.7 |
+| Version of the onboarding kit | v5.0.8 |
 
 The onboarding kit has a version, and each script has a separate version. The version of the onboarding kit follows the version of the Neologik Platform. The version of a script changes when the script changes.
 
@@ -252,7 +252,7 @@ When you choose tags, the onboarding script tags the resource group and each oth
 | `Solution` | The short name, for example `abcprd01` |
 | `DeploymentDate` | The date of the run |
 
-The onboarding script also adds the tag `NeologikOnboardingKit` to the resource group. The tag records the version of the onboarding kit, `v5.0.7`. The onboarding script adds the tag `NeologikOnboardingKit` even when you choose no tags. The Neologik Platform reads the tag before an upgrade.
+The onboarding script also adds the tag `NeologikOnboardingKit` to the resource group. The tag records the version of the onboarding kit, `v5.0.8`. The onboarding script adds the tag `NeologikOnboardingKit` even when you choose no tags. The Neologik Platform reads the tag before an upgrade.
 
 ### Guest users
 
