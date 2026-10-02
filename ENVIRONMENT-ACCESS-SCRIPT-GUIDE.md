@@ -172,7 +172,7 @@ The environment access script signs in to Microsoft Graph with your account. At 
 
 | Permission | Requested in | What the environment access script uses the permission for |
 |---|---|---|
-| `Application.ReadWrite.All` | Every run | To read the application registrations. To add the owner and the unique name. To add the federated credentials of the agent identity blueprint |
+| `Application.ReadWrite.All` | Every run | To read the application registrations. To add the owner and the unique name. To add the federated credentials of the agent identity blueprint. To read and to add the sponsor of the agent identity blueprint |
 | `AppRoleAssignment.ReadWrite.All` | Every run | To grant and remove Microsoft Graph application permissions, and to assign the security group to the Platform Sign-in application |
 | `Directory.Read.All` | Every run | To read the service principals, the groups and the directory roles |
 | `User.Read` | Every run | To identify your account |
