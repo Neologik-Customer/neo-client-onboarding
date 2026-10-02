@@ -145,7 +145,7 @@
         -AnswerFile .\inputs.json -SkipPowerShellUpdate -SkipModuleInstall
 
 .NOTES
-    Version: v5.0.6
+    Version: v5.0.7
     Requires: PowerShell 7.4 or later
     Requires: Owner on the subscription and Global Administrator in the tenant
 #>
@@ -216,10 +216,10 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v5.0.6'
+$script:Version = 'v5.0.7'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.0.8'
+$script:KitVersion = 'v5.0.9'
 
 # The time stamp of the run. The names of the log and of the configuration file hold the time stamp.
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -2736,6 +2736,7 @@ function New-NeologikAgentBlueprint {
         $escaped = $displayName -replace "'", "''"
         $found = Invoke-MgGraphRequest -Method GET -Uri "$graph/applications?`$filter=displayName eq '$escaped'&`$select=id,appId" -ErrorAction Stop
         $blueprint = @($found.value) | Select-Object -First 1
+        $blueprintExisted = [bool]$blueprint
         if ($blueprint) {
             Write-Log "The agent identity blueprint already exists, client id $($blueprint.appId)" -Level Info
         }
@@ -2748,7 +2749,7 @@ function New-NeologikAgentBlueprint {
             } | ConvertTo-Json -Depth 5 -Compress
             $blueprint = Invoke-MgGraphRequest -Method POST -Uri "$graph/applications/microsoft.graph.agentIdentityBlueprint" `
                 -Headers $odataHeaders -Body $body -ContentType 'application/json' -ErrorAction Stop
-            Write-Log "Agent identity blueprint created, client id $($blueprint.appId)" -Level Success
+            Write-Log "Agent identity blueprint created, client id $($blueprint.appId). The sponsor is the signed-in administrator" -Level Success
         }
         $blueprintObjectId = [string]$blueprint.id
         $blueprintAppId = [string]$blueprint.appId
@@ -2762,6 +2763,25 @@ function New-NeologikAgentBlueprint {
             $ref = @{ '@odata.id' = "$graph/directoryObjects/$DeploySpObjectId" } | ConvertTo-Json -Compress
             Invoke-MgGraphRequest -Method POST -Uri "$graph/applications/$blueprintObjectId/owners/`$ref" -Body $ref -ContentType 'application/json' -ErrorAction Stop | Out-Null
             Write-Log "The deployment identity was added as an owner of the agent identity blueprint" -Level Success
+        }
+
+        # 2b. The sponsor of the agent identity blueprint. The sponsor is the person who is accountable for the
+        #     agents of the environment. Each agent identity that the Neologik Platform creates takes the sponsor
+        #     of the agent identity blueprint. A new agent identity blueprint has the signed-in administrator as
+        #     the sponsor. The script adds the signed-in administrator to an agent identity blueprint that exists
+        #     with no sponsor.
+        if ($blueprintExisted) {
+            $sponsorsUri = "$graph/applications/$blueprintObjectId/microsoft.graph.agentIdentityBlueprint/sponsors"
+            $sponsors = Invoke-MgGraphRequest -Method GET -Uri "$sponsorsUri`?`$select=id,displayName" -ErrorAction Stop
+            $sponsorNames = @($sponsors.value | ForEach-Object { if ($_.displayName) { [string]$_.displayName } else { [string]$_.id } })
+            if ($sponsorNames.Count -gt 0) {
+                Write-Log "The sponsor of the agent identity blueprint: $($sponsorNames -join ', ')" -Level Info
+            }
+            else {
+                $ref = @{ '@odata.id' = "$graph/directoryObjects/$SponsorUserId" } | ConvertTo-Json -Compress
+                Invoke-MgGraphRequest -Method POST -Uri "$sponsorsUri/`$ref" -Body $ref -ContentType 'application/json' -ErrorAction Stop | Out-Null
+                Write-Log "The signed-in administrator was added as the sponsor of the agent identity blueprint" -Level Success
+            }
         }
 
         # 3. The service principal of the agent identity blueprint, created when absent. A new application takes
@@ -2843,7 +2863,6 @@ function New-NeologikAgentBlueprint {
             ClientId = $blueprintAppId
             ObjectId = $blueprintObjectId
             PrincipalId = $principalId
-            SponsorUserId = $SponsorUserId
             GitHubCredentials = $credentialNames
         }
         return $script:ConfigData['AgentBlueprint']

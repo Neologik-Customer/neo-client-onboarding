@@ -79,6 +79,7 @@ The command selects the first run when the command names no grants file. The fir
 | The agent identity blueprint, `Neologik Agent Blueprint - default - <short name>` | The agent identity blueprint exists | The environment access script creates the agent identity blueprint when the agent identity blueprint is absent |
 | The service principal of the agent identity blueprint | The service principal exists | The environment access script creates the service principal when the service principal is absent |
 | Owner | The deployment identity owns the agent identity blueprint and the service principal | The environment access script adds the deployment identity as an owner when the deployment identity is not an owner |
+| Sponsor | The agent identity blueprint has a sponsor. The sponsor is the person who is accountable for the agents of the environment. The summary names the sponsor | The environment access script adds the signed-in Global Administrator as the sponsor when the agent identity blueprint has no sponsor |
 | The permission of the service principal | The service principal holds `AgentIdUser.ReadWrite.IdentityParentedBy`. The permission covers only the agent users of this agent identity blueprint | The environment access script grants the permission when the permission is absent |
 | The federated credentials | The agent identity blueprint holds the three federated credentials through which the Neologik deployment signs in as the agent identity blueprint | The environment access script adds a federated credential when the federated credential is absent |
 | The permissions that the deployment identity keeps | The deployment identity holds `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` | The environment access script grants a permission when the permission is absent |
@@ -173,7 +174,7 @@ The environment access script signs in to Microsoft Graph with your account. At 
 
 | Permission | Requested in | What the environment access script uses the permission for |
 |---|---|---|
-| `Application.ReadWrite.All` | Every run | To read the application registrations. To add the owner and the unique name. To add the federated credentials of the agent identity blueprint |
+| `Application.ReadWrite.All` | Every run | To read the application registrations. To add the owner and the unique name. To add the federated credentials of the agent identity blueprint. To read and to add the sponsor of the agent identity blueprint |
 | `AppRoleAssignment.ReadWrite.All` | Every run | To grant and remove Microsoft Graph application permissions, and to assign the security group to the Platform Sign-in application |
 | `Directory.Read.All` | Every run | To read the service principals, the groups and the directory roles |
 | `User.Read` | Every run | To identify your account |

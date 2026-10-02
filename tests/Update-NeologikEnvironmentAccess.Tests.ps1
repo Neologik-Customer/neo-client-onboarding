@@ -124,7 +124,7 @@ BeforeAll {
 
     function New-FakeApp {
         param([string]$Id, [string]$AppId, [string]$DisplayName)
-        return @{ id = $Id; appId = $AppId; displayName = $DisplayName; owners = @(); credentials = @(); uniqueName = ''; passwordCredentials = @() }
+        return @{ id = $Id; appId = $AppId; displayName = $DisplayName; owners = @(); sponsors = @(); credentials = @(); uniqueName = ''; passwordCredentials = @() }
     }
 
     function Add-FakeAppRole {
@@ -200,6 +200,7 @@ BeforeAll {
         $t = $script:Tenant
         $app = New-FakeApp -Id $script:Ids.BlueprintAppObj -AppId $script:Ids.BlueprintAppId -DisplayName "Neologik Agent Blueprint - default - $script:ShortName"
         $app.owners = @($script:Ids.Me, $script:Ids.DeploySpId)
+        $app.sponsors = @($script:Ids.Me)
         $app.credentials = @('github-oidc-neo-infrastructure', 'github-oidc-neo-bot-service', 'github-oidc-neo-env-config')
         $t.Apps += $app
         $principal = New-FakeSp -Id $script:Ids.BlueprintSpId -AppId $script:Ids.BlueprintAppId -DisplayName $app.displayName
@@ -396,7 +397,7 @@ BeforeAll {
         $json = $null
         if ($Body) { $json = $Body | ConvertFrom-Json -AsHashtable }
         switch -Regex ($path) {
-            '^/me$' { return @{ StatusCode = 200; Headers = @{}; Body = @{ id = $t.Me; userPrincipalName = 'admin@contoso.com' } } }
+            '^/me$' { return @{ StatusCode = 200; Headers = @{}; Body = @{ id = $t.Me; userPrincipalName = 'admin@contoso.com'; displayName = 'Contoso Administrator' } } }
             '^/me/memberOf/microsoft\.graph\.directoryRole$' {
                 return @{ StatusCode = 200; Headers = @{}; Body = (ConvertTo-FakePage -Items @($t.MeDirectoryRoles) -Uri $Uri -Query $query) }
             }
@@ -422,6 +423,9 @@ BeforeAll {
                 $app = New-FakeApp -Id ([guid]::NewGuid().ToString()) -AppId ([guid]::NewGuid().ToString()) -DisplayName $json.displayName
                 $app.owners = @($t.Me)
                 foreach ($bind in @($json['owners@odata.bind'])) { $app.owners += ($bind -split '/')[-1] }
+                # Microsoft Graph refuses a blueprint with no sponsor.
+                if (@($json['sponsors@odata.bind']).Count -eq 0) { return @{ StatusCode = 400; Headers = @{}; Body = @{ error = @{ code = 'Request_BadRequest'; message = 'A sponsor is required' } } } }
+                foreach ($bind in @($json['sponsors@odata.bind'])) { $app.sponsors += ($bind -split '/')[-1] }
                 $t.Apps += $app
                 return @{ StatusCode = 201; Headers = @{}; Body = @{ id = $app.id; appId = $app.appId; displayName = $app.displayName } }
             }
@@ -434,6 +438,20 @@ BeforeAll {
                     return @{ StatusCode = 204; Headers = @{}; Body = $null }
                 }
                 return @{ StatusCode = 200; Headers = @{}; Body = @{ id = $app.id; appId = $app.appId; displayName = $app.displayName; uniqueName = $app.uniqueName; passwordCredentials = @($app.passwordCredentials) } }
+            }
+            '^/applications/([^/]+)/microsoft\.graph\.agentIdentityBlueprint/sponsors$' {
+                $app = Get-FakeApp -Id $Matches[1]
+                if (-not $app) { return @{ StatusCode = 404; Headers = @{}; Body = @{ error = @{ code = 'Request_ResourceNotFound'; message = 'not found' } } } }
+                $items = @($app.sponsors | ForEach-Object { @{ id = $_; displayName = $(if ($_ -eq $t.Me) { 'Contoso Administrator' } else { '' }) } })
+                return @{ StatusCode = 200; Headers = @{}; Body = (ConvertTo-FakePage -Items $items -Uri $Uri -Query $query) }
+            }
+            '^/applications/([^/]+)/microsoft\.graph\.agentIdentityBlueprint/sponsors/\$ref$' {
+                $app = Get-FakeApp -Id $Matches[1]
+                if (-not $app) { return @{ StatusCode = 404; Headers = @{}; Body = @{ error = @{ code = 'Request_ResourceNotFound'; message = 'not found' } } } }
+                $sponsor = ($json['@odata.id'] -split '/')[-1]
+                Add-Write "POST blueprint sponsor $sponsor"
+                $app.sponsors += $sponsor
+                return @{ StatusCode = 204; Headers = @{}; Body = $null }
             }
             '^/applications/([^/]+)/owners$' {
                 $app = Get-FakeApp -Id $Matches[1]
@@ -1711,6 +1729,7 @@ Context 'The first run on a compliant environment' {
         @($script:Summary | Where-Object { $_.Result -match $script:AttentionPattern }) | Should -HaveCount 0
         Get-SummaryResult 'Agent identity blueprint' | Should -Be 'Present'
         Get-SummaryResult 'Agent identity blueprint owner' | Should -Be 'Already an owner'
+        Get-SummaryResult 'Agent identity blueprint sponsor' | Should -Be 'Present: Contoso Administrator'
         Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'Present'
         Get-SummaryResult 'Agent identity blueprint service principal owner' | Should -Be 'Already an owner'
         Get-SummaryResult 'Agent identity blueprint service principal permission: AgentIdUser.ReadWrite.IdentityParentedBy' | Should -Be 'Already granted'
@@ -1861,6 +1880,8 @@ Context 'The first run on an environment with missing state' {
         $code | Should -Be 0
         Get-SummaryResult 'Agent identity blueprint' | Should -Be 'Created'
         Get-SummaryResult 'Agent identity blueprint owner' | Should -Be 'Already an owner' -Because 'owners@odata.bind set the deployment identity at creation'
+        Get-SummaryResult 'Agent identity blueprint sponsor' | Should -Be 'Present: Contoso Administrator' -Because 'sponsors@odata.bind set the signed-in administrator at creation'
+        @($script:Writes | Where-Object { $_ -like 'POST blueprint sponsor*' }) | Should -HaveCount 0
         Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'Created'
         Get-SummaryResult 'Agent identity blueprint service principal owner' | Should -Be 'Already an owner' -Because 'owners@odata.bind set the deployment identity at creation'
         @($script:Writes | Where-Object { $_ -like 'POST sp owner*' }) | Should -HaveCount 0 -Because 'Microsoft Graph refuses a later owner call without AgentIdentityBlueprintPrincipal.ReadWrite.All'
@@ -2857,6 +2878,41 @@ Context 'The first run: permission reduction (step 4)' {
     }
 }
 
+Context 'Blueprint sponsor' {
+    It 'adds the signed-in administrator when the blueprint has no sponsor, and writes nothing more on the next run' {
+        Add-CompliantPreWindowState
+        (Get-FakeApp -Id $script:Ids.BlueprintAppObj).sponsors = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Agent identity blueprint sponsor' | Should -Be 'Added: Contoso Administrator'
+        @($script:Writes) | Should -Be @("POST blueprint sponsor $($script:Ids.Me)")
+        (Get-FakeApp -Id $script:Ids.BlueprintAppObj).sponsors | Should -Be @($script:Ids.Me)
+        $script:Writes = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $script:Writes | Should -HaveCount 0
+        Get-SummaryResult 'Agent identity blueprint sponsor' | Should -Be 'Present: Contoso Administrator'
+    }
+
+    It 'reports WOULD ADD in a run with -Verify and writes nothing' {
+        Add-CompliantPreWindowState
+        (Get-FakeApp -Id $script:Ids.BlueprintAppObj).sponsors = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 1
+        Get-SummaryResult 'Agent identity blueprint sponsor' | Should -Be 'WOULD ADD: the signed-in administrator'
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'names a sponsor that another administrator set, by id when the directory gives no name, and changes nothing' {
+        Add-CompliantPreWindowState
+        (Get-FakeApp -Id $script:Ids.BlueprintAppObj).sponsors = @('99999999-9999-9999-9999-999999999999')
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Agent identity blueprint sponsor' | Should -Be 'Present: 99999999-9999-9999-9999-999999999999'
+        $script:Writes | Should -HaveCount 0
+    }
+}
+
 Context 'Verify-only run (-Verify)' {
     It 'reports every pending change on a legacy environment, writes nothing and exits 1' {
         Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.Read.All'
@@ -2868,6 +2924,7 @@ Context 'Verify-only run (-Verify)' {
         (Get-SummaryResult 'Agent identity blueprint') | Should -BeLike 'WOULD CREATE*'
         Get-SummaryResult 'Agent identity blueprint service principal' | Should -Be 'WOULD CREATE'
         Get-SummaryResult 'Agent identity blueprint service principal owner' | Should -Be 'WOULD ADD at creation'
+        Get-SummaryResult 'Agent identity blueprint sponsor' | Should -Be 'WOULD SET at creation: the signed-in administrator'
         Get-SummaryResult 'Agent identity blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'WOULD ADD'
         Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'WOULD GRANT'
         Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -Be 'WOULD REMOVE'
