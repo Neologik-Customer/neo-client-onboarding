@@ -16,8 +16,8 @@ This document describes the onboarding script, `Install-NeologikEnvironment.ps1`
 
 | Item | Value |
 |---|---|
-| Version of the onboarding script | v5.0.6 |
-| Version of the onboarding kit | v5.0.8 |
+| Version of the onboarding script | v5.0.7 |
+| Version of the onboarding kit | v5.0.9 |
 
 The onboarding kit has a version, and each script has a separate version. The version of the onboarding kit follows the version of the Neologik Platform. The version of a script changes when the script changes.
 
@@ -252,7 +252,7 @@ When you choose tags, the onboarding script tags the resource group and each oth
 | `Solution` | The short name, for example `abcprd01` |
 | `DeploymentDate` | The date of the run |
 
-The onboarding script also adds the tag `NeologikOnboardingKit` to the resource group. The tag records the version of the onboarding kit, `v5.0.8`. The onboarding script adds the tag `NeologikOnboardingKit` even when you choose no tags. The Neologik Platform reads the tag before an upgrade.
+The onboarding script also adds the tag `NeologikOnboardingKit` to the resource group. The tag records the version of the onboarding kit, `v5.0.9`. The onboarding script adds the tag `NeologikOnboardingKit` even when you choose no tags. The Neologik Platform reads the tag before an upgrade.
 
 ### Guest users
 
@@ -332,7 +332,7 @@ The Neologik Platform creates the agent identities and the agent user accounts o
 
 | Item | Value |
 |---|---|
-| Sponsor | The signed-in administrator. A Global Administrator can change the sponsor in the Microsoft Entra admin centre |
+| Sponsor | The signed-in administrator. The sponsor is the person who is accountable for the agents of the environment. Each agent identity that the Neologik Platform creates takes the sponsor of the agent identity blueprint. The agent identity blueprint can already exist with no sponsor. The onboarding script then adds the signed-in administrator. A Global Administrator can change the sponsor in the Microsoft Entra admin centre |
 | Owner | The deployment identity owns the agent identity blueprint and the service principal of the agent identity blueprint |
 | Microsoft Graph application permission of the principal | `AgentIdUser.ReadWrite.IdentityParentedBy`. The permission applies only to the agent users of this agent identity blueprint |
 | Federated credentials | Three. The next table lists the three federated credentials |
