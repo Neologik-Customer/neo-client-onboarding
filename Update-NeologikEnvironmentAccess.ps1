@@ -2060,7 +2060,7 @@ function Set-NeologikAgentBlueprint {
             if (-not $meId) { throw 'The script could not read the id of the signed-in user' }
             $meName = [string](Get-NeologikProperty $me 'displayName' '')
             if (-not $meName) { $meName = $meId }
-            $ref = @{ '@odata.id' = "$graph/users/$meId" } | ConvertTo-Json -Compress
+            $ref = @{ '@odata.id' = "$graph/directoryObjects/$meId" } | ConvertTo-Json -Compress
             $null = Invoke-NeologikGraph -Method POST -Uri "$sponsorsUri/`$ref" -Body $ref
             Write-Log "  The script added the signed-in administrator, $meName, as the sponsor of the agent identity blueprint" -Level Success
             Add-Summary 'Agent identity blueprint sponsor' "Added: $meName"

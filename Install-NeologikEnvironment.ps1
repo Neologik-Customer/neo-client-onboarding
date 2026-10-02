@@ -2767,7 +2767,7 @@ function New-NeologikAgentBlueprint {
                 Write-Log "The sponsor of the agent identity blueprint: $($sponsorNames -join ', ')" -Level Info
             }
             else {
-                $ref = @{ '@odata.id' = "$graph/users/$SponsorUserId" } | ConvertTo-Json -Compress
+                $ref = @{ '@odata.id' = "$graph/directoryObjects/$SponsorUserId" } | ConvertTo-Json -Compress
                 Invoke-MgGraphRequest -Method POST -Uri "$sponsorsUri/`$ref" -Body $ref -ContentType 'application/json' -ErrorAction Stop | Out-Null
                 Write-Log "The signed-in administrator was added as the sponsor of the agent identity blueprint" -Level Success
             }
