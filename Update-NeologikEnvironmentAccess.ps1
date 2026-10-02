@@ -41,6 +41,10 @@
           'Neologik Agent Blueprint - <key> - <short name>'.
         - The service principal of the agent identity blueprint.
         - The deployment identity as an owner of both objects.
+        - The sponsor of the agent identity blueprint. The sponsor is the person
+          who is accountable for the agents of the environment. The signed-in
+          Global Administrator becomes the sponsor when the agent identity
+          blueprint has no sponsor.
         - The permission AgentIdUser.ReadWrite.IdentityParentedBy on the service
           principal of the agent identity blueprint.
         - Three federated credentials. The Neologik deployment signs in as the
@@ -518,7 +522,7 @@ $script:Summary = @()
 $script:State = @{}
 # The version of the onboarding kit. The script records the version on the resource
 # group, in the tag NeologikOnboardingKit, when the permission reduction is complete.
-$script:KitVersion = 'v5.0.8'
+$script:KitVersion = 'v5.0.9'
 
 # ----- Console and summary -----------------------------------------------------
 
@@ -1943,7 +1947,7 @@ function Set-NeologikAgentBlueprint {
                 $names = @($owned | ForEach-Object { [string](Get-NeologikProperty $_ 'displayName' '') })
                 Write-Log "  The agent identity blueprint '$blueprintName': FAILED. The deployment identity owns $($owned.Count) agent identity blueprints with other short names: $($names -join ', '). Give -SolutionShortName the short name that the environment uses" -Level Error
                 Add-Summary 'Agent identity blueprint' "FAILED: the deployment identity owns several agent identity blueprints: $($names -join ', ')"
-                foreach ($item in @('Agent identity blueprint owner', 'Agent identity blueprint service principal', 'Agent identity blueprint service principal owner', 'Agent identity blueprint service principal permission', 'Agent identity blueprint credentials')) {
+                foreach ($item in @('Agent identity blueprint owner', 'Agent identity blueprint sponsor', 'Agent identity blueprint service principal', 'Agent identity blueprint service principal owner', 'Agent identity blueprint service principal permission', 'Agent identity blueprint credentials')) {
                     Add-Summary $item 'SKIPPED: the agent identity blueprint is not available'
                 }
                 return
@@ -1959,6 +1963,7 @@ function Set-NeologikAgentBlueprint {
             # the items as one set.
             Add-NeologikPendingChange 'Agent identity blueprint' "CREATE: $blueprintName"
             Add-NeologikPendingChange 'Agent identity blueprint owner' 'ADD at creation'
+            Add-NeologikPendingChange 'Agent identity blueprint sponsor' 'SET at creation: the signed-in administrator'
             Add-NeologikPendingChange 'Agent identity blueprint service principal' 'CREATE'
             Add-NeologikPendingChange 'Agent identity blueprint service principal owner' 'ADD at creation'
             foreach ($roleName in $script:BlueprintPrincipalGraphRoles) { Add-NeologikPendingChange "Agent identity blueprint service principal permission: $roleName" 'GRANT' }
@@ -1989,7 +1994,7 @@ function Set-NeologikAgentBlueprint {
         $blueprint = $null
     }
     if (-not $blueprint) {
-        foreach ($item in @('Agent identity blueprint owner', 'Agent identity blueprint service principal', 'Agent identity blueprint service principal owner', 'Agent identity blueprint service principal permission', 'Agent identity blueprint credentials')) {
+        foreach ($item in @('Agent identity blueprint owner', 'Agent identity blueprint sponsor', 'Agent identity blueprint service principal', 'Agent identity blueprint service principal owner', 'Agent identity blueprint service principal permission', 'Agent identity blueprint credentials')) {
             Add-Summary $item 'SKIPPED: the agent identity blueprint is not available'
         }
         return
@@ -2027,6 +2032,44 @@ function Set-NeologikAgentBlueprint {
         $reason = Get-NeologikErrorText $_
         Write-Log "  The owner of the agent identity blueprint: FAILED. $reason" -Level Error
         Add-Summary 'Agent identity blueprint owner' "FAILED: $reason"
+    }
+
+    # The sponsor of the agent identity blueprint. The sponsor is the person who is
+    # accountable for the agents of the environment. Each agent identity that the
+    # Neologik Platform creates takes the sponsor of the agent identity blueprint.
+    # Microsoft Entra ID creates no agent identity without a sponsor. The signed-in
+    # Global Administrator becomes the sponsor when the agent identity blueprint has
+    # no sponsor.
+    try {
+        $sponsorsUri = "$graph/applications/$blueprintObjectId/microsoft.graph.agentIdentityBlueprint/sponsors"
+        $sponsors = @(Get-NeologikGraphCollection -Uri "$sponsorsUri`?`$select=id,displayName" -RetryNotFound:$created)
+        if ($sponsors.Count -gt 0) {
+            $names = @($sponsors | ForEach-Object {
+                    $name = [string](Get-NeologikProperty $_ 'displayName' '')
+                    if ($name) { $name } else { [string](Get-NeologikProperty $_ 'id' '') }
+                })
+            Write-Log "  The sponsor of the agent identity blueprint: $($names -join ', ')" -Level Success
+            Add-Summary 'Agent identity blueprint sponsor' "Present: $($names -join ', ')"
+        }
+        elseif (Test-NeologikVerifyOnly) {
+            Add-NeologikPendingChange 'Agent identity blueprint sponsor' 'ADD: the signed-in administrator'
+        }
+        else {
+            $me = Invoke-NeologikGraph -Method GET -Uri "$graph/me?`$select=id,displayName"
+            $meId = [string](Get-NeologikProperty $me 'id' '')
+            if (-not $meId) { throw 'The script could not read the id of the signed-in user' }
+            $meName = [string](Get-NeologikProperty $me 'displayName' '')
+            if (-not $meName) { $meName = $meId }
+            $ref = @{ '@odata.id' = "$graph/directoryObjects/$meId" } | ConvertTo-Json -Compress
+            $null = Invoke-NeologikGraph -Method POST -Uri "$sponsorsUri/`$ref" -Body $ref
+            Write-Log "  The script added the signed-in administrator, $meName, as the sponsor of the agent identity blueprint" -Level Success
+            Add-Summary 'Agent identity blueprint sponsor' "Added: $meName"
+        }
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        Write-Log "  The sponsor of the agent identity blueprint: FAILED. $reason" -Level Error
+        Add-Summary 'Agent identity blueprint sponsor' "FAILED: $reason"
     }
 
     # The service principal of the agent identity blueprint. The function reads the

@@ -13,14 +13,15 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
-2. [Version 5.0.8](#version-508)
-3. [Version 5.0.7](#version-507)
-4. [Version 5.0.6](#version-506)
-5. [Version 5.0.3](#version-503)
-6. [Version 5.0.2](#version-502)
-7. [Version 5.0.1](#version-501)
-8. [Version 5.0.0](#version-500)
-9. [Earlier versions](#earlier-versions)
+2. [Version 5.0.9](#version-509)
+3. [Version 5.0.8](#version-508)
+4. [Version 5.0.7](#version-507)
+5. [Version 5.0.6](#version-506)
+6. [Version 5.0.3](#version-503)
+7. [Version 5.0.2](#version-502)
+8. [Version 5.0.1](#version-501)
+9. [Version 5.0.0](#version-500)
+10. [Earlier versions](#earlier-versions)
 
 ## Scripts in this version
 
@@ -28,11 +29,23 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.0.4 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.8 | Reduces the access of the deployment identity of an existing environment to the access that version 5 of the Neologik Platform needs. Applies the grants for agents and Apps that work unattended |
+| `Install-NeologikEnvironment.ps1` | v5.0.5 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.9 | Reduces the access of the deployment identity of an existing environment to the access that version 5 of the Neologik Platform needs. Applies the grants for agents and Apps that work unattended |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.0.9
+
+**Date**: 2026-10-02
+
+| Item | Change |
+|---|---|
+| `Update-NeologikEnvironmentAccess.ps1` | The first run now checks the sponsor of the agent identity blueprint. The sponsor is the person who is accountable for the agents of the environment. The summary names the sponsor in the item `Agent identity blueprint sponsor`. When the agent identity blueprint has no sponsor, the environment access script adds the signed-in Global Administrator as the sponsor. The environment access script records the version `v5.0.9` on the resource group |
+| `Install-NeologikEnvironment.ps1` | Version v5.0.5. The agent identity blueprint can already exist with no sponsor. The onboarding script then adds the signed-in Global Administrator as the sponsor. The configuration file does not record the sponsor. Microsoft Entra ID holds the sponsor on the agent identity blueprint. The onboarding script records the version `v5.0.9` on the resource group |
+| The Neologik Platform | Each agent identity that the Neologik Platform creates takes the sponsor of the agent identity blueprint. The Neologik Context Engine has no setting for the sponsor |
+| `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` | The document describes the check of the sponsor |
+| `TECHNICAL-REFERENCE.md` | The document states how the agent identities take the sponsor |
 
 ## Version 5.0.8
 
