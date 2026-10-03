@@ -97,6 +97,9 @@ BeforeAll {
         AppAdminRole     = 'cccccccc-1111-cccc-cccc-cccccccccccc'
         AgentIdAdminRole = 'cccccccc-2222-cccc-cccc-cccccccccccc'
         DevTeamGroup     = '55555555-bbbb-5555-5555-555555555555'
+        UserGroup        = '55555555-cccc-5555-5555-555555555555'
+        NceAdminsGroup   = '55555555-dddd-5555-5555-555555555555'
+        GuestUser        = '66666666-aaaa-6666-6666-666666666666'
         MailboxAppId     = 'dddddddd-1111-dddd-dddd-dddddddddddd'
         MailboxObjectId  = 'dddddddd-2222-dddd-dddd-dddddddddddd'
         LegacyAppId      = 'eeeeeeee-1111-eeee-eeee-eeeeeeeeeeee'
@@ -157,6 +160,8 @@ BeforeAll {
             Apps                  = @()
             ServicePrincipals     = @()
             Groups                = @()
+            # The accounts the script looks up by mail address (the Neologik guests).
+            Users                 = @()
             DirectoryRoles        = @()
             AzRoleAssignments     = @()
             Exchange              = @{ ServicePrincipals = @(); Scopes = @(); Assignments = @(); InScope = $true; Dehydrated = $false }
@@ -211,6 +216,18 @@ BeforeAll {
         Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'AgentIdentityBlueprint.AddRemoveCreds.All'
         $group = @($t.Groups | Where-Object { $_.id -eq $script:Ids.Group })[0]
         $group.appRoleAssignments = @(@{ Id = [guid]::NewGuid().ToString(); ResourceId = $script:Ids.SignInSpId; AppRoleId = '00000000-0000-0000-0000-000000000000' })
+        # The security groups of version 5 (project#3127): the user group under its
+        # version 5 name, the two groups the onboarding script creates, the Neologik
+        # guest and the administrator as members of all four, the NCE Admins group
+        # assigned to the sign-in application.
+        $group.displayName = "Neologik NCE Contributors - $script:ShortName"
+        $group.members = @(@{ id = $script:Ids.Me }, @{ id = $script:Ids.GuestUser })
+        $adminGroup = Get-FakeGroup -Id $script:Ids.AdminGroup
+        $adminGroup.members = @(@{ id = $script:Ids.Me }, @{ id = $script:Ids.GuestUser })
+        $t.Groups += @{ id = $script:Ids.UserGroup; displayName = "Neologik User Group - $script:ShortName"; members = @(@{ id = $script:Ids.Me }, @{ id = $script:Ids.GuestUser }); appRoleAssignments = @() }
+        $t.Groups += @{ id = $script:Ids.NceAdminsGroup; displayName = "Neologik NCE Admins - $script:ShortName"; members = @(@{ id = $script:Ids.Me }, @{ id = $script:Ids.GuestUser })
+            appRoleAssignments = @(@{ Id = [guid]::NewGuid().ToString(); ResourceId = $script:Ids.SignInSpId; AppRoleId = '00000000-0000-0000-0000-000000000000' }) }
+        $t.Users += @{ id = $script:Ids.GuestUser; mail = 'support@neologik.ai'; userPrincipalName = 'support_neologik.ai#EXT#@contoso.onmicrosoft.com'; displayName = 'Neologik Support'; userType = 'Guest' }
         $signIn = Get-FakeSp -Id $script:Ids.SignInSpId
         $signIn.grants = @(@{ id = 'grant-signin'; clientId = $script:Ids.SignInSpId; consentType = 'AllPrincipals'; principalId = $null; resourceId = $script:Ids.GraphSpId; scope = 'User.Read openid profile' })
     }
@@ -528,6 +545,63 @@ BeforeAll {
                 $sp.owners += $owner
                 return @{ StatusCode = 204; Headers = @{}; Body = $null }
             }
+            '^/groups$' {
+                if ($Method -eq 'POST') {
+                    Add-Write "POST group $($json.displayName)"
+                    $group = @{ id = [guid]::NewGuid().ToString(); displayName = [string]$json.displayName; description = [string]$json.description; members = @(); appRoleAssignments = @() }
+                    $t.Groups += $group
+                    return @{ StatusCode = 201; Headers = @{}; Body = @{ id = $group.id; displayName = $group.displayName } }
+                }
+                $filter = Get-QueryValue -Query $query -Name '$filter'
+                $items = @()
+                if ($filter -match "^displayName eq '(.+)'$") {
+                    $name = $Matches[1] -replace "''", "'"
+                    $items = @($t.Groups | Where-Object { $_.displayName -eq $name } | ForEach-Object { @{ id = $_.id; displayName = $_.displayName } })
+                }
+                return @{ StatusCode = 200; Headers = @{}; Body = (ConvertTo-FakePage -Items $items -Uri $Uri -Query $query) }
+            }
+            '^/groups/([^/]+)$' {
+                $group = Get-FakeGroup -Id $Matches[1]
+                if (-not $group) { return @{ StatusCode = 404; Headers = @{}; Body = @{ error = @{ code = 'Request_ResourceNotFound'; message = 'not found' } } } }
+                if ($Method -eq 'PATCH') {
+                    Add-Write "PATCH group $($group.displayName) displayName=$($json.displayName)"
+                    $group.displayName = [string]$json.displayName
+                    return @{ StatusCode = 204; Headers = @{}; Body = $null }
+                }
+                return @{ StatusCode = 200; Headers = @{}; Body = @{ id = $group.id; displayName = $group.displayName } }
+            }
+            '^/groups/([^/]+)/members$' {
+                $group = Get-FakeGroup -Id $Matches[1]
+                if (-not $group) { return @{ StatusCode = 404; Headers = @{}; Body = @{ error = @{ code = 'Request_ResourceNotFound'; message = 'not found' } } } }
+                $items = @($group.members | ForEach-Object { @{ id = $_.id } })
+                return @{ StatusCode = 200; Headers = @{}; Body = (ConvertTo-FakePage -Items $items -Uri $Uri -Query $query) }
+            }
+            '^/groups/([^/]+)/members/\$ref$' {
+                $group = Get-FakeGroup -Id $Matches[1]
+                if (-not $group) { return @{ StatusCode = 404; Headers = @{}; Body = @{ error = @{ code = 'Request_ResourceNotFound'; message = 'not found' } } } }
+                $memberId = ($json['@odata.id'] -split '/')[-1]
+                if (@($group.members | Where-Object { $_.id -eq $memberId }).Count -gt 0) { return @{ StatusCode = 400; Headers = @{}; Body = @{ error = @{ code = 'Request_BadRequest'; message = 'One or more added object references already exist' } } } }
+                Add-Write "POST group member $($group.displayName) $memberId"
+                $group.members += @{ id = $memberId }
+                return @{ StatusCode = 204; Headers = @{}; Body = $null }
+            }
+            '^/users$' {
+                $filter = Get-QueryValue -Query $query -Name '$filter'
+                $items = @()
+                if ($filter -match "^mail eq '(.+)' or userPrincipalName eq '(.+)'$") {
+                    $address = $Matches[1] -replace "''", "'"
+                    $items = @($t.Users | Where-Object { $_.mail -eq $address -or $_.userPrincipalName -eq $address } |
+                        ForEach-Object { @{ id = $_.id; displayName = $_.displayName; userPrincipalName = $_.userPrincipalName; userType = $_.userType } })
+                }
+                return @{ StatusCode = 200; Headers = @{}; Body = (ConvertTo-FakePage -Items $items -Uri $Uri -Query $query) }
+            }
+            '^/invitations$' {
+                $email = [string]$json.invitedUserEmailAddress
+                Add-Write "POST invitation $email"
+                $user = @{ id = [guid]::NewGuid().ToString(); mail = $email; userPrincipalName = (($email -replace '@', '_') + '#EXT#@contoso.onmicrosoft.com'); displayName = $email; userType = 'Guest' }
+                $t.Users += $user
+                return @{ StatusCode = 201; Headers = @{}; Body = @{ id = [guid]::NewGuid().ToString(); invitedUser = @{ id = $user.id }; status = 'PendingAcceptance' } }
+            }
             '^/oauth2PermissionGrants$' {
                 if ($Method -eq 'GET') {
                     $filter = Get-QueryValue -Query $query -Name '$filter'
@@ -698,6 +772,7 @@ BeforeAll {
     Mock Open-NeologikBrowser { param($Uri) $script:BrowserUris += $Uri; $script:BrowserOpens }
     Mock Test-NeologikDesktop { $script:Desktop }
     Mock Get-NeologikSummaryDirectory { @($script:SummaryDirs) }
+    Mock Get-NeologikGuestUsersFileDefault { $script:GuestFile }
     Mock Invoke-NeologikGraphRaw { param($Method, $Uri, $Body) Invoke-FakeGraph -Method $Method -Uri $Uri -Body $Body }
     Mock Connect-MgGraph { $script:Connected = $true }
     Mock Get-MgContext { [pscustomobject]@{ TenantId = $script:ContextTenant; Account = 'admin@contoso.com'; Scopes = @($script:ContextScopes) } }
@@ -910,6 +985,9 @@ BeforeEach {
     $script:ContextScopes = @()
     $script:AzContextSubscription = $script:Ids.Subscription
     $script:SummaryDirs = @((Join-Path $TestDrive 'summary'))
+    # NeologikGuestUsers.txt as the onboarding kit ships it: one Neologik support account.
+    $script:GuestFile = Join-Path $TestDrive 'NeologikGuestUsers.txt'
+    Set-Content -LiteralPath $script:GuestFile -Value "# Neologik support accounts`nsupport@neologik.ai`n" -Encoding UTF8
     if (Test-Path (Join-Path $TestDrive 'summary')) { Remove-Item -Path (Join-Path $TestDrive 'summary') -Recurse -Force }
     New-Item -ItemType Directory -Path (Join-Path $TestDrive 'summary') -Force | Out-Null
 }
@@ -1038,8 +1116,10 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
         Add-CompliantPreWindowState
         $cfg = New-ConfigFile -Remove @('AppRegistration', 'SecurityGroups', 'NceAuthApp')
         $code = Invoke-Run @{ ConfigurationFile = $cfg; DeploySpClientId = $script:Ids.DeployAppId; SignInAppClientId = $script:Ids.SignInAppId }
-        $code | Should -Be 1
-        Get-SummaryResult 'User group assignment' | Should -Be 'SKIPPED: the command gives no SignInAppClientId or no NceUserGroupId'
+        # Step 2 finds the groups by their version 5 names (project#3127), so the
+        # assignment runs without a group id on the command.
+        $code | Should -Be 0
+        Get-SummaryResult 'User group assignment' | Should -Be 'Already assigned'
         Get-SummaryResult 'Agent identity blueprint' | Should -Be 'Present'
     }
 
@@ -1809,12 +1889,23 @@ Context 'The first run on a compliant environment' {
         $script:Writes | Should -HaveCount 0
     }
 
-    It 'skips the group assignment and consent check when the group id is not supplied' {
+    It 'finds the user group by its version 5 name when the command gives no group id, so the assignment and the consent check run' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
+        $code | Should -Be 0
+        Get-SummaryResult 'User group assignment' | Should -Be 'Already assigned'
+        Get-SummaryResult 'Administrator consent' | Should -Be 'Present'
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'skips the group assignment and consent check when no group exists and the command gives no group id' {
+        Add-CompliantPreWindowState
+        $script:Tenant.Groups = @($script:Tenant.Groups | Where-Object { $_.id -eq $script:Ids.AdminGroup })
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName; Verify = $true }
         $code | Should -Be 1
         Get-SummaryResult 'User group assignment' | Should -Be 'SKIPPED: the command gives no SignInAppClientId or no NceUserGroupId'
         Get-SummaryResult 'Administrator consent' | Should -BeNullOrEmpty
+        $script:Writes | Should -HaveCount 0
     }
 
     It 'refuses the first run without the sign-in app client id or the solution name' {
@@ -1982,13 +2073,17 @@ Context 'The first run on an environment with missing state' {
         $script:Writes | Should -HaveCount 1
     }
 
-    It 'warns when the NCE user group has no direct members' {
+    It 'fills the NCE user group when it has no direct members' {
         Add-CompliantPreWindowState
         $group = @($script:Tenant.Groups)[0]
         $group.members = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        ($script:Console -join "`n") | Should -Match 'has no members'
+        # Step 2 adds the guest and the administrator (project#3127); the member
+        # count that step 3 reports is then two.
+        @($script:Writes | Where-Object { $_ -like "POST group member Neologik NCE Contributors - $script:ShortName *" }) | Should -HaveCount 2
+        ($script:Console -join "`n") | Should -Match 'has 2 direct member'
+        ($script:Console -join "`n") | Should -Not -Match 'has no members'
     }
 
     It 'reports a missing group and a missing sign-in application as MISSING, not as a crash' {
@@ -3029,6 +3124,119 @@ Context 'Summary and exit code' {
     }
 }
 
+Context 'The first run: security groups, guests and memberships (step 2, project#3127)' {
+    BeforeAll {
+        function Set-LegacyGroupState {
+            # The directory of an environment set up before version 5, with everything else
+            # compliant: the user group under its old name, no User Group, no NCE Admins
+            # group, no Neologik guest, the administrator a member of the two old groups.
+            $t = $script:Tenant
+            $t.Groups = @($t.Groups | Where-Object { $_.id -notin @($script:Ids.UserGroup, $script:Ids.NceAdminsGroup) })
+            $group = Get-FakeGroup -Id $script:Ids.Group
+            $group.displayName = "Neologik NCE User Group - $script:ShortName"
+            $group.members = @(@{ id = $script:Ids.Me })
+            (Get-FakeGroup -Id $script:Ids.AdminGroup).members = @(@{ id = $script:Ids.Me })
+            $t.Users = @()
+        }
+    }
+
+    It 'creates the two missing groups, renames the user group, invites the guest and fills the memberships, then changes nothing on the next run' {
+        Add-CompliantPreWindowState
+        Set-LegacyGroupState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $script:Writes | Should -Contain "POST group Neologik User Group - $script:ShortName"
+        $script:Writes | Should -Contain "POST group Neologik NCE Admins - $script:ShortName"
+        $script:Writes | Should -Contain "PATCH group Neologik NCE User Group - $script:ShortName displayName=Neologik NCE Contributors - $script:ShortName"
+        $script:Writes | Should -Contain 'POST invitation support@neologik.ai'
+        # The guest joins four groups; the administrator joins the two new ones.
+        @($script:Writes | Where-Object { $_ -like 'POST group member *' }) | Should -HaveCount 6
+        @($script:Writes | Where-Object { $_ -like "POST group member * $($script:Ids.Me)" }) | Should -HaveCount 2
+        $admins = @($script:Tenant.Groups | Where-Object { $_.displayName -eq "Neologik NCE Admins - $script:ShortName" })
+        $admins | Should -HaveCount 1
+        $script:Writes | Should -Contain "NEW group assignment $($admins[0].id) $($script:Ids.SignInSpId)"
+        (Get-SummaryResult 'Security groups') | Should -Be "Present: 1. Created: Neologik User Group - $script:ShortName, Neologik NCE Admins - $script:ShortName. Renamed: Neologik NCE Contributors - $script:ShortName"
+        (Get-SummaryResult 'Neologik guest users') | Should -Be 'Invited: support@neologik.ai'
+        (Get-SummaryResult 'Group memberships') | Should -BeLike 'Present: 2. Added: *'
+        (Get-SummaryResult 'Signed-in administrator membership') | Should -Be 'Present in every group (4)'
+        (Get-SummaryResult 'NCE Admins group') | Should -Be "Present, id $($admins[0].id). Neologik records this id for the environment"
+        Get-SummaryResult 'User group assignment' | Should -Be 'Already assigned'
+        Get-SummaryResult 'Admin group assignment' | Should -Be 'Assigned'
+        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentAccess_PreWindow_*.json')
+        $json = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
+        $json.nceAdminsGroupId | Should -Be $admins[0].id
+        $json.nceContributorsGroupId | Should -Be $script:Ids.Group
+
+        $script:Writes = @()
+        $script:Summary = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $script:Writes | Should -HaveCount 0
+        (Get-SummaryResult 'Security groups') | Should -Be 'Present: 4'
+        (Get-SummaryResult 'Neologik guest users') | Should -Be 'Present: 1'
+        (Get-SummaryResult 'Group memberships') | Should -Be 'Present: 8'
+    }
+
+    It 'reports every pending change with -Verify and writes nothing' {
+        Add-CompliantPreWindowState
+        Set-LegacyGroupState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 1
+        $script:Writes | Should -HaveCount 0
+        (Get-SummaryResult 'Security groups') | Should -Be "Present: 1. Renamed: WOULD RENAME 'Neologik NCE User Group - $script:ShortName'. WOULD CREATE: Neologik User Group - $script:ShortName, Neologik NCE Admins - $script:ShortName"
+        (Get-SummaryResult 'Neologik guest users') | Should -Be 'WOULD INVITE: support@neologik.ai'
+        (Get-SummaryResult 'NCE Admins group') | Should -Be 'WOULD CREATE'
+        @($script:Tenant.Groups) | Should -HaveCount 2
+    }
+
+    It 'finds the user group by its version 5 name when the command gives no group id' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Remove @('SecurityGroups')) }
+        $code | Should -Be 0
+        $script:Writes | Should -HaveCount 0
+        Get-SummaryResult 'User group assignment' | Should -Be 'Already assigned'
+        Get-SummaryResult 'Admin group assignment' | Should -Be 'Already assigned'
+    }
+
+    It 'reports the guest users file as skipped when the file is not beside the script' {
+        Add-CompliantPreWindowState
+        Mock Get-NeologikGuestUsersFileDefault { Join-Path $TestDrive 'not-there.txt' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        (Get-SummaryResult 'Neologik guest users') | Should -BeLike 'SKIPPED: the guest users file is not found*'
+        # The administrator's memberships are still confirmed.
+        (Get-SummaryResult 'Signed-in administrator membership') | Should -Be 'Present in every group (4)'
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'refuses a -GuestUsersFile that does not exist before contacting anything' {
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); GuestUsersFile = (Join-Path $TestDrive 'nowhere.txt') }
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'The guest users file is not found'
+        Should -Invoke Connect-MgGraph -Times 0
+    }
+
+    It 'takes the guest list from -GuestUsersFile and ignores a comment line' {
+        Add-CompliantPreWindowState
+        $file = Join-Path $TestDrive 'guests.txt'
+        Set-Content -LiteralPath $file -Value "# two accounts`nsupport@neologik.ai`n`nsecond@neologik.ai`n" -Encoding UTF8
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); GuestUsersFile = $file }
+        $code | Should -Be 0
+        $script:Writes | Should -Contain 'POST invitation second@neologik.ai'
+        @($script:Writes | Where-Object { $_ -like 'POST group member *' }) | Should -HaveCount 4
+        (Get-SummaryResult 'Neologik guest users') | Should -Be 'Present: 1. Invited: second@neologik.ai'
+    }
+
+    It 'requests the group and invitation scopes for the first run' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $request = @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' }) | Select-Object -First 1
+        @($request.Body.scope -split ' ') | Should -Contain 'Group.ReadWrite.All'
+        @($request.Body.scope -split ' ') | Should -Contain 'User.Invite.All'
+    }
+}
+
 Context 'The first run: Admin User Group membership' {
     BeforeEach {
         Add-CompliantDirectoryState
@@ -3093,10 +3301,19 @@ Context 'The first run: Admin User Group membership' {
         $script:Writes | Should -HaveCount 0
     }
 
-    It 'reports not checked, without needing attention, when no Admin User Group id is known' {
+    It 'finds the Admin User Group by its name when the command gives no AdminGroupId' {
         $cfg = New-ConfigFile -Overrides @{ SecurityGroups = @(@{ Name = "Neologik NCE User Group - $script:ShortName"; Id = $script:Ids.Group }) }
         $code = Invoke-Run @{ ConfigurationFile = $cfg }
         $code | Should -Be 0
+        # Step 2 names the group (project#3127), so the membership check runs.
+        Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not held'
+        Should -Invoke Remove-MgGroupMemberByRef -Times 0
+    }
+
+    It 'reports not checked, without needing attention, when no Admin User Group exists and the command gives no AdminGroupId' {
+        $cfg = New-ConfigFile -Overrides @{ SecurityGroups = @(@{ Name = "Neologik NCE User Group - $script:ShortName"; Id = $script:Ids.Group }) }
+        $script:Tenant.Groups = @($script:Tenant.Groups | Where-Object { $_.id -ne $script:Ids.AdminGroup })
+        $code = Invoke-Run @{ ConfigurationFile = $cfg; Verify = $true }
         Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not checked. The command gives no AdminGroupId'
         Should -Invoke Remove-MgGroupMemberByRef -Times 0
     }
