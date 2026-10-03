@@ -2987,6 +2987,32 @@ Context 'The first run: security groups, guests and memberships (step 2, project
         (Get-SummaryResult 'Neologik guest users') | Should -Be 'WOULD INVITE: support@neologik.ai'
         (Get-SummaryResult 'NCE Admins group') | Should -Be 'WOULD CREATE'
         @($script:Tenant.Groups) | Should -HaveCount 2
+        # The closing count takes every item that reports a change, the step 2 items included,
+        # where the word WOULD sits inside the line.
+        $reporting = @($script:Summary | Where-Object { $_.Result -match '\bWOULD ' })
+        @($reporting | ForEach-Object { $_.Item }) | Should -Be @('Security groups', 'NCE Admins group', 'Neologik guest users')
+        ($script:Console -join "`n") | Should -Match 'would change 3 item\(s\)'
+        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentAccess_PreWindow_*.json')
+        $json = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
+        $json.pendingChangeCount | Should -Be $reporting.Count
+    }
+
+    It 'adds the signed-in administrator who is also a listed guest once, and reports no failure' {
+        Add-CompliantPreWindowState
+        Set-LegacyGroupState
+        # The rare case: the administrator who runs the script is a Neologik guest on the list.
+        $script:Tenant.Users += @{ id = $script:Ids.Me; mail = 'admin@neologik.ai'; userPrincipalName = 'admin_neologik.ai#EXT#@contoso.onmicrosoft.com'; displayName = 'Admin'; userType = 'Guest' }
+        $file = Join-Path $TestDrive 'guests-with-admin.txt'
+        Set-Content -LiteralPath $file -Value "support@neologik.ai`nadmin@neologik.ai`n" -Encoding UTF8
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); GuestUsersFile = $file }
+        $code | Should -Be 0
+        # The administrator joins the two new groups once each; the other guest joins all four.
+        @($script:Writes | Where-Object { $_ -like "POST group member * $($script:Ids.Me)" }) | Should -HaveCount 2
+        @($script:Writes | Where-Object { $_ -like 'POST group member *' }) | Should -HaveCount 6
+        (Get-SummaryResult 'Neologik guest users') | Should -Be 'Present: 1. Invited: support@neologik.ai'
+        (Get-SummaryResult 'Group memberships') | Should -Not -Match 'FAILED'
+        (Get-SummaryResult 'Group memberships') | Should -Match 'signed-in administrator to Neologik NCE Admins'
+        (Get-SummaryResult 'Signed-in administrator membership') | Should -Be 'Present in every group (4)'
     }
 
     It 'finds the user group by its version 5 name when the command gives no group id' {

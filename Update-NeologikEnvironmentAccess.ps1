@@ -548,7 +548,7 @@ $script:Summary = @()
 $script:State = @{}
 # The version of the onboarding kit. The script records the version on the resource
 # group, in the tag NeologikOnboardingKit, when the permission reduction is complete.
-$script:KitVersion = 'v5.0.10'
+$script:KitVersion = 'v5.0.11'
 
 # ----- Console and summary -----------------------------------------------------
 
@@ -2555,9 +2555,14 @@ function Set-NeologikSecurityGroup {
     # ----- the memberships --------------------------------------------------------
     # Each guest and the signed-in administrator are direct members of every group.
     # The Neologik Context Engine reads direct memberships only.
-    $members = @()
-    foreach ($guestId in $guestIds) { $members += @{ Id = $guestId; Label = 'guest' } }
+    # An account appears once in the list. The signed-in administrator who is also a
+    # listed guest is the administrator: a second add of the same account is refused.
     $signedIn = [string](Get-NeologikProperty $state 'SignedInObjectId' '')
+    $members = @()
+    foreach ($guestId in $guestIds) {
+        if ($signedIn -and $guestId -ieq $signedIn) { continue }
+        $members += @{ Id = $guestId; Label = 'guest' }
+    }
     if ($signedIn) { $members += @{ Id = $signedIn; Label = 'signed-in administrator' } }
     $membershipPresent = 0
     $membershipAdded = @()
@@ -3848,7 +3853,9 @@ function Write-NeologikSummary {
         Write-Host '  The script checked no item. Read the messages above'
     }
     $attention = @($script:Summary | Where-Object { $_.Result -match $script:AttentionPattern })
-    $pending = @($script:Summary | Where-Object { $_.Result -like 'WOULD *' })
+    # A step that checks several things reports the item as one line, with the word
+    # WOULD inside the line. The count takes each item that reports a change.
+    $pending = @($script:Summary | Where-Object { $_.Result -match '\bWOULD ' })
     $runName = if ((Get-NeologikProperty $state 'Run' '') -eq 'PostWindow') { 'The later run' } else { 'The first run' }
     # The summary file in JSON. The summary file holds the Microsoft Graph application
     # permissions that the deployment identity holds now, and every item of the run. The
@@ -3896,7 +3903,7 @@ function Write-NeologikSummary {
     }
     if ($attention.Count -gt 0) {
         if ($pending.Count -gt 0) {
-            Write-Log "A run without -Verify would make $($pending.Count) change(s). The script wrote nothing" -Level Warning
+            Write-Log "A run without -Verify would change $($pending.Count) item(s). The script wrote nothing" -Level Warning
         }
         Write-Log "$($attention.Count) item(s) need attention. Read the summary above" -Level Warning
         return 1
