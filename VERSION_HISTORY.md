@@ -13,7 +13,8 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
-2. [Version 5.0.9](#version-509)
+2. [Version 5.0.10](#version-5010)
+3. [Version 5.0.9](#version-509)
 3. [Version 5.0.8](#version-508)
 4. [Version 5.0.7](#version-507)
 5. [Version 5.0.6](#version-506)
@@ -30,7 +31,7 @@ The table shows the version that each script reports.
 | Script | Version of the script | Purpose |
 |---|---|---|
 | `Install-NeologikEnvironment.ps1` | v5.0.7 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.9 | Reduces the access of the deployment identity of an existing environment to the access that version 5 of the Neologik Platform needs. Applies the grants for agents and Apps that work unattended |
+| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.10 | Reduces the access of the deployment identity of an existing environment to the access that version 5 of the Neologik Platform needs. Applies the grants for agents and Apps that work unattended |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
@@ -52,6 +53,19 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | `Update-NeologikEnvironmentAccess.ps1` | The environment access script signs in to Microsoft Graph, to Azure and to Exchange Online in the browser of the workstation first. A device code is the second method. Before this version, a device code was the first method. An organisation that blocks the device code with a Conditional Access policy could not complete the sign-in |
 | `Update-NeologikEnvironmentAccess.ps1` | When a Conditional Access policy refuses a sign-in, the environment access script says so and tries the next method at once |
 | `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` | The document describes the browser sign-in and the device code as the second method |
+
+## Version 5.0.10
+
+**Date**: 2026-10-03
+
+| Item | Change |
+|---|---|
+| `Update-NeologikEnvironmentAccess.ps1` | The first run has a new step 2. The environment access script confirms the four security groups of version 5 in your tenant and creates a group that is absent: `Neologik User Group`, `Neologik NCE Contributors`, `Neologik NCE Admins` and `Neologik Admin User Group`, each with the short name of the environment. The environment access script renames `Neologik NCE User Group` to `Neologik NCE Contributors`; the group keeps the id and the members. The environment access script confirms that each Neologik support account in `NeologikGuestUsers.txt` is a guest of your tenant, and invites an account that is absent. The environment access script confirms that each guest and the signed-in administrator are direct members of every group, and adds a membership that is absent. Nothing is removed. Before this version, an environment set up before version 5 kept its two groups, and nobody could administer the Neologik Context Engine after the upgrade |
+| `Update-NeologikEnvironmentAccess.ps1` | Step 3 assigns the group `Neologik NCE Admins` to the Platform Sign-in application, beside the user group. The summary gains the items `Security groups`, `NCE Admins group`, `Neologik guest users`, `Group memberships`, `Signed-in administrator membership` and `Admin group assignment`. The summary file names the two role groups |
+| `Update-NeologikEnvironmentAccess.ps1` | New parameter `-GuestUsersFile`. Without the parameter, the environment access script reads `NeologikGuestUsers.txt` from its own folder. Run the environment access script from the folder of the onboarding kit |
+| `Update-NeologikEnvironmentAccess.ps1` | The first run requests two more delegated permissions at the sign-in: `Group.ReadWrite.All` and `User.Invite.All`. The environment access script records the version `v5.0.10` on the resource group |
+| `Install-NeologikEnvironment.ps1` | No change to the script. The onboarding script records the version `v5.0.10` on the resource group |
+| `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` | The document describes the new step 2 and the permissions it needs |
 
 ## Version 5.0.9
 

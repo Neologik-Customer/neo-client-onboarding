@@ -57,7 +57,7 @@ The first run makes one more check before the first run changes an Azure role. T
 
 ## How to run the environment access script
 
-1. Place `Update-NeologikEnvironmentAccess.ps1` in a folder on your workstation.
+1. Place the onboarding kit in a folder on your workstation. The first run reads `NeologikGuestUsers.txt` from the folder of `Update-NeologikEnvironmentAccess.ps1`.
 2. Open PowerShell 7 in that folder.
 3. Paste the command from Neologik and press Enter.
 4. The environment access script opens the sign-in page in your browser. Sign in as a Global Administrator. The environment access script waits for up to 5 minutes.
@@ -70,7 +70,7 @@ To see what a run would change, add `-Verify` to the end of the command. The sig
 
 ## The first run
 
-The command selects the first run when the command names no grants file. The first run has four steps. The environment access script checks each item of a step separately. When an item fails, the environment access script records the item and the reason in the summary and continues.
+The command selects the first run when the command names no grants file. The first run has five steps. The environment access script checks each item of a step separately. When an item fails, the environment access script records the item and the reason in the summary and continues.
 
 ### Step 1: The agent identity blueprint and the permissions of the deployment identity
 
@@ -87,13 +87,32 @@ The command selects the first run when the command names no grants file. The fir
 
 The deployment identity can already own one agent identity blueprint with another short name. The environment access script then uses that agent identity blueprint and creates no second one. The summary then names the agent identity blueprint that the environment access script used.
 
-### Step 2: The user group of the Neologik Context Engine
+### Step 2: The security groups, the Neologik guest users and the memberships
 
-The Neologik Context Engine reads the groups claim of the sign-in token to authorise a user. The groups claim lists only the security groups that are assigned to the Platform Sign-in application. The environment access script assigns the security group that the command names to the application `Neologik Platform Sign-in - <short name>`, when the assignment is absent.
+Version 5 of the Neologik Platform uses four security groups in your tenant. The onboarding script creates them for a new environment. An environment set up before version 5 has two of them. The environment access script completes the set.
+
+| Item | What the environment access script checks | When the environment access script changes the item |
+|---|---|---|
+| `Neologik User Group - <short name>` | The group exists | The environment access script creates the group when the group is absent |
+| `Neologik NCE Contributors - <short name>` | The group exists under this name. The group is the user group of the Neologik Context Engine | The environment access script renames `Neologik NCE User Group - <short name>` to this name. The group keeps the id and the members. The environment access script creates the group when no group exists under either name |
+| `Neologik NCE Admins - <short name>` | The group exists. Members of the group administer the Neologik Context Engine | The environment access script creates the group when the group is absent |
+| `Neologik Admin User Group - <short name>` | The group exists | The environment access script creates the group when the group is absent |
+| The Neologik support accounts | Each mail address in `NeologikGuestUsers.txt` is a guest of your tenant | The environment access script invites an account that is absent. Microsoft sends the invitation |
+| The memberships | Each guest and the signed-in administrator are direct members of every one of the four groups | The environment access script adds a membership that is absent. The environment access script removes no member |
+
+When the command names a group by id, the id decides, whatever the name of the group. When the command names no id, the environment access script finds the group by name.
+
+The summary item `NCE Admins group` states the id of the group. Neologik records the id for the environment, so that members of the group hold the administrator role in the Neologik Context Engine.
+
+When `NeologikGuestUsers.txt` is not beside the environment access script, the summary reports the item `Neologik guest users` as `SKIPPED`. Run the environment access script from the folder of the onboarding kit, or add `-GuestUsersFile <path>` to the command.
+
+### Step 3: The role groups of the Neologik Context Engine
+
+The Neologik Context Engine reads the groups claim of the sign-in token to authorise a user. The groups claim lists only the security groups that are assigned to the Platform Sign-in application. The environment access script assigns the user group that the command names, and the group `Neologik NCE Admins - <short name>`, to the application `Neologik Platform Sign-in - <short name>`, when an assignment is absent.
 
 A user must be a direct member of the security group. A member of a nested group cannot sign in. The environment access script reports the number of direct members.
 
-### Step 3: Consent and ownership
+### Step 4: Consent and ownership
 
 | Item | What the environment access script checks | When the environment access script changes the item |
 |---|---|---|
@@ -106,7 +125,7 @@ A user must be a direct member of the security group. A member of a nested group
 
 The deployment replaces the client secrets of the Platform Sign-in application and of the application registration of each agent. When one of these application registrations holds a client secret that the deployment did not create, the summary lists the client secret as `PENDING`. Confirm with Neologik that nothing else uses the client secret before the upgrade.
 
-### Step 4: Permission reduction
+### Step 5: Permission reduction
 
 The environment access script first confirms that the deployment identity holds nine Azure roles. The environment access script assigns a role that is absent.
 
@@ -134,7 +153,7 @@ The first run changes nothing on a managed identity, on a security group or on a
 
 The command selects the later run when the command names a grants file. The later run applies what the files list. The later run makes none of the checks of the first run.
 
-### Step 5: Grants to agent users, with `-AgentGrantsFile`
+### Step 6: Grants to agent users, with `-AgentGrantsFile`
 
 An agent or an App that works unattended has an agent identity and an agent user account in your directory. For each agent and each App in the file, the environment access script creates one delegated permission grant. The grant lets the agent identity act as the agent user of that agent identity. The grant holds exactly the permissions that the file lists. The grant names one agent user. The grant is not a grant for the whole tenant.
 
@@ -142,7 +161,7 @@ The file can also list Microsoft Graph application permissions for named workloa
 
 When the file marks an entry as not ready, the summary reads `SKIPPED` for the entry. Neologik sends a new file when the entry is ready.
 
-### Step 6: Mailbox grants, with `-MailboxGrantsFile`
+### Step 7: Mailbox grants, with `-MailboxGrantsFile`
 
 For each email channel in the file, the environment access script grants three Exchange Online roles to the identity of the email channel.
 
@@ -181,7 +200,9 @@ The environment access script signs in to Microsoft Graph with your account. At 
 | `DelegatedPermissionGrant.Read.All` | Every run | To read the consent of the Platform Sign-in application |
 | `AgentIdentityBlueprint.Create`<br>`AgentIdentityBlueprint.AddRemoveCreds.All`<br>`AgentIdentityBlueprintPrincipal.Create` | Every run | To create the agent identity blueprint, the service principal and the federated credentials when each is absent |
 | `RoleManagement.ReadWrite.Directory` | The first run | To remove directory roles from the deployment identity |
-| `GroupMember.ReadWrite.All` | The first run | To remove the deployment identity from groups |
+| `GroupMember.ReadWrite.All` | The first run | To add the Neologik guest users and the signed-in administrator to the security groups, and to remove the deployment identity from groups |
+| `Group.ReadWrite.All` | The first run | To create a security group of version 5 that is absent, and to rename the user group of the Neologik Context Engine |
+| `User.Invite.All` | The first run | To invite a Neologik support account that is not yet a guest of your tenant |
 | `AgentIdentityBlueprintPrincipal.ReadWrite.All` | The first run | To add the deployment identity as an owner of the service principal of the agent identity blueprint. The environment access script adds the owner when that service principal has none |
 | `DelegatedPermissionGrant.ReadWrite.All` | A later run with `-AgentGrantsFile` | To create the grants to agent users |
 
@@ -198,12 +219,13 @@ The environment access script prints a summary table. The environment access scr
 
 The environment access script writes to the current folder when the folder of the environment access script is not writable. The environment access script writes to the temporary folder when the current folder is not writable. The environment access script reports the path.
 
-The summary file holds five things:
+The summary file holds six things:
 
 - the tenant id
 - the client id of the deployment identity
 - the time of the run
 - the Microsoft Graph application permissions that the deployment identity holds
+- the ids of the two role groups of the Neologik Context Engine, after the first run
 - every item of the summary
 
 The summary file holds no secret. Send the summary file to Neologik as the record of the run.
