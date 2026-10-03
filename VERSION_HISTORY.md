@@ -13,7 +13,8 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
-2. [Version 5.0.10](#version-5010)
+2. [Version 5.0.11](#version-5011)
+3. [Version 5.0.10](#version-5010)
 3. [Version 5.0.9](#version-509)
 3. [Version 5.0.8](#version-508)
 4. [Version 5.0.7](#version-507)
@@ -31,7 +32,7 @@ The table shows the version that each script reports.
 | Script | Version of the script | Purpose |
 |---|---|---|
 | `Install-NeologikEnvironment.ps1` | v5.0.7 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.10 | Reduces the access of the deployment identity of an existing environment to the access that version 5 of the Neologik Platform needs. Applies the grants for agents and Apps that work unattended |
+| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.11 | Reduces the access of the deployment identity of an existing environment to the access that version 5 of the Neologik Platform needs. Applies the grants for agents and Apps that work unattended |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
@@ -53,6 +54,17 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | `Update-NeologikEnvironmentAccess.ps1` | The environment access script signs in to Microsoft Graph, to Azure and to Exchange Online in the browser of the workstation first. A device code is the second method. Before this version, a device code was the first method. An organisation that blocks the device code with a Conditional Access policy could not complete the sign-in |
 | `Update-NeologikEnvironmentAccess.ps1` | When a Conditional Access policy refuses a sign-in, the environment access script says so and tries the next method at once |
 | `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` | The document describes the browser sign-in and the device code as the second method |
+
+## Version 5.0.11
+
+**Date**: 2026-10-03
+
+| Item | Change |
+|---|---|
+| `Update-NeologikEnvironmentAccess.ps1` | When the administrator who runs the environment access script is also a Neologik support account on the guest list, the first run adds the account to each security group once and reports the account as the signed-in administrator. Before this version, the first run added the account a second time, Microsoft Graph refused the second addition, and the summary reported `FAILED` although the membership was in place |
+| `Update-NeologikEnvironmentAccess.ps1` | With `-Verify`, the closing line counts every item of the summary that reports a change, and reads `A run without -Verify would change N item(s)`. Before this version, the count left out the items of step 2 |
+| `Update-NeologikEnvironmentAccess.ps1` | The environment access script records the version `v5.0.11` on the resource group |
+| `Install-NeologikEnvironment.ps1` | No change to the script. The onboarding script records the version `v5.0.11` on the resource group |
 
 ## Version 5.0.10
 
