@@ -63,20 +63,37 @@
         - AgentIdUser.ReadWrite.All
         - Group.Create
 
-    Step 2. The user group of the Neologik Context Engine.
-      The script assigns the security group that -NceUserGroupId names to the
-      enterprise application 'Neologik Platform Sign-in'. The Neologik Context
-      Engine reads the groups claim of the sign-in token to authorise a user. The
-      groups claim lists only the groups that are assigned to the enterprise
-      application.
+    Step 2. The security groups, the Neologik guest users and the memberships.
+      The script confirms the four security groups of version 5 in this tenant:
+        - 'Neologik User Group - <short name>'
+        - 'Neologik NCE Contributors - <short name>', the user group of the
+          Neologik Context Engine under its version 5 name. The script renames
+          'Neologik NCE User Group - <short name>'. The group keeps the id and
+          the members.
+        - 'Neologik NCE Admins - <short name>', the administrators of the
+          Neologik Context Engine.
+        - 'Neologik Admin User Group - <short name>'
+      The script creates a group that is absent. The script then confirms that
+      each Neologik support account in NeologikGuestUsers.txt is a guest of the
+      tenant, and invites an account that is absent. Last, the script confirms
+      that each guest and the signed-in administrator are direct members of
+      every group, and adds a membership that is absent. The script removes no
+      member.
 
-    Step 3. Administrator consent.
+    Step 3. The role groups of the Neologik Context Engine.
+      The script assigns the user group that -NceUserGroupId names, and the
+      group 'Neologik NCE Admins', to the enterprise application 'Neologik
+      Platform Sign-in'. The Neologik Context Engine reads the groups claim of
+      the sign-in token to authorise a user. The groups claim lists only the
+      groups that are assigned to the enterprise application.
+
+    Step 4. Administrator consent.
       The script confirms that the Platform Sign-in application has administrator
       consent for the whole tenant. When the consent is absent, the script prints
       the consent address. A Global Administrator opens the consent address, reads
       the permissions and gives the consent. The script never gives consent.
 
-    Step 3a. SharePoint consent.
+    Step 4a. SharePoint consent.
       The SharePoint application of the environment needs the Microsoft Graph
       application permission Sites.Selected. A consent belongs to one application.
       When the SharePoint application holds Sites.Selected, the script changes
@@ -89,7 +106,7 @@
       script then prints the consent address. A site administrator grants access
       to each SharePoint site separately.
 
-    Step 3b. Ownership of the application registrations.
+    Step 4b. Ownership of the application registrations.
       The deployment identity can manage only an application registration that the
       deployment identity owns. The script changes only the application
       registrations that the command names by client id.
@@ -107,7 +124,7 @@
       The summary lists every other application registration whose name begins
       'Neologik'. The script does not change those application registrations.
 
-    Step 4. Permission reduction.
+    Step 5. Permission reduction.
       The script first confirms that the deployment identity holds nine Azure
       roles: seven roles on the resource group and two roles on the subscription.
       The two roles on the subscription are Reader and Cost Management Contributor.
@@ -242,6 +259,12 @@
     The object id of the security group whose members sign in to the Neologik
     Context Engine. Without the parameter the script skips step 2 and step 3.
 
+.PARAMETER GuestUsersFile
+    The file that lists the Neologik support accounts, one mail address per line.
+    Without the parameter, the script reads NeologikGuestUsers.txt from the folder
+    of the script. The onboarding kit ships the file with the script. The first run
+    uses the file.
+
 .PARAMETER AdminGroupId
     The object id of the Neologik Admin User Group. Without the parameter, and
     without a configuration file that names the group, the first run does not check
@@ -315,7 +338,7 @@
       1. The workstation can reach each Microsoft address that the script uses.
       2. The PowerShell modules load.
       3. The signed-in account holds an active Global Administrator role.
-    Before step 4 changes an Azure role, the script confirms that the signed-in
+    Before step 5 changes an Azure role, the script confirms that the signed-in
     account holds Owner or User Access Administrator on the subscription.
 #>
 
@@ -362,6 +385,9 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$AdminGroupId,
+
+    [Parameter(Mandatory = $false)]
+    [string]$GuestUsersFile,
 
     [Parameter(Mandatory = $false)]
     [string]$SubscriptionId,
@@ -522,7 +548,7 @@ $script:Summary = @()
 $script:State = @{}
 # The version of the onboarding kit. The script records the version on the resource
 # group, in the tag NeologikOnboardingKit, when the permission reduction is complete.
-$script:KitVersion = 'v5.0.9'
+$script:KitVersion = 'v5.0.10'
 
 # ----- Console and summary -----------------------------------------------------
 
@@ -1053,7 +1079,7 @@ function Resolve-NeologikInput {
     param([hashtable]$Parameters)
     $state = $script:State
     foreach ($name in @('ConfigurationFile', 'TenantId', 'DeploySpClientId', 'SolutionShortName', 'SolutionName', 'SignInAppClientId', 'SharePointAppClientId',
-            'NceUserGroupId', 'AdminGroupId', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'AgentGrantsFile', 'MailboxGrantsFile')) {
+            'NceUserGroupId', 'AdminGroupId', 'GuestUsersFile', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'AgentGrantsFile', 'MailboxGrantsFile')) {
         $state[$name] = ([string](Get-NeologikProperty $Parameters $name '')).Trim()
     }
     # Agent registrations: one client id for each agent registration. One element can
@@ -1076,6 +1102,23 @@ function Resolve-NeologikInput {
     $state.AgentGrants = $null
     $state.MailboxGrants = @()
     $state.AdoptedIdentityAppIds = @()
+    # The Neologik support accounts: the file that the command names, else the file
+    # beside the script. The first run reads the file. A file that the command names
+    # must exist.
+    $state.GuestUserEmails = @()
+    $state.NceContributorsGroupId = ''
+    $state.NceAdminsGroupId = ''
+    if ($state.GuestUsersFile) {
+        if (-not (Test-Path -LiteralPath $state.GuestUsersFile)) {
+            throw [System.ArgumentException]::new("The guest users file is not found: $($state.GuestUsersFile). Check the value of -GuestUsersFile.")
+        }
+    }
+    else {
+        $state.GuestUsersFile = Get-NeologikGuestUsersFileDefault
+    }
+    if ($state.Run -eq 'PreWindow' -and (Test-Path -LiteralPath $state.GuestUsersFile)) {
+        $state.GuestUserEmails = @(Read-NeologikGuestUsersFile -Path $state.GuestUsersFile)
+    }
 
     if ($state.ConfigurationFile) {
         $config = Read-NeologikJsonFile -Path $state.ConfigurationFile -Label 'configuration file'
@@ -1094,7 +1137,7 @@ function Resolve-NeologikInput {
         }
         if (-not $state.NceUserGroupId) {
             $nceGroup = @(@(Get-NeologikProperty $config 'SecurityGroups' @()) | Where-Object {
-                    [string](Get-NeologikProperty $_ 'Name' '') -match 'NCE User Group|Harness User Group'
+                    [string](Get-NeologikProperty $_ 'Name' '') -match 'NCE Contributors|NCE User Group|Harness User Group'
                 }) | Select-Object -First 1
             if ($nceGroup) { $state.NceUserGroupId = [string](Get-NeologikProperty $nceGroup 'Id' '') }
         }
@@ -1362,6 +1405,10 @@ function Get-NeologikGraphScope {
         # identity.
         $scopes += 'RoleManagement.ReadWrite.Directory'
         $scopes += 'GroupMember.ReadWrite.All'
+        # The security groups of version 5, created when absent, and the Neologik
+        # support accounts, invited as guests when absent.
+        $scopes += 'Group.ReadWrite.All'
+        $scopes += 'User.Invite.All'
         # Microsoft Graph accepts a new owner on an existing service principal of an agent
         # identity blueprint only with this permission. Application.ReadWrite.All does not
         # cover that object.
@@ -1909,7 +1956,7 @@ function Set-NeologikAgentBlueprint {
     $graph = $script:GraphV1
     $graphBeta = $script:GraphBeta
 
-    Write-Log 'Step 1a of 4: the agent identity blueprint' -Level Info
+    Write-Log 'Step 1a of 5: the agent identity blueprint' -Level Info
     # The short name comes from the configuration file or from -SolutionShortName. The
     # script never reads the short name from a display name. The name of the agent
     # identity blueprint is 'Neologik Agent Blueprint - <key> - <short name>'.
@@ -2155,7 +2202,7 @@ function Set-NeologikAgentBlueprint {
             Add-Summary 'Agent identity blueprint service principal owner' "FAILED: $reason"
         }
 
-        Write-Log 'Step 1b of 4: the permission of the service principal of the agent identity blueprint' -Level Info
+        Write-Log 'Step 1b of 5: the permission of the service principal of the agent identity blueprint' -Level Info
         $null = Grant-NeologikGraphAppRole -PrincipalId $principalId -Label 'Agent identity blueprint service principal' -RoleNames $script:BlueprintPrincipalGraphRoles
     }
     elseif (-not $principalPending) {
@@ -2163,7 +2210,7 @@ function Set-NeologikAgentBlueprint {
         Add-Summary 'Agent identity blueprint service principal permission' 'SKIPPED: the service principal of the agent identity blueprint is not available'
     }
 
-    Write-Log 'Step 1c of 4: the federated credentials of the agent identity blueprint' -Level Info
+    Write-Log 'Step 1c of 5: the federated credentials of the agent identity blueprint' -Level Info
     $existingNames = $null
     try {
         $existingCreds = @(Get-NeologikGraphCollection -Uri "$graphBeta/applications/$blueprintObjectId/federatedIdentityCredentials?`$select=name" -RetryNotFound:$created)
@@ -2223,7 +2270,7 @@ function Set-NeologikDeploymentGraphRole {
     $state = $script:State
     $deploySp = $state.DeploySp
     $graphSp = $state.GraphSp
-    Write-Log 'Step 1d of 4: the Microsoft Graph application permissions of the deployment identity' -Level Info
+    Write-Log 'Step 1d of 5: the Microsoft Graph application permissions of the deployment identity' -Level Info
     $outcome = Grant-NeologikGraphAppRole -PrincipalId $deploySp.Id -Label 'Deployment identity' -RoleNames $script:RequiredGraphRoles
     if (-not $outcome.Complete) {
         Write-Log '  The deployment identity does not hold both permissions that the deployment identity keeps. The script removes no permission' -Level Warning
@@ -2275,14 +2322,321 @@ function Set-NeologikDeploymentGraphRole {
     Write-Log "Step 1d is complete. Permissions that the script granted: $($outcome.Granted)" -Level Info
 }
 
-function Set-NeologikSignInGroupAssignment {
-    # Steps 2 and 3: the assignment of the user group of the Neologik Context Engine to
-    # the Platform Sign-in application, and the check of the administrator consent.
+# ----- Security groups, Neologik guest users and memberships ----------------------
+
+function Get-NeologikGuestUsersFileDefault {
+    # The file beside the script. The onboarding kit ships the file with the script.
+    return (Join-Path $PSScriptRoot 'NeologikGuestUsers.txt')
+}
+
+function Read-NeologikGuestUsersFile {
+    # Returns the mail addresses in the file: one address per line, a line that
+    # starts with # is a comment, blank lines and duplicates are dropped.
+    param([string]$Path)
+    $emails = @()
+    foreach ($line in @(Get-Content -LiteralPath $Path -ErrorAction Stop)) {
+        $text = [string]$line
+        if ($null -eq $text) { continue }
+        $text = $text.Trim()
+        if (-not $text -or $text.StartsWith('#')) { continue }
+        if ($text -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+            throw [System.ArgumentException]::new("The guest users file holds a line that is not a mail address: '$text'. File: $Path.")
+        }
+        $emails += $text.ToLowerInvariant()
+    }
+    return @($emails | Select-Object -Unique)
+}
+
+function Get-NeologikGroupByName {
+    # Returns the security group with the exact display name, or $null.
+    param([string]$DisplayName)
+    $safe = $DisplayName -replace "'", "''"
+    $filter = [uri]::EscapeDataString("displayName eq '$safe'")
+    $items = @(Get-NeologikGraphCollection -Uri "$script:GraphV1/groups?`$filter=$filter&`$select=id,displayName")
+    return (@($items) | Select-Object -First 1)
+}
+
+function Find-NeologikUserByEmail {
+    # Returns the account whose mail address or user principal name is the address,
+    # or $null. A guest account keeps the invited address in the mail property.
+    param([string]$Email)
+    $safe = $Email -replace "'", "''"
+    $filter = [uri]::EscapeDataString("mail eq '$safe' or userPrincipalName eq '$safe'")
+    $items = @(Get-NeologikGraphCollection -Uri "$script:GraphV1/users?`$filter=$filter&`$select=id,displayName,userPrincipalName,userType")
+    return (@($items) | Select-Object -First 1)
+}
+
+function Set-NeologikSecurityGroup {
+    <#
+    Step 2 of the first run. The security groups of version 5 of the Neologik
+    Platform exist in this tenant, the Neologik support accounts are guests of the
+    tenant, each guest and the signed-in administrator are members of every group,
+    and the two role groups of the Neologik Context Engine are known for step 3.
+    The onboarding script does the same work for a new environment. An environment
+    that was set up before version 5 has two of the four groups, so this step
+    creates the other two, renames the user group of the Neologik Context Engine
+    and fills the memberships. The step changes no group that already matches.
+    #>
     $state = $script:State
-    Write-Log 'Step 2 of 4: the assignment of the user group of the Neologik Context Engine to the Platform Sign-in application' -Level Info
+    Write-Log 'Step 2 of 5: the security groups of the environment, the Neologik guest users and the memberships' -Level Info
+    $graph = $script:GraphV1
+    $suffix = " - $($state.ShortName)"
+    $definitions = @(
+        @{ Key = 'UserGroup'; Name = "Neologik User Group$suffix"
+           Description = 'Default Neologik users group - assign to agent channels created in the NCE'; PreviousNames = @(); GivenId = '' },
+        @{ Key = 'Contributors'; Name = "Neologik NCE Contributors$suffix"
+           Description = 'NCE contributor role - create and change platform configuration in the Neologik Context Engine'
+           PreviousNames = @("Neologik NCE User Group$suffix", "Neologik Harness User Group$suffix"); GivenId = $state.NceUserGroupId },
+        @{ Key = 'Admins'; Name = "Neologik NCE Admins$suffix"
+           Description = 'NCE admin role - full access including Blueprints, Audit and the Admin page'; PreviousNames = @(); GivenId = '' },
+        @{ Key = 'AdminUserGroup'; Name = "Neologik Admin User Group$suffix"
+           Description = 'Users who will administer and support the resources'; PreviousNames = @(); GivenId = $state.AdminGroupId }
+    )
+
+    # ----- the four groups --------------------------------------------------------
+    $groups = @{}
+    $present = @()
+    $created = @()
+    $renamed = @()
+    $pendingCreate = @()
+    $failed = @()
+    foreach ($definition in $definitions) {
+        $group = $null
+        try {
+            if ($definition.GivenId) {
+                # The command names the group by id. The id decides, whatever the name.
+                $group = Invoke-NeologikGraph -Method GET -Uri "$graph/groups/$($definition.GivenId)?`$select=id,displayName"
+            }
+            if (-not $group) { $group = Get-NeologikGroupByName -DisplayName $definition.Name }
+            if (-not $group) {
+                foreach ($previousName in $definition.PreviousNames) {
+                    $group = Get-NeologikGroupByName -DisplayName $previousName
+                    if ($group) { break }
+                }
+            }
+        }
+        catch {
+            $reason = Get-NeologikErrorText $_
+            Write-Log "  $($definition.Name): FAILED. The script could not read the group. $reason" -Level Error
+            $failed += "$($definition.Name): $reason"
+            continue
+        }
+        if ($group) {
+            $groupId = [string](Get-NeologikProperty $group 'id' '')
+            $currentName = [string](Get-NeologikProperty $group 'displayName' '')
+            if ($currentName -ne $definition.Name) {
+                # The group keeps the id and the members. The display name moves to the
+                # version 5 name.
+                if (Test-NeologikVerifyOnly) {
+                    Write-Log "  '$currentName': WOULD RENAME to '$($definition.Name)'" -Level Warning
+                    $renamed += "WOULD RENAME '$currentName'"
+                }
+                else {
+                    try {
+                        $body = @{ displayName = $definition.Name; description = $definition.Description } | ConvertTo-Json -Compress
+                        $null = Invoke-NeologikGraph -Method PATCH -Uri "$graph/groups/$groupId" -Body $body
+                        Write-Log "  Renamed the group '$currentName' to '$($definition.Name)'. The group keeps the id $groupId and the members" -Level Success
+                        $renamed += $definition.Name
+                    }
+                    catch {
+                        $reason = Get-NeologikErrorText $_
+                        Write-Log "  '$currentName': FAILED. The script could not rename the group. $reason" -Level Error
+                        $failed += "$($definition.Name): $reason"
+                    }
+                }
+            }
+            else {
+                Write-Log "  '$($definition.Name)' exists, id $groupId" -Level Info
+                $present += $definition.Name
+            }
+            $groups[$definition.Key] = @{ Id = $groupId; Name = $definition.Name }
+            continue
+        }
+        if (Test-NeologikVerifyOnly) {
+            Write-Log "  '$($definition.Name)': WOULD CREATE" -Level Warning
+            $pendingCreate += $definition.Name
+            continue
+        }
+        try {
+            $body = @{
+                displayName     = $definition.Name
+                description     = $definition.Description
+                mailEnabled     = $false
+                securityEnabled = $true
+                mailNickname    = ($definition.Name -replace '\s', '')
+            } | ConvertTo-Json -Compress
+            $newGroup = Invoke-NeologikGraph -Method POST -Uri "$graph/groups" -Body $body
+            $groupId = [string](Get-NeologikProperty $newGroup 'id' '')
+            Write-Log "  Created the group '$($definition.Name)', id $groupId" -Level Success
+            $created += $definition.Name
+            $groups[$definition.Key] = @{ Id = $groupId; Name = $definition.Name; New = $true }
+        }
+        catch {
+            $reason = Get-NeologikErrorText $_
+            $status = Get-NeologikHttpStatus $_
+            if ($status -eq 403) { $reason = 'insufficient privileges. Sign in as a Global Administrator' }
+            Write-Log "  '$($definition.Name)': FAILED. The script could not create the group. $reason" -Level Error
+            $failed += "$($definition.Name): $reason"
+        }
+    }
+    $parts = @()
+    if ($present.Count -gt 0) { $parts += "Present: $($present.Count)" }
+    if ($created.Count -gt 0) { $parts += "Created: $($created -join ', ')" }
+    if ($renamed.Count -gt 0) { $parts += "Renamed: $($renamed -join ', ')" }
+    if ($pendingCreate.Count -gt 0) { $parts += "WOULD CREATE: $($pendingCreate -join ', ')" }
+    if ($failed.Count -gt 0) { $parts += "FAILED: $($failed -join '; ')" }
+    Add-Summary 'Security groups' ($parts -join '. ')
+
+    # The two role groups of the Neologik Context Engine, for step 3 and for the
+    # summary file. The Admin User Group, for the permission reduction.
+    if ($groups.ContainsKey('Contributors')) {
+        $state.NceContributorsGroupId = $groups['Contributors'].Id
+        if (-not $state.NceUserGroupId) { $state.NceUserGroupId = $groups['Contributors'].Id }
+    }
+    if ($groups.ContainsKey('Admins')) {
+        $state.NceAdminsGroupId = $groups['Admins'].Id
+        Add-Summary 'NCE Admins group' "Present, id $($groups['Admins'].Id). Neologik records this id for the environment"
+    }
+    elseif ($pendingCreate -contains "Neologik NCE Admins$suffix") {
+        Add-Summary 'NCE Admins group' 'WOULD CREATE'
+    }
+    else {
+        Add-Summary 'NCE Admins group' 'MISSING: the group could not be read or created. Read the item Security groups'
+    }
+    if ($groups.ContainsKey('AdminUserGroup') -and -not $state.AdminGroupId) { $state.AdminGroupId = $groups['AdminUserGroup'].Id }
+
+    # ----- the Neologik guest users ---------------------------------------------
+    $guestIds = @()
+    if (-not $state.GuestUsersFile -or -not (Test-Path -LiteralPath $state.GuestUsersFile)) {
+        $where = if ($state.GuestUsersFile) { $state.GuestUsersFile } else { 'NeologikGuestUsers.txt beside the script' }
+        Write-Log "  The guest users file is not found: $where. The script cannot confirm the Neologik support accounts. Download the onboarding kit and run the script from the folder of the kit, or add -GuestUsersFile" -Level Warning
+        Add-Summary 'Neologik guest users' 'SKIPPED: the guest users file is not found. Run the script from the folder of the onboarding kit, or add -GuestUsersFile'
+    }
+    else {
+        $guestPresent = @()
+        $guestInvited = @()
+        $guestPending = @()
+        $guestFailed = @()
+        foreach ($email in @($state.GuestUserEmails)) {
+            try {
+                $user = Find-NeologikUserByEmail -Email $email
+                if ($user) {
+                    $guestIds += [string](Get-NeologikProperty $user 'id' '')
+                    $guestPresent += $email
+                    continue
+                }
+                if (Test-NeologikVerifyOnly) {
+                    Write-Log "  $($email): WOULD INVITE as a guest" -Level Warning
+                    $guestPending += $email
+                    continue
+                }
+                $body = @{ invitedUserEmailAddress = $email; inviteRedirectUrl = 'https://portal.azure.com'; sendInvitationMessage = $true } | ConvertTo-Json -Compress
+                $invitation = Invoke-NeologikGraph -Method POST -Uri "$graph/invitations" -Body $body
+                $invitedId = [string](Get-NeologikProperty (Get-NeologikProperty $invitation 'invitedUser') 'id' '')
+                Write-Log "  Invited $email as a guest, id $invitedId" -Level Success
+                if ($invitedId) { $guestIds += $invitedId }
+                $guestInvited += $email
+            }
+            catch {
+                $reason = Get-NeologikErrorText $_
+                Write-Log "  $($email): FAILED. $reason" -Level Error
+                $guestFailed += "$($email): $reason"
+            }
+        }
+        $parts = @()
+        if ($guestPresent.Count -gt 0) { $parts += "Present: $($guestPresent.Count)" }
+        if ($guestInvited.Count -gt 0) { $parts += "Invited: $($guestInvited -join ', ')" }
+        if ($guestPending.Count -gt 0) { $parts += "WOULD INVITE: $($guestPending -join ', ')" }
+        if ($guestFailed.Count -gt 0) { $parts += "FAILED: $($guestFailed -join '; ')" }
+        if ($parts.Count -eq 0) { $parts += 'None listed in the guest users file' }
+        Add-Summary 'Neologik guest users' ($parts -join '. ')
+    }
+
+    # ----- the memberships --------------------------------------------------------
+    # Each guest and the signed-in administrator are direct members of every group.
+    # The Neologik Context Engine reads direct memberships only.
+    $members = @()
+    foreach ($guestId in $guestIds) { $members += @{ Id = $guestId; Label = 'guest' } }
+    $signedIn = [string](Get-NeologikProperty $state 'SignedInObjectId' '')
+    if ($signedIn) { $members += @{ Id = $signedIn; Label = 'signed-in administrator' } }
+    $membershipPresent = 0
+    $membershipAdded = @()
+    $membershipPending = 0
+    $membershipFailed = @()
+    $administratorGroups = @()
+    foreach ($key in @('UserGroup', 'Contributors', 'Admins', 'AdminUserGroup')) {
+        if (-not $groups.ContainsKey($key)) { continue }
+        $group = $groups[$key]
+        $existing = @()
+        try {
+            # A group created a moment ago takes time to replicate.
+            $isNew = [bool](Get-NeologikProperty $group 'New' $false)
+            $existing = @(Get-NeologikGraphCollection -Uri "$graph/groups/$($group.Id)/members?`$select=id" -RetryNotFound:$isNew |
+                ForEach-Object { ([string](Get-NeologikProperty $_ 'id' '')).ToLowerInvariant() })
+        }
+        catch {
+            $reason = Get-NeologikErrorText $_
+            Write-Log "  '$($group.Name)': FAILED. The script could not read the members. $reason" -Level Error
+            $membershipFailed += "$($group.Name): $reason"
+            continue
+        }
+        foreach ($member in $members) {
+            if ($existing -contains $member.Id.ToLowerInvariant()) {
+                $membershipPresent++
+                if ($member.Label -eq 'signed-in administrator') { $administratorGroups += $group.Name }
+                continue
+            }
+            if (Test-NeologikVerifyOnly) {
+                Write-Log "  '$($group.Name)': WOULD ADD the $($member.Label) $($member.Id)" -Level Warning
+                $membershipPending++
+                continue
+            }
+            try {
+                $ref = @{ '@odata.id' = "$graph/directoryObjects/$($member.Id)" } | ConvertTo-Json -Compress
+                $null = Invoke-NeologikGraph -Method POST -Uri "$graph/groups/$($group.Id)/members/`$ref" -Body $ref -RetryNotFound:$isNew
+                Write-Log "  Added the $($member.Label) $($member.Id) to '$($group.Name)'" -Level Success
+                $membershipAdded += "$($member.Label) to $($group.Name)"
+                if ($member.Label -eq 'signed-in administrator') { $administratorGroups += $group.Name }
+            }
+            catch {
+                $reason = Get-NeologikErrorText $_
+                Write-Log "  '$($group.Name)': FAILED. The script could not add the $($member.Label) $($member.Id). $reason" -Level Error
+                $membershipFailed += "$($group.Name): $reason"
+            }
+        }
+    }
+    $parts = @()
+    if ($membershipPresent -gt 0) { $parts += "Present: $membershipPresent" }
+    if ($membershipAdded.Count -gt 0) { $parts += "Added: $($membershipAdded -join ', ')" }
+    if ($membershipPending -gt 0) { $parts += "WOULD ADD: $membershipPending membership(s)" }
+    if ($membershipFailed.Count -gt 0) { $parts += "FAILED: $($membershipFailed -join '; ')" }
+    if ($parts.Count -eq 0) { $parts += 'Not checked: no guest and no signed-in account to check' }
+    Add-Summary 'Group memberships' ($parts -join '. ')
+    if (-not $signedIn) {
+        Add-Summary 'Signed-in administrator membership' 'UNKNOWN: the script could not read the id of the signed-in account. Add the account to the group Neologik NCE Admins in the Microsoft Entra admin centre'
+    }
+    elseif ($membershipPending -gt 0 -and $administratorGroups.Count -lt $groups.Count) {
+        Add-Summary 'Signed-in administrator membership' 'WOULD ADD'
+    }
+    elseif ($administratorGroups.Count -ge $groups.Count -and $groups.Count -gt 0) {
+        Add-Summary 'Signed-in administrator membership' "Present in every group ($($administratorGroups.Count))"
+    }
+    else {
+        Add-Summary 'Signed-in administrator membership' 'FAILED: the signed-in account is not a member of every group. Read the item Group memberships'
+    }
+}
+
+function Set-NeologikSignInGroupAssignment {
+    # Steps 3 and 4: the assignment of the two role groups of the Neologik Context
+    # Engine to the Platform Sign-in application, and the check of the administrator
+    # consent.
+    $state = $script:State
+    Write-Log 'Step 3 of 5: the assignment of the role groups of the Neologik Context Engine to the Platform Sign-in application' -Level Info
+    $adminsGroupId = [string](Get-NeologikProperty $state 'NceAdminsGroupId' '')
     if (-not $state.SignInAppClientId -or -not $state.NceUserGroupId) {
         Write-Log '  SKIPPED. The command gives no SignInAppClientId or no NceUserGroupId. The command from Neologik holds both values' -Level Warning
         Add-Summary 'User group assignment' 'SKIPPED: the command gives no SignInAppClientId or no NceUserGroupId'
+        if ($adminsGroupId) { Add-Summary 'Admin group assignment' 'SKIPPED: the command gives no SignInAppClientId' }
         return
     }
     $signInSp = $null
@@ -2293,49 +2647,59 @@ function Set-NeologikSignInGroupAssignment {
         $reason = Get-NeologikErrorText $_
         Write-Log "  The Platform Sign-in application: FAILED. The script could not read the Platform Sign-in application. $reason" -Level Error
         Add-Summary 'User group assignment' "FAILED: $reason"
+        if ($adminsGroupId) { Add-Summary 'Admin group assignment' "FAILED: $reason" }
         Add-Summary 'Administrator consent' 'SKIPPED: the script could not read the Platform Sign-in application'
         return
     }
     if (-not $signInSp) {
         Write-Log "  This tenant holds no service principal of the Platform Sign-in application with the client id $($state.SignInAppClientId). Ask Neologik to confirm the client id" -Level Error
         Add-Summary 'User group assignment' 'MISSING: the tenant holds no Platform Sign-in application with this client id'
+        if ($adminsGroupId) { Add-Summary 'Admin group assignment' 'MISSING: the tenant holds no Platform Sign-in application with this client id' }
         Add-Summary 'Administrator consent' 'SKIPPED: the tenant holds no Platform Sign-in application with this client id'
         return
     }
     Write-Log "  Platform Sign-in application: '$($signInSp.DisplayName)'" -Level Info
-    try {
-        $assignments = @(Get-MgGroupAppRoleAssignment -GroupId $state.NceUserGroupId -All -ErrorAction Stop |
-            Where-Object { $_.ResourceId -eq $signInSp.Id })
-        if ($assignments.Count -gt 0) {
-            Write-Log '  The user group is already assigned to the Platform Sign-in application' -Level Success
-            Add-Summary 'User group assignment' 'Already assigned'
-        }
-        elseif (Test-NeologikVerifyOnly) {
-            Add-NeologikPendingChange 'User group assignment' 'ASSIGN'
-        }
-        else {
-            Invoke-NeologikWrite -Command 'New-MgGroupAppRoleAssignment' -Parameters @{
-                GroupId = $state.NceUserGroupId; PrincipalId = $state.NceUserGroupId; ResourceId = $signInSp.Id
-                AppRoleId = '00000000-0000-0000-0000-000000000000'
-            } | Out-Null
-            Write-Log '  The script assigned the user group to the Platform Sign-in application. The sign-in token now holds the groups claim' -Level Success
-            Add-Summary 'User group assignment' 'Assigned'
-        }
+    # The user group of the command (the contributors), then the NCE Admins group that
+    # step 2 found or created. Each assignment is independent of the other.
+    $targets = @(@{ Item = 'User group assignment'; GroupId = $state.NceUserGroupId; Label = 'the user group'; Parameter = '-NceUserGroupId' })
+    if ($adminsGroupId -and $adminsGroupId -ne $state.NceUserGroupId) {
+        $targets += @{ Item = 'Admin group assignment'; GroupId = $adminsGroupId; Label = 'the NCE Admins group'; Parameter = 'the NCE Admins group' }
     }
-    catch {
-        $reason = Get-NeologikErrorText $_
-        $status = Get-NeologikHttpStatus $_
-        if ($status -eq 404) {
-            Write-Log "  This tenant holds no group with the id $($state.NceUserGroupId). Check the value of -NceUserGroupId" -Level Error
-            Add-Summary 'User group assignment' 'MISSING: the tenant holds no group with this id. Check the value of -NceUserGroupId'
+    foreach ($target in $targets) {
+        try {
+            $assignments = @(Get-MgGroupAppRoleAssignment -GroupId $target.GroupId -All -ErrorAction Stop |
+                Where-Object { $_.ResourceId -eq $signInSp.Id })
+            if ($assignments.Count -gt 0) {
+                Write-Log "  $($target.Label) is already assigned to the Platform Sign-in application" -Level Success
+                Add-Summary $target.Item 'Already assigned'
+            }
+            elseif (Test-NeologikVerifyOnly) {
+                Add-NeologikPendingChange $target.Item 'ASSIGN'
+            }
+            else {
+                Invoke-NeologikWrite -Command 'New-MgGroupAppRoleAssignment' -Parameters @{
+                    GroupId = $target.GroupId; PrincipalId = $target.GroupId; ResourceId = $signInSp.Id
+                    AppRoleId = '00000000-0000-0000-0000-000000000000'
+                } | Out-Null
+                Write-Log "  The script assigned $($target.Label) to the Platform Sign-in application. The sign-in token now holds the groups claim" -Level Success
+                Add-Summary $target.Item 'Assigned'
+            }
         }
-        elseif ($status -eq 403) {
-            Write-Log '  Microsoft Graph refused the assignment of the user group. Sign in as a Global Administrator' -Level Error
-            Add-Summary 'User group assignment' 'FAILED: insufficient privileges. Sign in as a Global Administrator'
-        }
-        else {
-            Write-Log "  The assignment of the user group: FAILED. $reason" -Level Error
-            Add-Summary 'User group assignment' "FAILED: $reason"
+        catch {
+            $reason = Get-NeologikErrorText $_
+            $status = Get-NeologikHttpStatus $_
+            if ($status -eq 404) {
+                Write-Log "  This tenant holds no group with the id $($target.GroupId). Check the value of $($target.Parameter)" -Level Error
+                Add-Summary $target.Item "MISSING: the tenant holds no group with this id. Check the value of $($target.Parameter)"
+            }
+            elseif ($status -eq 403) {
+                Write-Log "  Microsoft Graph refused the assignment of $($target.Label). Sign in as a Global Administrator" -Level Error
+                Add-Summary $target.Item 'FAILED: insufficient privileges. Sign in as a Global Administrator'
+            }
+            else {
+                Write-Log "  The assignment of $($target.Label): FAILED. $reason" -Level Error
+                Add-Summary $target.Item "FAILED: $reason"
+            }
         }
     }
     try {
@@ -2352,8 +2716,8 @@ function Set-NeologikSignInGroupAssignment {
         Write-Log "  The script could not read the members of the group. $(Get-NeologikErrorText $_). Check that the group has direct members" -Level Warning
     }
 
-    # ----- Step 3: administrator consent ----------------------------------
-    Write-Log 'Step 3 of 4: the administrator consent of the Platform Sign-in application' -Level Info
+    # ----- Step 4: administrator consent ----------------------------------
+    Write-Log 'Step 4 of 5: the administrator consent of the Platform Sign-in application' -Level Info
     try {
         $grants = @(Get-MgServicePrincipalOauth2PermissionGrant -ServicePrincipalId $signInSp.Id -All -ErrorAction Stop |
             Where-Object { $_.ConsentType -eq 'AllPrincipals' })
@@ -2527,7 +2891,7 @@ function Test-NeologikSharePointConsent {
 
 function Test-NeologikPreWindowSharePointConsent {
     <#
-    Step 3a of the first run. The configuration file can record whether the
+    Step 4a of the first run. The configuration file can record whether the
     solution uses SharePoint ingestion, in the field "SharePointIngestion". When
     the configuration file does not hold the field, the script reads the SharePoint
     permissions in the directory. An earlier SharePoint application of Neologik
@@ -2535,7 +2899,7 @@ function Test-NeologikPreWindowSharePointConsent {
     ingestion.
     #>
     $state = $script:State
-    Write-Log 'Step 3a of 4: the consent of the SharePoint application for Sites.Selected' -Level Info
+    Write-Log 'Step 4a of 5: the consent of the SharePoint application for Sites.Selected' -Level Info
     if (-not $state.Config -or -not (Test-NeologikProperty $state.Config 'SharePointIngestion')) {
         Write-Log '  No file records whether the solution uses SharePoint ingestion. The script reads the SharePoint permissions in the directory' -Level Info
         Test-NeologikSharePointConsent
@@ -2553,7 +2917,7 @@ function Test-NeologikPreWindowSharePointConsent {
 
 function Set-NeologikPlatformAppOwnership {
     <#
-    Step 3b of the first run. The deployment identity must own each application
+    Step 4b of the first run. The deployment identity must own each application
     registration that the Neologik Platform manages in this tenant, and the service
     principal of each. Each application registration must hold the unique name by
     which the deployment finds the application registration. The function changes
@@ -2562,7 +2926,7 @@ function Set-NeologikPlatformAppOwnership {
     $state = $script:State
     $deploySp = $state.DeploySp
     $graph = $script:GraphV1
-    Write-Log 'Step 3b of 4: the ownership of the application registrations by the deployment identity' -Level Info
+    Write-Log 'Step 4b of 5: the ownership of the application registrations by the deployment identity' -Level Info
     $shortName = $state.ShortName
     if (-not $shortName) {
         Write-Log '  The command gives no SolutionShortName. The script cannot find the application registrations' -Level Warning
@@ -2730,11 +3094,11 @@ function Set-NeologikDirectoryObjectOwner {
 }
 
 function Set-NeologikAgentUserGrant {
-    # Step 5 of the later run: the grants to agent users, the application permissions
+    # Step 6 of the later run: the grants to agent users, the application permissions
     # and the check of the SharePoint consent.
     $state = $script:State
     $grantsFile = $state.AgentGrants
-    Write-Log 'Step 5 of 6: the grants to agent users from the agent grants file' -Level Info
+    Write-Log 'Step 6 of 7: the grants to agent users from the agent grants file' -Level Info
     foreach ($entry in @(Get-NeologikProperty $grantsFile 'grants' @())) {
         $kind = [string](Get-NeologikProperty $entry 'kind' 'agent')
         $name = [string](Get-NeologikProperty $entry 'name' 'no name')
@@ -2779,13 +3143,13 @@ function Set-NeologikAgentUserGrant {
 
 function Set-NeologikMailboxGrant {
     <#
-    Step 6 of the later run: the Exchange Online mailbox grants of the email
+    Step 7 of the later run: the Exchange Online mailbox grants of the email
     channels. The function also removes the role assignments of each identity that
     the environment has stopped using. An identity that the file lists under
     adoptedIdentityAppIds keeps the role assignments.
     #>
     $state = $script:State
-    Write-Log 'Step 6 of 6: the Exchange Online mailbox grants of the email channels' -Level Info
+    Write-Log 'Step 7 of 7: the Exchange Online mailbox grants of the email channels' -Level Info
     $legacyToRemove = @()
     foreach ($legacyAppId in $state.RemoveLegacyGrantAppIds) {
         if ($state.AdoptedIdentityAppIds -contains $legacyAppId) {
@@ -3363,12 +3727,12 @@ function Set-NeologikKitVersionTag {
 
 function Invoke-NeologikPermissionReduction {
     <#
-    Step 4 of the first run: the permission reduction. The function first assigns
+    Step 5 of the first run: the permission reduction. The function first assigns
     the seven roles on the resource group and the two roles on the subscription. The
     function removes nothing unless the deployment identity holds all nine roles.
     #>
     $state = $script:State
-    Write-Log 'Step 4 of 4: the permission reduction of the deployment identity' -Level Info
+    Write-Log 'Step 5 of 5: the permission reduction of the deployment identity' -Level Info
 
     $azureItems = @()
     foreach ($roleName in $script:RequiredRgRoles) { $azureItems += "Resource group role: $roleName" }
@@ -3443,6 +3807,7 @@ function Invoke-NeologikPreWindowRun {
     # The first run: the checks and the grants, then the permission reduction.
     Set-NeologikAgentBlueprint
     Set-NeologikDeploymentGraphRole
+    Set-NeologikSecurityGroup
     Set-NeologikSignInGroupAssignment
     Test-NeologikPreWindowSharePointConsent
     Set-NeologikPlatformAppOwnership
@@ -3502,6 +3867,10 @@ function Write-NeologikSummary {
             deploymentGraphRoles = @($heldRoles)
             expectedGraphRoles   = @($script:RequiredGraphRoles)
             agentGrantsFile      = [string](Get-NeologikProperty $state 'AgentGrantsFile' '')
+            # The two role groups of the Neologik Context Engine (first run). Neologik
+            # records the NCE Admins group for the environment.
+            nceContributorsGroupId = [string](Get-NeologikProperty $state 'NceContributorsGroupId' '')
+            nceAdminsGroupId     = [string](Get-NeologikProperty $state 'NceAdminsGroupId' '')
             items                = @($script:Summary)
             attentionCount       = $attention.Count
             pendingChangeCount   = $pending.Count
@@ -3563,6 +3932,7 @@ function Invoke-NeologikEnvironmentAccess {
         [string[]]$BotAppClientIds,
         [string]$NceUserGroupId,
         [string]$AdminGroupId,
+        [string]$GuestUsersFile,
         [string]$SubscriptionId,
         [string]$ResourceGroupName,
         [string]$BlueprintKey = 'default',
@@ -3591,6 +3961,7 @@ function Invoke-NeologikEnvironmentAccess {
             BotAppClientIds         = @($BotAppClientIds)
             NceUserGroupId          = $NceUserGroupId
             AdminGroupId            = $AdminGroupId
+            GuestUsersFile          = $GuestUsersFile
             SubscriptionId          = $SubscriptionId
             ResourceGroupName       = $ResourceGroupName
             BlueprintKey            = $BlueprintKey
