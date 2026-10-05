@@ -6,8 +6,10 @@
 
 | Run | When Neologik asks for the run | What the environment access script does |
 |---|---|---|
-| The first run | Before an existing environment moves to version 5 of the Neologik Platform | Confirms the directory objects that the Neologik Platform uses. Reduces the access of the deployment identity to the roles that the deployment identity needs |
-| The later run | When an agent or an App is to work unattended in Microsoft 365 | Applies the grants that the files from Neologik list. Makes no other change |
+| The first run | Before an existing environment moves to version 5 of the Neologik Platform | Confirms the directory objects that the Neologik Platform uses, and the roles and permissions that the deployment identity needs. Removes nothing |
+| The later run | After Neologik has deployed and proven the environment | Applies the grants that the files from Neologik list, when the command names a file. Reduces the access of the deployment identity to the roles that the deployment identity needs |
+
+The first run removes nothing. The deployment identity keeps the access it holds today until the later run. Between the two runs, Neologik can put right a failed first run or a failed deployment with that access. Neologik then needs no further request to you.
 
 An environment that this version of the onboarding kit onboarded already holds the access that the first run produces. Such an environment needs the first run only when Neologik asks for the first run.
 
@@ -34,18 +36,18 @@ The environment access script reads the current state before each change. The en
 | PowerShell 7.4 or later | The environment access script stops on an earlier version |
 | A workstation with a desktop and a browser | The environment access script opens the sign-in page in the browser of the workstation. You complete the sign-in in the browser |
 | A Global Administrator account in your tenant | Only a Global Administrator can grant and remove Microsoft Graph application permissions and directory roles |
-| Owner or User Access Administrator on the subscription, for the first run | The same account changes the Azure role assignments of the deployment identity |
-| Exchange Administrator or Global Administrator, for a later run with mailbox grants | The mailbox grants are made in Exchange Online |
+| Owner or User Access Administrator on the subscription, for the first run and for the later run | The same account changes the Azure role assignments of the deployment identity |
+| Exchange Administrator or Global Administrator, for a run with mailbox grants | The mailbox grants are made in Exchange Online |
 | The command from Neologik | The command names your tenant, your subscription, your resource group and the application registrations of the environment |
-| The files from Neologik, for the later run | The files list the grants to apply |
+| The files from Neologik, when an agent or an App is to work unattended in Microsoft 365 | The files list the grants to apply |
 
 The environment access script installs the PowerShell modules that the run needs, for your user account, when the modules are missing.
 
 | Modules | Run |
 |---|---|
 | The Microsoft Graph modules | Every run |
-| The Az modules | The first run |
-| The Exchange Online module | A later run with mailbox grants |
+| The Az modules | The first run and the later run |
+| The Exchange Online module | A run with mailbox grants |
 
 Before the environment access script changes anything, the environment access script confirms three facts.
 
@@ -53,7 +55,7 @@ Before the environment access script changes anything, the environment access sc
 2. The PowerShell modules load.
 3. The signed-in account holds an active Global Administrator role.
 
-The first run makes one more check before the first run changes an Azure role. The signed-in account must hold Owner or User Access Administrator on the subscription.
+The first run and the later run make one more check before either changes an Azure role. The signed-in account must hold Owner or User Access Administrator on the subscription.
 
 ## How to run the environment access script
 
@@ -61,8 +63,8 @@ The first run makes one more check before the first run changes an Azure role. T
 2. Open PowerShell 7 in that folder.
 3. Paste the command from Neologik and press Enter.
 4. The environment access script opens the sign-in page in your browser. Sign in as a Global Administrator. The environment access script waits for up to 5 minutes.
-5. In the first run, the environment access script signs in a second time, to Azure. The browser uses the same account and does not usually ask again. In a later run with mailbox grants, the environment access script signs in to Exchange Online in the same way.
-6. Read the summary table on screen. Send the summary file to Neologik.
+5. In the first run and in the later run, the environment access script signs in a second time, to Azure. The browser uses the same account and does not usually ask again. In a run with mailbox grants, the environment access script signs in to Exchange Online in the same way.
+6. Read the summary table on screen. Send the summary file and the log file to Neologik.
 
 When the browser sign-in does not complete, the environment access script prints a web address and a code. Open the web address in a browser on any device, enter the code and sign in. The environment access script waits for up to 15 minutes. Some organisations block this sign-in with a Conditional Access policy. The environment access script then says so and tries the next method.
 
@@ -70,7 +72,7 @@ To see what a run would change, add `-Verify` to the end of the command. The sig
 
 ## The first run
 
-The command selects the first run when the command names no grants file. The first run has five steps. The environment access script checks each item of a step separately. When an item fails, the environment access script records the item and the reason in the summary and continues.
+The command selects the first run when the command names neither `-LaterRun` nor a grants file. The first run has five steps. The environment access script checks each item of a step separately. When an item fails, the environment access script records the item and the reason in the summary and continues. The first run removes nothing.
 
 ### Step 1: The agent identity blueprint and the permissions of the deployment identity
 
@@ -82,8 +84,7 @@ The command selects the first run when the command names no grants file. The fir
 | Sponsor | The agent identity blueprint has a sponsor. The sponsor is the person who is accountable for the agents of the environment. The summary names the sponsor | The environment access script adds the signed-in Global Administrator as the sponsor when the agent identity blueprint has no sponsor |
 | The permission of the service principal | The service principal holds `AgentIdUser.ReadWrite.IdentityParentedBy`. The permission covers only the agent users of this agent identity blueprint | The environment access script grants the permission when the permission is absent |
 | The federated credentials | The agent identity blueprint holds the three federated credentials through which the Neologik deployment signs in as the agent identity blueprint | The environment access script adds a federated credential when the federated credential is absent |
-| The permissions that the deployment identity keeps | The deployment identity holds `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` | The environment access script grants a permission when the permission is absent |
-| The permissions that the deployment identity does not need | The deployment identity holds none of these seven permissions:<br>`Application.Read.All`<br>`AgentIdentityBlueprint.Create`<br>`AgentIdentityBlueprint.UpdateAuthProperties.All`<br>`AgentIdentityBlueprintPrincipal.Create`<br>`AgentIdentity.Create.All`<br>`AgentIdUser.ReadWrite.All`<br>`Group.Create` | The environment access script removes a permission that the deployment identity holds. The environment access script removes a permission only after the environment access script has confirmed the two permissions that the deployment identity keeps |
+| The permissions that the deployment identity keeps | The deployment identity holds `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` | The environment access script grants a permission when the permission is absent. The first run removes no permission. The later run removes the seven permissions listed under step 8 |
 
 The deployment identity can already own one agent identity blueprint with another short name. The environment access script then uses that agent identity blueprint and creates no second one. The summary then names the agent identity blueprint that the environment access script used.
 
@@ -125,33 +126,24 @@ A user must be a direct member of the security group. A member of a nested group
 
 The deployment replaces the client secrets of the Platform Sign-in application and of the application registration of each agent. When one of these application registrations holds a client secret that the deployment did not create, the summary lists the client secret as `PENDING`. Confirm with Neologik that nothing else uses the client secret before the upgrade.
 
-### Step 5: Permission reduction
+### Step 5: The Azure roles of the deployment identity
 
-The environment access script first confirms that the deployment identity holds nine Azure roles. The environment access script assigns a role that is absent.
+The environment access script confirms that the deployment identity holds nine Azure roles. The environment access script assigns a role that is absent and removes nothing.
 
 | Scope | Roles |
 |---|---|
 | Resource group | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator |
 | Subscription | Reader<br>Cost Management Contributor |
 
-The environment access script removes the wider access only when the deployment identity holds all nine roles. When the environment access script cannot assign one of the nine roles, the environment access script removes nothing. The deployment never loses access part way through the run.
+When the deployment identity holds all nine roles, the environment access script records the version of the onboarding kit on the resource group. The record is the tag `NeologikOnboardingKit`. The environment access script keeps your other tags and writes the tag only when the value differs. The Neologik Platform reads the tag before an upgrade.
 
-| What the environment access script removes | Condition |
-|---|---|
-| Contributor and User Access Administrator on the subscription | The deployment identity holds the role |
-| The directory role Application Administrator | The deployment identity holds the role |
-| The membership of the group `Neologik Admin User Group - <short name>` | The deployment identity is a member, and each SQL server in the resource group names the deployment identity as the Microsoft Entra administrator. Until then the environment access script keeps the membership, because the membership is the only access of the deployment identity to SQL. The summary then reads `HELD` |
-| Every other Azure role in the subscription | The role is outside the nine roles above. The environment access script keeps the role `Cognitive Services Content Understanding Contributor` on a resource in the resource group |
-| Every other directory role | The deployment identity holds the role |
-| Every other group membership | The deployment identity is a member |
-
-Last, the environment access script records the version of the onboarding kit on the resource group, in the tag `NeologikOnboardingKit`. The environment access script keeps your other tags and writes the tag only when the value differs. The Neologik Platform reads the tag before an upgrade.
-
-The first run changes nothing on a managed identity, on a security group or on a user.
+The first run changes nothing on a managed identity, on a security group or on a user. The first run removes no role, no permission and no membership.
 
 ## The later run
 
-The command selects the later run when the command names a grants file. The later run applies what the files list. The later run makes none of the checks of the first run.
+The command selects the later run with `-LaterRun`. Neologik asks for the later run once Neologik has deployed and proven the environment. The later run applies the grants that the files list, when the command names a file. The later run then reduces the access of the deployment identity. The later run makes none of the checks of the first run.
+
+A command that names a grants file and not `-LaterRun` applies the file and nothing else. Neologik sends such a command when an agent or an App is to work unattended in Microsoft 365 after the later run.
 
 ### Step 6: Grants to agent users, with `-AgentGrantsFile`
 
@@ -177,6 +169,22 @@ With `-RemoveLegacyGrantAppIds` the environment access script also removes the E
 
 When your Exchange Online organisation has never been customised, the environment access script enables organisation customisation. Exchange Online requires the setting before a role assignment. Exchange Online needs the setting once.
 
+### Step 8: Permission reduction, with `-LaterRun`
+
+The environment access script first confirms the two Microsoft Graph application permissions that the deployment identity keeps, and the nine Azure roles of step 5. The environment access script assigns a role or grants a permission that is absent. The environment access script removes the wider access only when the deployment identity holds all of them. When the environment access script cannot assign one of the nine roles, the environment access script removes nothing. The deployment never loses access part way through the run.
+
+| What the environment access script removes | Condition |
+|---|---|
+| Seven Microsoft Graph application permissions:<br>`Application.Read.All`<br>`AgentIdentityBlueprint.Create`<br>`AgentIdentityBlueprint.UpdateAuthProperties.All`<br>`AgentIdentityBlueprintPrincipal.Create`<br>`AgentIdentity.Create.All`<br>`AgentIdUser.ReadWrite.All`<br>`Group.Create` | The deployment identity holds the permission |
+| Contributor and User Access Administrator on the subscription | The deployment identity holds the role |
+| The directory role Application Administrator | The deployment identity holds the role |
+| The membership of the group `Neologik Admin User Group - <short name>` | The deployment identity is a member, and each SQL server in the resource group names the deployment identity as the Microsoft Entra administrator. Until then the environment access script keeps the membership, because the membership is the only access of the deployment identity to SQL. The summary then reads `HELD` |
+| Every other Azure role in the subscription | The role is outside the nine roles of step 5. The environment access script keeps the role `Cognitive Services Content Understanding Contributor` on a resource in the resource group |
+| Every other directory role | The deployment identity holds the role |
+| Every other group membership | The deployment identity is a member |
+
+Last, the environment access script records the version of the onboarding kit on the resource group, in the tag `NeologikOnboardingKit`.
+
 ## What the environment access script never does
 
 - The environment access script never reads, moves or deletes your data. The environment access script reads directory objects, Azure role assignments and Exchange Online role assignments.
@@ -199,9 +207,10 @@ The environment access script signs in to Microsoft Graph with your account. At 
 | `User.Read` | Every run | To identify your account |
 | `DelegatedPermissionGrant.Read.All` | Every run | To read the consent of the Platform Sign-in application |
 | `AgentIdentityBlueprint.Create`<br>`AgentIdentityBlueprint.AddRemoveCreds.All`<br>`AgentIdentityBlueprintPrincipal.Create` | Every run | To create the agent identity blueprint, the service principal and the federated credentials when each is absent |
-| `RoleManagement.ReadWrite.Directory` | The first run | To remove directory roles from the deployment identity |
-| `GroupMember.ReadWrite.All` | The first run | To add the Neologik guest users and the signed-in administrator to the security groups, and to remove the deployment identity from groups |
+| `GroupMember.ReadWrite.All` | The first run | To add the Neologik guest users and the signed-in administrator to the security groups |
 | `Group.ReadWrite.All` | The first run | To create a security group of version 5 that is absent, and to rename the user group of the Neologik Context Engine |
+| `RoleManagement.ReadWrite.Directory` | The later run, with `-LaterRun` | To remove directory roles from the deployment identity |
+| `GroupMember.ReadWrite.All` | The later run, with `-LaterRun` | To remove the deployment identity from groups |
 | `User.Invite.All` | The first run | To invite a Neologik support account that is not yet a guest of your tenant |
 | `AgentIdentityBlueprintPrincipal.ReadWrite.All` | The first run | To add the deployment identity as an owner of the service principal of the agent identity blueprint. The environment access script adds the owner when that service principal has none |
 | `DelegatedPermissionGrant.ReadWrite.All` | A later run with `-AgentGrantsFile` | To create the grants to agent users |
@@ -210,25 +219,29 @@ The sign-in to Azure and the sign-in to Exchange Online use the same account and
 
 ## What you receive
 
-The environment access script prints a summary table. The environment access script writes the same table to a summary file in the folder of the environment access script.
+The environment access script prints a summary table. The environment access script writes two files in the folder of the environment access script.
 
-| Run | Summary file |
-|---|---|
-| The first run | `Neologik_EnvironmentAccess_PreWindow_<date and time>.json` |
-| The later run | `Neologik_EnvironmentAccess_PostWindow_<date and time>.json` |
+| File | Name | Content |
+|---|---|---|
+| The log file | `NeologikEnvironmentAccess_<date and time>.log` | Every message of the run, from the first line. Each failed request to Microsoft Graph, with its status and the request id by which Microsoft can find the request. The summary table |
+| The summary file of the first run | `Neologik_EnvironmentAccess_PreWindow_<date and time>.json` | The summary of the run, see below |
+| The summary file of the later run | `Neologik_EnvironmentAccess_PostWindow_<date and time>.json` | The summary of the run, see below |
 
-The environment access script writes to the current folder when the folder of the environment access script is not writable. The environment access script writes to the temporary folder when the current folder is not writable. The environment access script reports the path.
+The environment access script writes the summary file on every exit, a run that stopped before its steps included. The environment access script writes to the current folder when the folder of the environment access script is not writable. The environment access script writes to the temporary folder when the current folder is not writable. The environment access script reports both paths.
 
-The summary file holds six things:
+The summary file holds nine things:
 
+- the version of the onboarding kit
 - the tenant id
 - the client id of the deployment identity
+- the signed-in account
 - the time of the run
 - the Microsoft Graph application permissions that the deployment identity holds
 - the ids of the two role groups of the Neologik Context Engine, after the first run
 - every item of the summary
+- the path of the log file, and the reason when the run stopped before its steps
 
-The summary file holds no secret. Send the summary file to Neologik as the record of the run.
+Neither file holds a secret. Send both files to Neologik as the record of the run.
 
 | Result | Meaning |
 |---|---|
@@ -248,7 +261,11 @@ The summary file holds no secret. Send the summary file to Neologik as the recor
 
 **Does the first run give Neologik more access?**
 
-No. The first run removes access from the deployment identity. The first run adds only a role or a permission that is absent from the set listed in this document. On an environment onboarded before version 5, the deployment identity ends the run with less access than the deployment identity held before the run.
+The first run adds only a role or a permission that is absent from the set listed in this document, and removes nothing. On an environment onboarded before version 5, the deployment identity keeps the wider access it held before the run until the later run. The later run removes that wider access, so that the deployment identity ends with the access listed in this document and nothing else.
+
+**Why does the first run keep the wider access until the later run?**
+
+Neologik deploys the new version of the environment between the two runs. When a step of the first run or of the deployment fails, Neologik puts the step right with the access that the deployment identity still holds. Neologik then needs no further request to you. Once the environment is proven, the later run removes the wider access.
 
 **Why does my account need such wide permissions?**
 
@@ -260,7 +277,7 @@ The environment access script reports the item and moves to the next item. A sec
 
 **What happens when an item fails?**
 
-The environment access script records the failure with the reason, continues with the other items and ends with exit code 1. Send the summary file to Neologik.
+The environment access script records the failure with the reason, continues with the other items and ends with exit code 1. Send the summary file and the log file to Neologik.
 
 **Why does the summary list application registrations that the environment access script did not change?**
 
@@ -268,4 +285,4 @@ The deployment identity manages only the application registrations that the depl
 
 ## Help
 
-Email support@neologik.ai with the summary file, the name of your organisation and the host name of the environment.
+Email support@neologik.ai with the summary file, the log file, the name of your organisation and the host name of the environment.
