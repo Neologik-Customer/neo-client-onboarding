@@ -1289,14 +1289,16 @@ Context 'Modules and sign-in' {
         $scopes | Should -Contain 'Directory.Read.All'
         $scopes | Should -Contain 'User.Read'
         $scopes | Should -Contain 'AppRoleAssignment.ReadWrite.All'
-        $scopes | Should -Contain 'RoleManagement.ReadWrite.Directory'
+        # The first run removes no directory role (project#3170): the scope belongs to the later run.
+        $scopes | Should -Not -Contain 'RoleManagement.ReadWrite.Directory'
+        $scopes | Should -Contain 'GroupMember.ReadWrite.All'
         $scopes | Should -Contain 'AgentIdentityBlueprintPrincipal.ReadWrite.All'
         $scopes | Should -Not -Contain 'DelegatedPermissionGrant.ReadWrite.All'
         $scopes | Should -Contain 'offline_access'
         Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $AccessToken -is [securestring] -and -not $UseDeviceCode }
     }
 
-    It 'adds the grant write scope only with a grants file and the directory role scope only in the first run' {
+    It 'adds the grant write scope only with a grants file and the directory role scope only with -LaterRun' {
         Add-AgentIdentities
         $grants = New-GrantsFile -Grants @((New-AgentGrantEntry))
         $graphScopes = {
@@ -1314,8 +1316,13 @@ Context 'Modules and sign-in' {
         (& $graphScopes) | Should -Not -Contain 'RoleManagement.ReadWrite.Directory'
         Add-CompliantPreWindowState
         $script:TokenRequests = @()
-        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $null = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         (& $graphScopes) | Should -Contain 'RoleManagement.ReadWrite.Directory'
+        (& $graphScopes) | Should -Contain 'GroupMember.ReadWrite.All'
+        (& $graphScopes) | Should -Not -Contain 'Group.ReadWrite.All'
+        $script:TokenRequests = @()
+        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        (& $graphScopes) | Should -Not -Contain 'RoleManagement.ReadWrite.Directory'
         (& $graphScopes) | Should -Not -Contain 'DelegatedPermissionGrant.ReadWrite.All'
     }
 
@@ -1615,14 +1622,13 @@ Context 'The first run on a compliant environment' {
         Get-SummaryResult 'Agent identity blueprint service principal permission: AgentIdUser.ReadWrite.IdentityParentedBy' | Should -Be 'Already granted'
         Get-SummaryResult 'Agent identity blueprint credential: github-oidc-neo-env-config' | Should -Be 'Present'
         Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Already granted'
-        Get-SummaryResult 'Deployment identity permission to remove: Group.Create' | Should -Be 'Not held'
         Get-SummaryResult 'User group assignment' | Should -Be 'Already assigned'
         Get-SummaryResult 'Administrator consent' | Should -Be 'Present'
         Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'Not needed. No SharePoint application of Neologik holds a SharePoint permission'
         Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Already assigned'
         Get-SummaryResult 'Subscription role: Cost Management Contributor' | Should -Be 'Already assigned'
-        Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'Not held'
-        Get-SummaryResult 'Application Administrator role' | Should -Be 'Not held'
+        # The first run reports no removal item (project#3170): the removals belong to the later run.
+        @($script:Summary | Where-Object { $_.Item -match 'to remove|Application Administrator role|Admin User Group membership|^Other ' }) | Should -HaveCount 0
         Should -Invoke Connect-AzAccount -Times 1
         ($script:Console -join "`n") | Should -Match 'first run'
         ($script:Console -join "`n") | Should -Match 'The first run is complete'
@@ -1733,7 +1739,7 @@ Context 'The first run on a compliant environment' {
 }
 
 Context 'The first run on an environment with missing state' {
-    It 'performs the directory checks and then the guarded permission reduction, in that order' {
+    It 'in the later run grants the retained access and then removes the wider access, in that order' {
         Add-CompliantPreWindowState
         $deploy = Get-FakeSp -Id $script:Ids.DeploySpId
         $deploy.appRoleAssignments = @()
@@ -1741,7 +1747,7 @@ Context 'The first run on an environment with missing state' {
         $script:Tenant.AzRoleAssignments = @(@{ ObjectId = $script:Ids.Me; RoleDefinitionName = 'Owner'; Scope = '/' })
         $script:Tenant.DirectoryRoles = @()
         Add-LegacyAzureState
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Granted'
         Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -Be 'Removed'
@@ -1817,7 +1823,7 @@ Context 'The first run on an environment with missing state' {
         $deploy = Get-FakeSp -Id $script:Ids.DeploySpId
         $deploy.appRoleAssignments = @()
         foreach ($roleName in @('Application.Read.All', 'AgentIdentity.Create.All', 'Group.Create')) { Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName $roleName }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Granted'
         Get-SummaryResult 'Deployment identity permission: AgentIdentityBlueprint.AddRemoveCreds.All' | Should -Be 'Granted'
@@ -1840,7 +1846,7 @@ Context 'The first run on an environment with missing state' {
         $deploy.appRoleAssignments = @()
         Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.Read.All'
         Mock New-MgServicePrincipalAppRoleAssignment { throw (New-ForbiddenException) }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         (Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy') | Should -Match '^FAILED: insufficient privileges'
         Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -Be 'SKIPPED: the deployment identity does not hold both permissions that the deployment identity keeps'
@@ -2624,11 +2630,11 @@ Context 'Graph resilience' {
     }
 }
 
-Context 'The first run: permission reduction (step 4)' {
+Context 'The later run: permission reduction (step 8)' {
     It 'on an already-hardened environment creates only the Cost Management Contributor grant' {
         Add-CompliantPreWindowState
         $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -ne 'Cost Management Contributor' })
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $script:Writes | Should -HaveCount 1
         $script:Writes[0] | Should -Be "NEW az role Cost Management Contributor $script:SubScope"
@@ -2640,7 +2646,7 @@ Context 'The first run: permission reduction (step 4)' {
         Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $Tenant -eq $script:Ids.Tenant -and $Subscription -eq $script:Ids.Subscription -and $AccessToken -eq 'eyJ0b2tlbg' }
         # Second run: pure verification.
         $script:Writes = @()
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $script:Writes | Should -HaveCount 0
     }
@@ -2648,7 +2654,7 @@ Context 'The first run: permission reduction (step 4)' {
     It 'on a legacy environment applies the narrow set before removing the broad grants' {
         Add-CompliantDirectoryState
         Add-LegacyAzureState
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $news = @($script:Writes | Where-Object { $_ -like 'NEW az role*' })
         $removes = @($script:Writes | Where-Object { $_ -like 'REMOVE*' })
@@ -2675,7 +2681,7 @@ Context 'The first run: permission reduction (step 4)' {
         Add-CompliantDirectoryState
         Add-LegacyAzureState
         Mock New-AzRoleAssignment { param($RoleDefinitionName) if ($RoleDefinitionName -eq 'Monitoring Contributor') { throw 'AuthorizationFailed: The client does not have authorization to perform action' }; $script:Tenant.AzRoleAssignments += @{ ObjectId = $ObjectId; RoleDefinitionName = $RoleDefinitionName; Scope = $Scope }; Add-Write "NEW az role $RoleDefinitionName $Scope" }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         (Get-SummaryResult 'Resource group role: Monitoring Contributor') | Should -Match '^FAILED: insufficient privileges'
         Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'SKIPPED: the deployment identity does not hold all nine Azure roles'
@@ -2684,9 +2690,7 @@ Context 'The first run: permission reduction (step 4)' {
         Should -Invoke Remove-MgDirectoryRoleMemberDirectoryObjectByRef -Times 0
         @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
         @($script:Tenant.AzRoleAssignments | Where-Object { $_.Scope -eq $script:SubScope -and $_.RoleDefinitionName -eq 'Contributor' }) | Should -HaveCount 1
-        Get-SummaryResult 'Agent identity blueprint' | Should -Be 'Present'
         Get-SummaryResult 'Deployment identity permission to remove: Group.Create' | Should -Be 'Not held'
-        Get-SummaryResult 'Administrator consent' | Should -Be 'Present'
     }
 
     It 'treats a RoleAssignmentExists race as already in place' {
@@ -2702,7 +2706,7 @@ Context 'The first run: permission reduction (step 4)' {
         Add-CompliantDirectoryState
         Add-LegacyAzureState
         Mock Connect-AzAccount { throw 'Device code expired' }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         ($script:Console -join "`n") | Should -Match 'Owner or User Access Administrator on subscription'
         Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'SKIPPED: the sign-in to Azure failed'
@@ -2733,7 +2737,7 @@ Context 'The first run: permission reduction (step 4)' {
         Add-CompliantDirectoryState
         Add-LegacyAzureState
         Mock Remove-MgDirectoryRoleMemberDirectoryObjectByRef { throw (New-ForbiddenException) }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         (Get-SummaryResult 'Application Administrator role') | Should -Match '^FAILED: insufficient privileges'
         Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'Removed'
@@ -2743,7 +2747,7 @@ Context 'The first run: permission reduction (step 4)' {
         Add-CompliantDirectoryState
         Add-LegacyAzureState
         Mock Get-MgServicePrincipalMemberOf { throw (New-ForbiddenException) }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         (Get-SummaryResult 'Application Administrator role') | Should -Match '^FAILED'
         @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
@@ -2755,7 +2759,7 @@ Context 'The first run: permission reduction (step 4)' {
         Add-CompliantDirectoryState
         Add-LegacyAzureState
         Add-UndeclaredState
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Application Administrator role' | Should -Be 'Removed'
         Get-SummaryResult 'Other directory role: Agent ID Administrator' | Should -Be 'Removed'
@@ -2822,13 +2826,13 @@ Context 'Verify-only run (-Verify)' {
         Get-SummaryResult 'Agent identity blueprint sponsor' | Should -Be 'WOULD SET at creation: the signed-in administrator'
         Get-SummaryResult 'Agent identity blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'WOULD ADD'
         Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'WOULD GRANT'
-        Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -BeNullOrEmpty -Because 'the first run removes nothing (project#3170)'
         Get-SummaryResult 'User group assignment' | Should -Be 'WOULD ASSIGN'
         Get-SummaryResult 'Administrator consent' | Should -Be 'MISSING: the script printed the consent address'
         Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'WOULD ASSIGN'
         Get-SummaryResult 'Subscription role: Cost Management Contributor' | Should -Be 'WOULD ASSIGN'
-        Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'WOULD REMOVE'
-        Get-SummaryResult 'Application Administrator role' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'Subscription role to remove: Contributor' | Should -BeNullOrEmpty
+        Get-SummaryResult 'Application Administrator role' | Should -BeNullOrEmpty
         @($script:Summary | Where-Object { $_.Result -match '^(FAILED|SKIPPED)' }) | Should -HaveCount 0
         ($script:Console -join "`n") | Should -Match 'with -Verify'
         ($script:Console -join "`n") | Should -Match 'The script wrote nothing'
@@ -2849,6 +2853,25 @@ Context 'Verify-only run (-Verify)' {
         $code | Should -Be 0
         $script:Writes | Should -HaveCount 0
         ($script:Console -join "`n") | Should -Match 'would change nothing'
+    }
+
+    It 'reports every pending removal of the later run on a legacy environment, writes nothing and exits 1' {
+        Add-CompliantDirectoryState
+        Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.Read.All'
+        Add-LegacyAzureState
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 1
+        $script:Writes | Should -HaveCount 0
+        Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'WOULD ASSIGN'
+        Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'Application Administrator role' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'Agent identity blueprint' | Should -BeNullOrEmpty -Because 'the later run makes none of the checks of the first run'
+        ($script:Console -join "`n") | Should -Match 'later run with -Verify'
+        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentAccess_PostWindow_*.json')
+        $files | Should -HaveCount 1
+        (Get-FakeSp -Id $script:Ids.DeploySpId).appRoleAssignments | Should -HaveCount 3
+        @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
     }
 
     It 'reports pending agent-user and mailbox grants in the later run without writing' {
@@ -2897,6 +2920,7 @@ Context 'Parameter surface' {
         $names | Should -Contain 'Verify'
         $names | Should -Contain 'AgentGrantsFile'
         $names | Should -Contain 'MailboxGrantsFile'
+        $names | Should -Contain 'LaterRun'
         { Invoke-NeologikEnvironmentAccess -ConfigurationFile (New-ConfigFile) -Phase 'PostWindow' } | Should -Throw -ExpectedMessage "*'Phase'*"
         Should -Invoke Connect-MgGraph -Times 0
     }
@@ -3063,14 +3087,14 @@ Context 'The first run: security groups, guests and memberships (step 2, project
     }
 }
 
-Context 'The first run: Admin User Group membership' {
+Context 'The later run: Admin User Group membership' {
     BeforeEach {
         Add-CompliantDirectoryState
         Add-CompliantAzureState
     }
 
     It 'reports the membership as not held on a compliant environment' {
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not held'
         Should -Invoke Remove-MgGroupMemberByRef -Times 0
@@ -3078,7 +3102,7 @@ Context 'The first run: Admin User Group membership' {
 
     It 'keeps the membership while a SQL server still names the group as its administrator' {
         Add-AdminGroupMembership
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Admin User Group membership' | Should -Match '^HELD\. The script keeps the membership until each SQL server names the deployment identity'
         Should -Invoke Remove-MgGroupMemberByRef -Times 0
@@ -3089,7 +3113,7 @@ Context 'The first run: Admin User Group membership' {
     It 'removes the membership once every SQL server names the deployment identity as its administrator' {
         Add-AdminGroupMembership
         Set-SqlAdministrator -ObjectId $script:Ids.DeploySpId
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Admin User Group membership' | Should -Be 'Removed'
         Should -Invoke Remove-MgGroupMemberByRef -Times 1
@@ -3103,7 +3127,7 @@ Context 'The first run: Admin User Group membership' {
         Add-AdminGroupMembership
         $script:Tenant.SqlServers += @{ ServerName = 'sql-custom-01'; AdminObjectId = $script:Ids.AdminGroup; AdminDisplayName = 'SQL Administrators' }
         Set-SqlAdministrator -ObjectId $script:Ids.DeploySpId -ServerName "sql-main-$script:ShortName"
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Admin User Group membership' | Should -Match '^HELD'
         Should -Invoke Remove-MgGroupMemberByRef -Times 0
@@ -3112,7 +3136,7 @@ Context 'The first run: Admin User Group membership' {
     It 'keeps the membership when the resource group has no SQL server yet' {
         Add-AdminGroupMembership
         $script:Tenant.SqlServers = @()
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         Get-SummaryResult 'Admin User Group membership' | Should -Match '^HELD'
         Should -Invoke Remove-MgGroupMemberByRef -Times 0
     }
@@ -3120,7 +3144,7 @@ Context 'The first run: Admin User Group membership' {
     It 'records the removal as a pending change in a verify-only run and writes nothing' {
         Add-AdminGroupMembership
         Set-SqlAdministrator -ObjectId $script:Ids.DeploySpId
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); Verify = $true }
         $code | Should -Be 1
         Get-SummaryResult 'Admin User Group membership' | Should -Be 'WOULD REMOVE'
         Should -Invoke Remove-MgGroupMemberByRef -Times 0
@@ -3129,7 +3153,7 @@ Context 'The first run: Admin User Group membership' {
 
     It 'finds the Admin User Group by its name when the command gives no AdminGroupId' {
         $cfg = New-ConfigFile -Overrides @{ SecurityGroups = @(@{ Name = "Neologik NCE User Group - $script:ShortName"; Id = $script:Ids.Group }) }
-        $code = Invoke-Run @{ ConfigurationFile = $cfg }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = $cfg }
         $code | Should -Be 0
         # Step 2 names the group (project#3127), so the membership check runs.
         Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not held'
@@ -3139,7 +3163,7 @@ Context 'The first run: Admin User Group membership' {
     It 'reports not checked, without needing attention, when no Admin User Group exists and the command gives no AdminGroupId' {
         $cfg = New-ConfigFile -Overrides @{ SecurityGroups = @(@{ Name = "Neologik NCE User Group - $script:ShortName"; Id = $script:Ids.Group }) }
         $script:Tenant.Groups = @($script:Tenant.Groups | Where-Object { $_.id -ne $script:Ids.AdminGroup })
-        $code = Invoke-Run @{ ConfigurationFile = $cfg; Verify = $true }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = $cfg; Verify = $true }
         Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not checked. The command gives no AdminGroupId'
         Should -Invoke Remove-MgGroupMemberByRef -Times 0
     }
@@ -3148,22 +3172,22 @@ Context 'The first run: Admin User Group membership' {
         Add-AdminGroupMembership
         Set-SqlAdministrator -ObjectId $script:Ids.DeploySpId
         $cfg = New-ConfigFile -Overrides @{ SecurityGroups = @(@{ Name = "Neologik NCE User Group - $script:ShortName"; Id = $script:Ids.Group }) }
-        $code = Invoke-Run @{ ConfigurationFile = $cfg; AdminGroupId = $script:Ids.AdminGroup }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = $cfg; AdminGroupId = $script:Ids.AdminGroup }
         $code | Should -Be 0
         Get-SummaryResult 'Admin User Group membership' | Should -Be 'Removed'
     }
 
     It 'imports the Az modules at their own versions, never a common pin' {
         Mock Get-NeologikAvailableModuleVersion { param($Name) switch -Wildcard ($Name) { 'Az.Accounts' { @([version]'5.5.3') } 'Az.Resources' { @([version]'10.0.0') } 'Az.Sql' { @([version]'7.1.0') } default { @([version]'2.38.0') } } }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         @($script:Imports | Where-Object { $_ -like 'Az.*' }) | Should -Be @('Az.Accounts ', 'Az.Resources ', 'Az.Sql ')
         Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Already assigned'
         Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not held'
     }
 
-    It 'requests the group-member write scope for the first run' {
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+    It 'requests the group-member and directory role scopes for the later run' {
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $request = @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' }) | Select-Object -First 1
         @($request.Body.scope -split ' ') | Should -Contain 'GroupMember.ReadWrite.All'
@@ -3174,21 +3198,21 @@ Context 'The first run: Admin User Group membership' {
         Add-AdminGroupMembership
         Set-SqlAdministrator -ObjectId $script:Ids.DeploySpId
         Mock Remove-MgGroupMemberByRef { throw (New-ForbiddenException) }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         (Get-SummaryResult 'Admin User Group membership') | Should -Match '^FAILED: insufficient privileges'
         @((Get-FakeGroup -Id $script:Ids.AdminGroup).members | ForEach-Object { $_.id }) | Should -Contain $script:Ids.DeploySpId
     }
 }
 
-Context 'The first run: declared set or nothing' {
+Context 'The later run: declared set or nothing' {
     BeforeEach {
         Add-CompliantDirectoryState
         Add-CompliantAzureState
     }
 
     It 'reports nothing undeclared on a compliant environment' {
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Other Azure roles' | Should -Be 'None'
         Get-SummaryResult 'Other directory roles' | Should -Be 'None'
@@ -3199,7 +3223,7 @@ Context 'The first run: declared set or nothing' {
 
     It 'removes every undeclared Azure role, directory role and group membership and keeps the declared set' {
         Add-UndeclaredState
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         foreach ($item in @('Other Azure role: Azure AI Developer on resource group', 'Other Azure role: Foundry User on resource group',
                 'Other Azure role: Reader on resource group', 'Other Azure role: Search Index Data Reader on resource group',
@@ -3220,7 +3244,7 @@ Context 'The first run: declared set or nothing' {
 
     It 'reports every undeclared item as a pending removal in a verify-only run and writes nothing' {
         Add-UndeclaredState
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); Verify = $true }
         $code | Should -Be 1
         Get-SummaryResult 'Other Azure role: Foundry User on resource group' | Should -Be 'WOULD REMOVE'
         Get-SummaryResult 'Other directory role: Agent ID Administrator' | Should -Be 'WOULD REMOVE'
@@ -3232,7 +3256,7 @@ Context 'The first run: declared set or nothing' {
         Add-UndeclaredState
         Mock New-AzRoleAssignment { param($RoleDefinitionName) if ($RoleDefinitionName -eq 'Monitoring Contributor') { throw 'AuthorizationFailed: The client does not have authorization to perform action' }; $script:Tenant.AzRoleAssignments += @{ ObjectId = $ObjectId; RoleDefinitionName = $RoleDefinitionName; Scope = $Scope }; Add-Write "NEW az role $RoleDefinitionName $Scope" }
         $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -ne 'Monitoring Contributor' })
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         Get-SummaryResult 'Other Azure roles' | Should -Be 'SKIPPED: the deployment identity does not hold all nine Azure roles'
         Get-SummaryResult 'Other directory roles' | Should -Be 'SKIPPED: the deployment identity does not hold all nine Azure roles'
@@ -3245,10 +3269,130 @@ Context 'The first run: declared set or nothing' {
     It 'reports a refused group removal and continues' {
         Add-UndeclaredState
         Mock Remove-MgGroupMemberByRef { throw (New-ForbiddenException) }
-        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         (Get-SummaryResult 'Other group memberships') | Should -Match '^FAILED: insufficient privileges'
         Get-SummaryResult 'Other directory role: Agent ID Administrator' | Should -Be 'Removed'
+    }
+}
+
+Context 'The first run removes nothing (project#3170)' {
+    It 'keeps every wider grant on a legacy environment and assigns the nine roles' {
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
+        Add-UndeclaredState
+        Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.Read.All'
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        @($script:Writes | Where-Object { $_ -like 'REMOVE*' }) | Should -HaveCount 0
+        @($script:Writes | Where-Object { $_ -like 'NEW az role*' }) | Should -HaveCount 9
+        @($script:Summary | Where-Object { $_.Item -match 'to remove|Application Administrator role|Admin User Group membership|^Other ' }) | Should -HaveCount 0
+        @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $script:Ids.AppAdminRole })[0].members | Should -Contain $script:Ids.DeploySpId
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.Scope -eq $script:SubScope -and $_.RoleDefinitionName -eq 'Contributor' }) | Should -HaveCount 1
+        @((Get-FakeSp -Id $script:Ids.DeploySpId).appRoleAssignments | ForEach-Object { $_.AppRoleId }) | Should -Contain $script:AppRoleIds['Application.Read.All']
+        @((Get-FakeGroup -Id $script:Ids.DevTeamGroup).members | ForEach-Object { $_.id }) | Should -Contain $script:Ids.DeploySpId
+        Get-SummaryResult 'Onboarding kit version tag' | Should -Be "Set: $script:KitVersion"
+        ($script:Console -join "`n") | Should -Match 'The first run removes nothing'
+        Should -Invoke Remove-AzRoleAssignment -Times 0
+        Should -Invoke Remove-MgDirectoryRoleMemberDirectoryObjectByRef -Times 0
+        Should -Invoke Remove-MgServicePrincipalAppRoleAssignment -Times 0
+        Should -Invoke Remove-MgGroupMemberByRef -Times 0
+    }
+
+    It 'then the later run removes exactly that wider access' {
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
+        Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.Read.All'
+        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $script:Writes = @()
+        $script:Summary = @()
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -Be 'Removed'
+        Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'Removed'
+        Get-SummaryResult 'Application Administrator role' | Should -Be 'Removed'
+        Get-SummaryResult 'Admin User Group membership' | Should -Match '^HELD'
+        Get-SummaryResult 'Onboarding kit version tag' | Should -Be "Already set: $script:KitVersion"
+        @($script:Writes | Where-Object { $_ -like 'NEW az role*' }) | Should -HaveCount 0
+        ($script:Console -join "`n") | Should -Match 'The later run is complete'
+        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentAccess_PostWindow_*.json')
+        $files | Should -HaveCount 1
+    }
+
+    It 'needs SubscriptionId and ResourceGroupName for the later run with -LaterRun' {
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile -Remove @('SubscriptionId')) }
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'The later run with -LaterRun needs SubscriptionId'
+        Should -Invoke Connect-MgGraph -Times 0
+    }
+
+    It 'applies a grants file and nothing else without -LaterRun' {
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
+        Add-CompliantExchangeState
+        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
+        Should -Invoke Connect-AzAccount -Times 0
+        @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $script:Ids.AppAdminRole })[0].members | Should -Contain $script:Ids.DeploySpId
+        Get-SummaryResult 'Application Administrator role' | Should -BeNullOrEmpty
+        ($script:Console -join "`n") | Should -Match 'This run applies the grants that the grants files list'
+    }
+}
+
+Context 'Log file and summary file on every exit (project#3170)' {
+    It 'writes the log file and the summary file when an input is wrong, before contacting anything' {
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Remove @('TenantId')) }
+        $code | Should -Be 1
+        Should -Invoke Connect-MgGraph -Times 0
+        $logs = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'NeologikEnvironmentAccess_*.log')
+        $logs | Should -HaveCount 1
+        $log = Get-Content -LiteralPath $logs[0].FullName -Raw
+        $log | Should -Match "onboarding kit $([regex]::Escape($script:KitVersion))"
+        $log | Should -Match '\[Error\] .*TenantId'
+        $log | Should -Match '\[ActionRequired\]'
+        $log | Should -Match '\[Summary\] Run: FAILED: an input is wrong'
+        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentAccess_*.json')
+        $files | Should -HaveCount 1
+        $json = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
+        $json.exitReason | Should -Match '^an input is wrong'
+        $json.logFile | Should -Be $logs[0].FullName
+        $json.kitVersion | Should -Be $script:KitVersion
+        $json.attentionCount | Should -Be 1
+    }
+
+    It 'writes the summary file and the log file when the sign-in to Microsoft Graph fails' {
+        Mock Connect-MgGraph { throw 'AADSTS50076: multi-factor authentication is required' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentAccess_PreWindow_*.json')
+        $files | Should -HaveCount 1
+        $json = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
+        $json.exitReason | Should -Match 'sign-in to Microsoft Graph did not complete'
+        $log = Get-Content -LiteralPath $json.logFile -Raw
+        $log | Should -Match 'AADSTS50076'
+        $log | Should -Match 'Neologik environment access: first run'
+    }
+
+    It 'records a failed Microsoft Graph request with its status and request id in the log file' {
+        Add-CompliantPreWindowState
+        $script:Faults += @{ Match = 'GET /applications$'; Status = 403; Code = 'Authorization_RequestDenied'; Message = 'Insufficient privileges'; Remaining = 1; Headers = @{ 'request-id' = @('req-0001') } }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        $logs = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'NeologikEnvironmentAccess_*.log')
+        $logs | Should -HaveCount 1
+        $log = Get-Content -LiteralPath $logs[0].FullName -Raw
+        $log | Should -Match '\[Graph\] GET .*/applications.* returned HTTP 403\. request-id req-0001\. .*Authorization_RequestDenied: Insufficient privileges'
+        $log | Should -Match 'Step 1a of 5'
+        $log | Should -Match 'SUMMARY'
+        $log | Should -Match '\[Summary\] Agent identity blueprint: FAILED'
+    }
+
+    It 'continues without a log file when no folder accepts one' {
+        Mock Get-NeologikSummaryDirectory { @((Join-Path $TestDrive 'does-not-exist')) }
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        ($script:Console -join "`n") | Should -Match 'could not create the log file'
+        ($script:Console -join "`n") | Should -Match 'could not write the summary file to any folder'
     }
 }
 
