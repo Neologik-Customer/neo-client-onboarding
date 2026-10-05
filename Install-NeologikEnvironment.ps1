@@ -22,7 +22,7 @@
     7. The script writes a configuration file and a log.
 
     README.md describes how to run the script.
-    QUICK-REFERENCE.md lists each change and each permission.
+    docs\QUICK-REFERENCE.md lists each change and each permission.
 
 .PARAMETER OrganizationCode
     The organisation code of three characters, for example 'abc'. Without this
@@ -4089,7 +4089,7 @@ function Export-ConfigurationData {
         Write-Host "  2. Check that the Key Vault $($script:ConfigData['KeyVault'].Name) holds the client secret of the deployment identity"
         Write-Host "     Secret name: $($script:ConfigData['KeyVault'].SecretName)"
         Write-Host "  3. Provide your TLS certificate by ONE of two methods."
-        Write-Host "     PFX-CERT-GUIDE.md describes how to create the .pfx file."
+        Write-Host "     docs\PFX-CERT-GUIDE.md describes how to create the .pfx file."
         Write-Host "     Method 1: import the .pfx file into the Key Vault as a certificate."
         Write-Host "       In the Azure portal, portal.azure.com, open the Key Vault"
         Write-Host "       '$($script:ConfigData['KeyVault'].Name)', then Certificates, then Generate/Import."

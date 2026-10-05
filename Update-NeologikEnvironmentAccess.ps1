@@ -7,7 +7,7 @@
     Administrator runs the script.
 
 .DESCRIPTION
-    ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md describes the script in full.
+    docs\ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md describes the script in full.
 
     The script reads the current state before each change. On an environment that
     already holds the correct access, the script changes nothing. A Global

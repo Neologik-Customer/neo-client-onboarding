@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the onboarding script, `Install-NeologikEnvironment.ps1`, in detail. The reader is the administrator who runs the onboarding script and needs more detail than [README.md](README.md) gives.
+This document describes the onboarding script, `Install-NeologikEnvironment.ps1`, in detail. The reader is the administrator who runs the onboarding script and needs more detail than [README.md](../README.md) gives.
 
 | Subject | Section |
 |---|---|

@@ -1624,7 +1624,7 @@ Context 'The first run on a compliant environment' {
     }
 
     It 'declares the kit version the version history opens with' {
-        $history = Get-Content -Raw (Join-Path (Split-Path -Parent $script:ScriptPath) 'VERSION_HISTORY.md')
+        $history = Get-Content -Raw (Join-Path (Split-Path -Parent $script:ScriptPath) 'docs' 'VERSION_HISTORY.md')
         $top = [regex]::Match($history, '(?m)^## Version (\d+\.\d+\.\d+)').Groups[1].Value
         $script:KitVersion | Should -Be "v$top"
     }
