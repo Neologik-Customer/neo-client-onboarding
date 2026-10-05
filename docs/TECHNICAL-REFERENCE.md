@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the onboarding script, `Install-NeologikEnvironment.ps1`, in detail. The reader is the administrator who runs the onboarding script and needs more detail than [README.md](README.md) gives.
+This document describes the onboarding script, `Install-NeologikEnvironment.ps1`, in detail. The reader is the administrator who runs the onboarding script and needs more detail than [README.md](../README.md) gives.
 
 | Subject | Section |
 |---|---|
@@ -16,8 +16,8 @@ This document describes the onboarding script, `Install-NeologikEnvironment.ps1`
 
 | Item | Value |
 |---|---|
-| Version of the onboarding script | v5.0.7 |
-| Version of the onboarding kit | v5.0.13 |
+| Version of the onboarding script | v5.0.9 |
+| Version of the onboarding kit | v5.0.14 |
 
 The onboarding kit has a version, and each script has a separate version. The version of the onboarding kit follows the version of the Neologik Platform. The version of a script changes when the script changes.
 
@@ -293,7 +293,7 @@ The onboarding script stores the client secret in the Key Vault, as the secret `
 
 | Scope | What the deployment identity holds |
 |---|---|
-| Subscription | Reader and Cost Management Contributor |
+| Subscription | Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning two roles: Reader and AppGw for Containers Configuration Manager |
 | Resource group | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator |
 | Microsoft Graph application permissions | `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Security groups | No membership |

@@ -7,7 +7,7 @@
     Administrator runs the script.
 
 .DESCRIPTION
-    ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md describes the script in full.
+    docs\ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md describes the script in full.
 
     The script reads the current state before each change. On an environment that
     already holds the correct access, the script changes nothing. A Global
@@ -126,13 +126,18 @@
       'Neologik'. The script does not change those application registrations.
 
     Step 5. The Azure roles of the deployment identity.
-      The script confirms that the deployment identity holds nine Azure roles:
-      seven roles on the resource group and two roles on the subscription. The two
-      roles on the subscription are Reader and Cost Management Contributor. The
-      deployment uses Cost Management Contributor for the daily cost report. The
-      script assigns a role that is absent and removes nothing.
+      The script confirms that the deployment identity holds ten Azure roles:
+      seven roles on the resource group and three roles on the subscription. The
+      roles on the subscription are Reader, Cost Management Contributor and Role
+      Based Access Control Administrator limited to two roles. The deployment uses
+      Cost Management Contributor for the daily cost report. The limited role lets
+      the deployment assign Reader and AppGw for Containers Configuration Manager
+      to the identity of the ingress controller of a secure environment, and no
+      other role. The script assigns a role that is absent and removes nothing.
+      When the limited role is already held without the limit, the first run
+      reports it and the later run applies the limit.
 
-      When the deployment identity holds all nine roles, the script records the
+      When the deployment identity holds all ten roles, the script records the
       version of the onboarding kit on the resource group, in the tag
       NeologikOnboardingKit.
 
@@ -174,7 +179,7 @@
 
     Step 8. Permission reduction, with -LaterRun.
       The script first confirms the two Microsoft Graph application permissions
-      that the deployment identity keeps, and the nine Azure roles of step 5. The
+      that the deployment identity keeps, and the ten Azure roles of step 5. The
       script removes nothing unless the deployment identity holds all of them.
       The script then removes the wider access from the deployment identity.
         - Seven Microsoft Graph application permissions: Application.Read.All,
@@ -538,6 +543,25 @@ $script:RequiredSubRoles = @(
     'Cost Management Contributor'
 )
 
+# The third role on the subscription: Role Based Access Control Administrator, limited
+# by a condition to two roles. The deployment runs the ingress controller of a secure
+# environment with Application Gateway for Containers. Microsoft requires the identity
+# of that controller to hold Reader on the resource group that Azure Kubernetes
+# Service creates for the nodes of the cluster, which is outside the resource group of
+# the environment, and AppGw for Containers Configuration Manager on the resource
+# group of the environment. The condition lets the deployment identity assign those
+# two roles and no other role, and remove only those two.
+# Install-NeologikEnvironment.ps1 assigns the same role with the same condition.
+$script:LimitedSubRole = 'Role Based Access Control Administrator'
+$script:LimitedSubRoleId = 'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
+# Reader, then AppGw for Containers Configuration Manager.
+$script:LimitedSubRoleAssignableIds = @(
+    'acdd72a7-3385-48ef-bd42-f606fba81ae7',
+    'fbc52c3f-28ad-4303-a892-8a056630b8f1'
+)
+$script:LimitedSubRoleConditionVersion = '2.0'
+$script:LimitedSubRoleCondition = ("((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/write'}})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}})) AND ((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/delete'}})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}}))" -f ($script:LimitedSubRoleAssignableIds -join ', '))
+
 # The roles on the subscription that step 4 removes.
 # Step 4 removes the roles only when the deployment identity holds the roles above.
 $script:LegacySubRoles = @('Contributor', 'User Access Administrator')
@@ -624,7 +648,7 @@ $script:State = @{}
 # The version of the onboarding kit. The script records the version on the resource
 # group, in the tag NeologikOnboardingKit, at the end of each run that confirms the
 # Azure roles of the deployment identity.
-$script:KitVersion = 'v5.0.13'
+$script:KitVersion = 'v5.0.14'
 # The log file of the run. The script writes every message to the log file from the
 # first line. The reason a run ended before its steps, for the summary file.
 $script:LogFile = $null
@@ -3922,6 +3946,90 @@ function Set-NeologikAzureRoleAssignment {
     }
 }
 
+function ConvertTo-NeologikConditionKey {
+    # Two conditions are the same condition when they differ only in spacing and case.
+    param([string]$Condition)
+    return (($Condition -replace '\s', '')).ToLowerInvariant()
+}
+
+function Set-NeologikLimitedAzureRoleAssignment {
+    <#
+    Assigns the role Role Based Access Control Administrator to the deployment identity
+    on the subscription, with the condition that limits the roles the deployment
+    identity may assign. An assignment that carries the condition is reported, not
+    recreated. An assignment without the condition is wider than the deployment needs:
+    the first run reports it and keeps it, because the first run removes nothing; the
+    later run, with -ApplyLimit, writes the condition onto the assignment. Returns $true
+    when the deployment identity holds the role.
+    #>
+    param([string]$Scope, [string]$Label, [switch]$ApplyLimit)
+    $deploySp = $script:State.DeploySp
+    $roleName = $script:LimitedSubRole
+    $item = "$Label role: $roleName (limited)"
+    $wanted = ConvertTo-NeologikConditionKey $script:LimitedSubRoleCondition
+    try {
+        $assignments = @(Get-AzRoleAssignment -ObjectId $deploySp.Id -RoleDefinitionName $roleName -Scope $Scope -ErrorAction Stop |
+            Where-Object { $_.Scope -eq $Scope })
+        $limited = @($assignments | Where-Object { (ConvertTo-NeologikConditionKey ([string](Get-NeologikProperty $_ 'Condition' ''))) -eq $wanted })
+        if ($limited.Count -gt 0) {
+            Write-Log "  $item role '$roleName': already assigned with the limit" -Level Success
+            Add-Summary $item 'Already assigned'
+            return $true
+        }
+        if ($assignments.Count -gt 0) {
+            if (-not $ApplyLimit) {
+                Write-Log "  $item role '$roleName': assigned without the limit. The later run applies the limit" -Level Warning
+                Add-Summary $item 'Already assigned without the limit. The later run applies the limit'
+                return $true
+            }
+            if (Test-NeologikVerifyOnly) {
+                Add-NeologikPendingChange $item 'APPLY THE LIMIT'
+                return $true
+            }
+            $assignment = $assignments[0]
+            $assignment | Add-Member -NotePropertyName Condition -NotePropertyValue $script:LimitedSubRoleCondition -Force
+            $assignment | Add-Member -NotePropertyName ConditionVersion -NotePropertyValue $script:LimitedSubRoleConditionVersion -Force
+            Invoke-NeologikWrite -Command 'Set-AzRoleAssignment' -Parameters @{ InputObject = $assignment } | Out-Null
+            Write-Log "  $item role '$roleName': limit applied" -Level Success
+            Add-Summary $item 'Limit applied'
+            return $true
+        }
+        if (Test-NeologikVerifyOnly) {
+            Add-NeologikPendingChange $item 'ASSIGN'
+            return $true
+        }
+        try {
+            Invoke-NeologikWrite -Command 'New-AzRoleAssignment' -Parameters @{
+                ObjectId         = $deploySp.Id
+                RoleDefinitionId = $script:LimitedSubRoleId
+                Scope            = $Scope
+                Condition        = $script:LimitedSubRoleCondition
+                ConditionVersion = $script:LimitedSubRoleConditionVersion
+            } | Out-Null
+        }
+        catch {
+            if ((Get-NeologikErrorText $_) -match '(?i)RoleAssignmentExists|already exists') {
+                Write-Log "  $item role '$roleName': already assigned" -Level Success
+                Add-Summary $item 'Already assigned'
+                return $true
+            }
+            throw
+        }
+        Write-Log "  $item role '$roleName': assigned with the limit" -Level Success
+        Add-Summary $item 'Assigned'
+        return $true
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        if ($reason -match '(?i)AuthorizationFailed|does not have authorization|Forbidden') {
+            $reason = 'insufficient privileges. The signed-in account needs Owner or User Access Administrator on the subscription'
+        }
+        Write-Log "  $item role '$roleName': FAILED. $reason" -Level Error
+        Add-Summary $item "FAILED: $reason"
+        return $false
+    }
+}
+
 function Remove-NeologikAzureRoleAssignment {
     param([string]$RoleName, [string]$Scope, [string]$Label)
     $deploySp = $script:State.DeploySp
@@ -4078,7 +4186,7 @@ function Test-NeologikDeclaredAzureRole {
     # Returns whether the role assignment belongs to the declared set.
     param([string]$RoleName, [string]$Scope, [string]$RgScope, [string]$SubScope)
     if ($Scope -eq $RgScope) { return [bool]($script:RequiredRgRoles -contains $RoleName) }
-    if ($Scope -eq $SubScope) { return [bool]($script:RequiredSubRoles -contains $RoleName) }
+    if ($Scope -eq $SubScope) { return [bool](($script:RequiredSubRoles + $script:LimitedSubRole) -contains $RoleName) }
     if ($Scope.StartsWith("$RgScope/", [System.StringComparison]::OrdinalIgnoreCase)) {
         return [bool]($script:DeclaredResourceRoles -contains $RoleName)
     }
@@ -4088,8 +4196,8 @@ function Test-NeologikDeclaredAzureRole {
 function Remove-NeologikUndeclaredAzureRole {
     # Step 4e: the function removes every Azure role assignment of the deployment
     # identity in the subscription that is outside the declared set. The declared set is
-    # the seven roles on the resource group, the two roles on the subscription and the
-    # declared role below the resource group.
+    # the seven roles on the resource group, the three roles on the subscription and
+    # the declared role below the resource group.
     $state = $script:State
     $deploySp = $state.DeploySp
     $rgScope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)"
@@ -4238,12 +4346,14 @@ function Set-NeologikKitVersionTag {
 function Set-NeologikDeploymentAzureRole {
     <#
     Step 5 of the first run, and the first part of the permission reduction of the
-    later run: the nine Azure roles of the deployment identity, seven on the resource
-    group and two on the subscription. The function assigns a role that is absent and
-    removes nothing. Returns $true when the deployment identity holds all nine roles.
-    The function records in the state whether the sign-in to Azure succeeded.
+    later run: the ten Azure roles of the deployment identity, seven on the resource
+    group and three on the subscription. The function assigns a role that is absent and
+    removes nothing. With -ApplyLimit, the later run, the function writes the limit onto
+    a Role Based Access Control Administrator assignment on the subscription that lacks
+    it. Returns $true when the deployment identity holds all ten roles. The function
+    records in the state whether the sign-in to Azure succeeded.
     #>
-    param([Parameter(Mandatory)][string]$StepLabel)
+    param([Parameter(Mandatory)][string]$StepLabel, [switch]$ApplyLimit)
     $state = $script:State
     $state.AzureConnected = $false
     Write-Log $StepLabel -Level Info
@@ -4251,6 +4361,7 @@ function Set-NeologikDeploymentAzureRole {
     $azureItems = @()
     foreach ($roleName in $script:RequiredRgRoles) { $azureItems += "Resource group role: $roleName" }
     foreach ($roleName in $script:RequiredSubRoles) { $azureItems += "Subscription role: $roleName" }
+    $azureItems += "Subscription role: $($script:LimitedSubRole) (limited)"
     if (-not (Import-NeologikModuleSet -Names @('Az.Accounts', 'Az.Resources', 'Az.Sql') -MinimumVersion ([version]'2.0.0') -Independent `
                 -InstallHint 'Install-Module Az.Accounts, Az.Resources, Az.Sql -Scope CurrentUser -Force')) {
         foreach ($item in $azureItems) { Add-Summary $item 'SKIPPED: the Az modules are not available' }
@@ -4272,23 +4383,24 @@ function Set-NeologikDeploymentAzureRole {
         if (-not (Set-NeologikAzureRoleAssignment -RoleName $roleName -Scope $rgScope -Label 'Resource group')) { $narrowComplete = $false }
     }
 
-    # The two roles on the subscription.
+    # The three roles on the subscription. The limited role comes last.
     foreach ($roleName in $script:RequiredSubRoles) {
         if (-not (Set-NeologikAzureRoleAssignment -RoleName $roleName -Scope $subScope -Label 'Subscription')) { $narrowComplete = $false }
     }
+    if (-not (Set-NeologikLimitedAzureRoleAssignment -Scope $subScope -Label 'Subscription' -ApplyLimit:$ApplyLimit)) { $narrowComplete = $false }
     return $narrowComplete
 }
 
 function Invoke-NeologikPermissionReduction {
     <#
     The last step of the later run: the permission reduction. The function first
-    confirms the nine Azure roles. The function removes nothing unless the deployment
-    identity holds all nine roles. The first run removes nothing: the deployment
+    confirms the ten Azure roles. The function removes nothing unless the deployment
+    identity holds all ten roles. The first run removes nothing: the deployment
     identity keeps its wider access until the later run, so that Neologik can repair
     a failed first run or a failed deployment with that access.
     #>
     $state = $script:State
-    $held = Set-NeologikDeploymentAzureRole -StepLabel 'Step 8 of 8: the permission reduction of the deployment identity'
+    $held = Set-NeologikDeploymentAzureRole -StepLabel 'Step 8 of 8: the permission reduction of the deployment identity' -ApplyLimit
     $reductionItems = @()
     foreach ($roleName in $script:LegacySubRoles) { $reductionItems += "Subscription role to remove: $roleName" }
     $reductionItems += @('Application Administrator role', 'Admin User Group membership', 'Other Azure roles', 'Other directory roles', 'Other group memberships')
@@ -4297,8 +4409,8 @@ function Invoke-NeologikPermissionReduction {
         return
     }
     if (-not $held) {
-        Write-Log '  The deployment identity does not hold all nine Azure roles. The script removes no access' -Level Warning
-        foreach ($item in $reductionItems) { Add-Summary $item 'SKIPPED: the deployment identity does not hold all nine Azure roles' }
+        Write-Log '  The deployment identity does not hold all ten Azure roles. The script removes no access' -Level Warning
+        foreach ($item in $reductionItems) { Add-Summary $item 'SKIPPED: the deployment identity does not hold all ten Azure roles' }
         return
     }
 

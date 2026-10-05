@@ -110,7 +110,7 @@ The onboarding script treats your deployment service principal exactly as a depl
 
 | Item | Reason |
 |---|---|
-| Azure role assignments | The onboarding script assigns Reader and Cost Management Contributor on the subscription. The onboarding script also assigns the roles on the resource group |
+| Azure role assignments | The onboarding script assigns Reader, Cost Management Contributor and the limited Role Based Access Control Administrator on the subscription. The onboarding script also assigns the roles on the resource group |
 | API permissions and administrator consent | The onboarding script grants the two Microsoft Graph application permissions: `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Group membership | The deployment service principal is a member of no group |
 
