@@ -30,7 +30,7 @@ The onboarding script also registers the Azure resource providers that the Neolo
 | Subject | Position |
 |---|---|
 | Resource group | The deployment identity can deploy Azure resources into one resource group |
-| Subscription | The deployment identity holds two roles: Reader and Cost Management Contributor. Neither role allows a change to an Azure resource |
+| Subscription | The deployment identity holds three roles: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning two roles. None of the three allows a change to an Azure resource. The limited role lets the deployment identity assign exactly two roles: Reader and AppGw for Containers Configuration Manager. The deployment assigns them to the identity of the ingress controller of a secure environment |
 | Microsoft Graph | The deployment identity holds two Microsoft Graph application permissions: `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Microsoft Entra ID | The deployment identity receives no directory role |
 
@@ -192,7 +192,7 @@ The deployment by Neologik creates agent identities and agent users as the agent
 | Resource providers and preview features | `Register-AzResourceProvider`, `Register-AzProviderFeature` | Subscription | The list in `resource-providers.txt`: 35 resource providers and 2 preview features |
 | Resource group | `New-AzResourceGroup`, `Update-AzTag` | Subscription | The name `rg-<solution name>`, in the Azure region that you chose, with tags. The tag `NeologikOnboardingKit` records the version of the onboarding kit. The onboarding script adds the tag and keeps your existing tags |
 | Roles of the Admin User Group | `New-AzRoleAssignment` | Resource group | The thirteen roles in the table below. No role on the subscription |
-| Roles of the deployment identity | `New-AzRoleAssignment` | Subscription | `Reader` and `Cost Management Contributor` |
+| Roles of the deployment identity | `New-AzRoleAssignment` | Subscription | `Reader`, `Cost Management Contributor`, and `Role Based Access Control Administrator` with a condition that limits the roles the deployment identity may assign to `Reader` and `AppGw for Containers Configuration Manager` |
 | Roles of the deployment identity | `New-AzRoleAssignment` | Resource group | `Contributor`<br>`Key Vault Certificates Officer`<br>`Key Vault Secrets Officer`<br>`Storage Blob Data Contributor`<br>`Azure Kubernetes Service RBAC Cluster Admin`<br>`Monitoring Contributor`<br>`Role Based Access Control Administrator` |
 | Key Vault | `New-AzKeyVault`, `Update-AzKeyVault` | Resource group | The name `kv<short name>`, or the name that you give. Azure role-based access control, set at creation. Tags. The onboarding script does not change the settings of an existing Key Vault |
 | Role of the administrator for the secrets | `New-AzRoleAssignment` | Resource group | `Key Vault Secrets Officer` for the signed-in administrator. The onboarding script needs the role to store the client secrets |
@@ -231,7 +231,7 @@ Three further points apply to the Azure writes.
 
 | Kind | What the deployment identity holds |
 |---|---|
-| Azure roles | `Reader` and `Cost Management Contributor` on the subscription. The seven roles on the resource group listed under [Azure writes](#azure-writes) |
+| Azure roles | `Reader`, `Cost Management Contributor` and the limited `Role Based Access Control Administrator` on the subscription. The seven roles on the resource group listed under [Azure writes](#azure-writes) |
 | Microsoft Graph application permissions | `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All`. The next table describes each permission |
 | Microsoft Entra directory roles | None |
 | Membership of security groups | None |
@@ -358,7 +358,7 @@ The onboarding script writes a checkpoint at these points:
 
 | Scope | Who holds the roles or the permissions | Roles or permissions |
 |---|---|---|
-| Subscription | Deployment identity | Reader and Cost Management Contributor |
+| Subscription | Deployment identity | Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning two roles: Reader and AppGw for Containers Configuration Manager |
 | Resource group | Deployment identity | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator |
 | Resource group | Script runner managed identity. The deployment runs scripts inside Azure as this managed identity | Reader<br>Key Vault Secrets Officer<br>Azure Bot Service Contributor Role |
 | Resource group | The group `Neologik Admin User Group - <short name>` | The thirteen roles listed under [Azure writes](#azure-writes) |

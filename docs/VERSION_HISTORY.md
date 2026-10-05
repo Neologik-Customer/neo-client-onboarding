@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.0.14](#version-5014)
 2. [Version 5.0.13](#version-5013)
 2. [Version 5.0.12](#version-5012)
 2. [Version 5.0.11](#version-5011)
@@ -33,11 +34,23 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.0.5 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.13 | Confirms the access that the deployment identity of an existing environment needs for version 5 of the Neologik Platform, and reduces the access in the later run. Applies the grants for agents and Apps that work unattended |
+| `Install-NeologikEnvironment.ps1` | v5.0.8 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.14 | Confirms the access that the deployment identity of an existing environment needs for version 5 of the Neologik Platform, and reduces the access in the later run. Applies the grants for agents and Apps that work unattended |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.0.14
+
+**Date**: 2026-10-05
+
+| Item | Change |
+|---|---|
+| `Update-NeologikEnvironmentAccess.ps1` | Step 5 assigns a third role on the subscription: Role Based Access Control Administrator, limited by a condition to two roles, Reader and AppGw for Containers Configuration Manager. The deployment needs the role for the identity of the ingress controller of a secure environment. That identity needs Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster. That resource group is outside the resource group of the environment. The deployment identity can assign those two roles and no other. Step 5 and step 8 now confirm ten roles |
+| `Update-NeologikEnvironmentAccess.ps1` | The deployment identity may already hold the role on the subscription without the limit. The first run then reports the assignment and keeps it. The later run writes the limit onto the assignment |
+| `Update-NeologikEnvironmentAccess.ps1` | The environment access script records the version `v5.0.14` on the resource group |
+| `Install-NeologikEnvironment.ps1` | Version v5.0.8. The onboarding script assigns the same limited role on the subscription, and records the version `v5.0.14` on the resource group |
+| Documents | The documents list the limited role and the reason for it |
 
 ## Version 5.0.13
 

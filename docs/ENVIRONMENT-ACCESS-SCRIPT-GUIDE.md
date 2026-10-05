@@ -126,14 +126,16 @@ The deployment replaces the client secrets of the Platform Sign-in application a
 
 ### Step 5: The Azure roles of the deployment identity
 
-The environment access script confirms that the deployment identity holds nine Azure roles. The environment access script assigns a role that is absent and removes nothing.
+The environment access script confirms that the deployment identity holds ten Azure roles. The environment access script assigns a role that is absent and removes nothing.
 
 | Scope | Roles |
 |---|---|
 | Resource group | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator |
-| Subscription | Reader<br>Cost Management Contributor |
+| Subscription | Reader<br>Cost Management Contributor<br>Role Based Access Control Administrator, limited to assigning two roles: Reader and AppGw for Containers Configuration Manager |
 
-When the deployment identity holds all nine roles, the environment access script records the version of the onboarding kit on the resource group. The record is the tag `NeologikOnboardingKit`. The environment access script keeps your other tags and writes the tag only when the value differs. The Neologik Platform reads the tag before an upgrade.
+The deployment runs the ingress controller of a secure environment with Application Gateway for Containers. Microsoft requires the identity of that controller to hold two roles. The first is Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster. That resource group is outside the resource group of the environment. The second is AppGw for Containers Configuration Manager on the resource group of the environment. The condition on the role lets the deployment identity assign those two roles and no other role. The condition is Azure's delegation of role assignment management with conditions. The deployment identity may already hold Role Based Access Control Administrator on the subscription without the condition. The first run then reports `Already assigned without the limit` and keeps the role, because the first run removes nothing. The later run writes the condition onto that assignment and reports `Limit applied`.
+
+When the deployment identity holds all ten roles, the environment access script records the version of the onboarding kit on the resource group. The record is the tag `NeologikOnboardingKit`. The environment access script keeps your other tags and writes the tag only when the value differs. The Neologik Platform reads the tag before an upgrade.
 
 The first run changes nothing on a managed identity, on a security group or on a user. The first run removes no role, no permission and no membership.
 
@@ -169,7 +171,7 @@ When your Exchange Online organisation has never been customised, the environmen
 
 ### Step 8: Permission reduction, with `-LaterRun`
 
-The environment access script first confirms the two Microsoft Graph application permissions that the deployment identity keeps, and the nine Azure roles of step 5. The environment access script assigns a role or grants a permission that is absent. The environment access script removes the wider access only when the deployment identity holds all of them. When the environment access script cannot assign one of the nine roles, the environment access script removes nothing. The deployment never loses access part way through the run.
+The environment access script first confirms the two Microsoft Graph application permissions that the deployment identity keeps, and the ten Azure roles of step 5. The environment access script assigns a role or grants a permission that is absent. The environment access script writes the limit onto a Role Based Access Control Administrator assignment on the subscription that lacks it. The environment access script removes the wider access only when the deployment identity holds all of them. When the environment access script cannot assign one of the ten roles, the environment access script removes nothing. The deployment never loses access part way through the run.
 
 | What the environment access script removes | Condition |
 |---|---|
@@ -177,7 +179,7 @@ The environment access script first confirms the two Microsoft Graph application
 | Contributor and User Access Administrator on the subscription | The deployment identity holds the role |
 | The directory role Application Administrator | The deployment identity holds the role |
 | The membership of the group `Neologik Admin User Group - <short name>` | The deployment identity is a member, and each SQL server in the resource group names the deployment identity as the Microsoft Entra administrator. Until then the environment access script keeps the membership, because the membership is the only access of the deployment identity to SQL. The summary then reads `HELD` |
-| Every other Azure role in the subscription | The role is outside the nine roles of step 5. The environment access script keeps the role `Cognitive Services Content Understanding Contributor` on a resource in the resource group |
+| Every other Azure role in the subscription | The role is outside the ten roles of step 5. The environment access script keeps the role `Cognitive Services Content Understanding Contributor` on a resource in the resource group |
 | Every other directory role | The deployment identity holds the role |
 | Every other group membership | The deployment identity is a member |
 
