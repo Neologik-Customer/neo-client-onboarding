@@ -17,7 +17,7 @@ This document describes the onboarding script, `Install-NeologikEnvironment.ps1`
 | Item | Value |
 |---|---|
 | Version of the onboarding script | v5.0.7 |
-| Version of the onboarding kit | v5.0.12 |
+| Version of the onboarding kit | v5.0.13 |
 
 The onboarding kit has a version, and each script has a separate version. The version of the onboarding kit follows the version of the Neologik Platform. The version of a script changes when the script changes.
 
