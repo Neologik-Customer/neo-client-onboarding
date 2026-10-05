@@ -60,6 +60,12 @@ BeforeAll {
     function New-ManagementRoleAssignment { [CmdletBinding()] param($Name, $App, $Role, $CustomResourceScope) }
     function Remove-ManagementRoleAssignment { [CmdletBinding(SupportsShouldProcess)] param($Identity) }
     function Test-ServicePrincipalAuthorization { [CmdletBinding()] param($Identity, $Resource) }
+    # Az.Storage, for the upload of the files of the run (project#3171).
+    function Get-AzStorageAccount { [CmdletBinding()] param($ResourceGroupName, $Name) }
+    function New-AzStorageContext { [CmdletBinding()] param($StorageAccountName, [switch]$UseConnectedAccount) }
+    function Get-AzStorageContainer { [CmdletBinding()] param($Name, $Context) }
+    function New-AzStorageContainer { [CmdletBinding()] param($Name, $Context, $Permission) }
+    function Set-AzStorageBlobContent { [CmdletBinding()] param($File, $Container, $Blob, $Context, [switch]$Force) }
 
     # The script under test: dot-sourced, so its functions are defined here
     # and its guarded main entry does not run.
@@ -773,6 +779,17 @@ BeforeAll {
     Mock Test-NeologikDesktop { $script:Desktop }
     Mock Get-NeologikSummaryDirectory { @($script:SummaryDirs) }
     Mock Get-NeologikGuestUsersFileDefault { $script:GuestFile }
+    # The storage account of the environment (project#3171): the first
+    # $script:UploadRefusals uploads are refused as a missing data role is.
+    Mock Get-AzStorageAccount { @($script:StorageAccounts | ForEach-Object { @{ StorageAccountName = $_ } }) }
+    Mock New-AzStorageContext { param($StorageAccountName) if ($script:UnreachableAccounts -contains $StorageAccountName) { throw "Name or service not known: $StorageAccountName.blob.core.windows.net" }; @{ StorageAccountName = $StorageAccountName } }
+    Mock Get-AzStorageContainer { param($Name) if ($script:StorageContainers -contains $Name) { @{ Name = $Name } } else { $null } }
+    Mock New-AzStorageContainer { param($Name) $script:StorageContainers += $Name; Add-Write "NEW container $Name" }
+    Mock Set-AzStorageBlobContent {
+        param($File, $Container, $Blob)
+        if ($script:UploadRefusals -gt 0) { $script:UploadRefusals--; throw 'AuthorizationPermissionMismatch: This request is not authorized to perform this operation using this permission.' }
+        $script:Uploads += "$Container/$Blob"
+    }
     Mock Invoke-NeologikGraphRaw { param($Method, $Uri, $Body) Invoke-FakeGraph -Method $Method -Uri $Uri -Body $Body }
     Mock Connect-MgGraph { $script:Connected = $true }
     Mock Get-MgContext { [pscustomobject]@{ TenantId = $script:ContextTenant; Account = 'admin@contoso.com'; Scopes = @($script:ContextScopes) } }
@@ -985,6 +1002,11 @@ BeforeEach {
     $script:ContextScopes = @()
     $script:AzContextSubscription = $script:Ids.Subscription
     $script:SummaryDirs = @((Join-Path $TestDrive 'summary'))
+    $script:StorageContainers = @()
+    $script:StorageAccounts = @()
+    $script:UnreachableAccounts = @()
+    $script:Uploads = @()
+    $script:UploadRefusals = 0
     # NeologikGuestUsers.txt as the onboarding kit ships it: one Neologik support account.
     $script:GuestFile = Join-Path $TestDrive 'NeologikGuestUsers.txt'
     Set-Content -LiteralPath $script:GuestFile -Value "# Neologik support accounts`nsupport@neologik.ai`n" -Encoding UTF8
@@ -1873,7 +1895,8 @@ Context 'The first run on a compliant environment' {
         $script:SummaryDirs = @((Join-Path $TestDrive 'does-not-exist\nested'), $second)
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        @(Get-ChildItem -Path $second -Filter '*.json') | Should -HaveCount 1
+        @(Get-ChildItem -Path $second -Filter 'Neologik_EnvironmentAccess_PreWindow_*.json') | Should -HaveCount 1
+        @(Get-ChildItem -Path $second -Filter 'Neologik_EnvironmentAccess_Snapshot_Pre_*.json') | Should -HaveCount 1
         ($script:Console -join "`n") | Should -Match 'The script tries the next folder'
     }
 
@@ -2826,7 +2849,7 @@ Context 'Graph resilience' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         Get-SummaryResult 'Run' | Should -Be 'FAILED: unexpected error. something nobody anticipated'
-        @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter '*.json') | Should -HaveCount 1
+        @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentAccess_PreWindow_*.json') | Should -HaveCount 1
     }
 }
 
@@ -3144,7 +3167,7 @@ Context 'Summary and exit code' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); MailboxGrantsFile = (New-MailboxFile) }
         $code | Should -Be 1
         ($script:Console -join "`n") | Should -Match 'could not read the permissions of the deployment identity for the summary'
-        @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter '*.json') | Should -HaveCount 1
+        @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentAccess_PostWindow_*.json') | Should -HaveCount 1
     }
 }
 
@@ -3381,7 +3404,8 @@ Context 'The later run: Admin User Group membership' {
         Mock Get-NeologikAvailableModuleVersion { param($Name) switch -Wildcard ($Name) { 'Az.Accounts' { @([version]'5.5.3') } 'Az.Resources' { @([version]'10.0.0') } 'Az.Sql' { @([version]'7.1.0') } default { @([version]'2.38.0') } } }
         $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        @($script:Imports | Where-Object { $_ -like 'Az.*' }) | Should -Be @('Az.Accounts ', 'Az.Resources ', 'Az.Sql ')
+        # Az.Storage is imported for the upload of the files of the run (project#3171).
+        @($script:Imports | Where-Object { $_ -like 'Az.*' }) | Should -Be @('Az.Accounts ', 'Az.Resources ', 'Az.Sql ', 'Az.Storage ')
         Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Already assigned'
         Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not held'
     }
@@ -3590,9 +3614,157 @@ Context 'Log file and summary file on every exit (project#3170)' {
         Mock Get-NeologikSummaryDirectory { @((Join-Path $TestDrive 'does-not-exist')) }
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
-        $code | Should -Be 0
+        $code | Should -Be 1 -Because 'the snapshot file could not be written either, which needs attention'
         ($script:Console -join "`n") | Should -Match 'could not create the log file'
         ($script:Console -join "`n") | Should -Match 'could not write the summary file to any folder'
+        Get-SummaryResult 'Snapshot file' | Should -Match '^SKIPPED'
+    }
+}
+
+Context 'Snapshot, upload and the file list (project#3171)' {
+    BeforeAll {
+        function Get-SnapshotFile {
+            param([string]$Label)
+            $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter "Neologik_EnvironmentAccess_Snapshot_${Label}_*.json")
+            $files | Should -HaveCount 1
+            return (Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json)
+        }
+    }
+
+    It 'the first run writes the Pre snapshot and lists the three files' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Snapshot file' | Should -BeLike 'Written: Neologik_EnvironmentAccess_Snapshot_Pre_*'
+        $snapshot = Get-SnapshotFile -Label 'Pre'
+        $snapshot.label | Should -Be 'Pre'
+        $snapshot.run | Should -Be 'PreWindow'
+        $snapshot.kitVersion | Should -Be $script:KitVersion
+        $snapshot.deploymentIdentity.graphRoles | Should -Contain 'Application.ReadWrite.OwnedBy'
+        @($snapshot.deploymentIdentity.azureRoleAssignments | Where-Object { $_.role -eq 'Reader' }) | Should -HaveCount 1
+        $signIn = @($snapshot.applications | Where-Object { $_.appId -eq $script:Ids.SignInAppId })
+        $signIn | Should -HaveCount 1
+        $signIn[0].present | Should -BeTrue
+        $signIn[0].servicePrincipal.present | Should -BeTrue
+        @($snapshot.groups).Count | Should -BeGreaterOrEqual 3
+        @($snapshot.groups | Where-Object { $_.id -eq $script:Ids.AdminGroup })[0].memberCount | Should -Be 2
+        @($snapshot.summaryItems).Count | Should -BeGreaterThan 10
+        ($snapshot | ConvertTo-Json -Depth 8) | Should -Not -Match 'secretText'
+        $text = $script:Console -join "`n"
+        $text | Should -Match 'FILES TO SEND TO NEOLOGIK'
+        $text | Should -Match 'NeologikEnvironmentAccess_\d+_\d+\.log'
+        $text | Should -Match 'Neologik_EnvironmentAccess_PreWindow_'
+        $text | Should -Match 'Neologik_EnvironmentAccess_Snapshot_Pre_'
+        $script:Uploads | Should -HaveCount 0
+    }
+
+    It 'the later run writes the Post snapshot' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $snapshot = Get-SnapshotFile -Label 'Post'
+        $snapshot.run | Should -Be 'PostWindow'
+        @($snapshot.azure.sqlServers).Count | Should -BeGreaterOrEqual 1
+    }
+
+    It 'uploads the three files to the storage account and lists the blobs' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UploadStorageAccountName = 'sttemplateabcprd01' }
+        $code | Should -Be 0
+        $script:Uploads | Should -HaveCount 3
+        $script:Uploads | Should -Contain ('onboarding-access/' + (Split-Path -Leaf (Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentAccess_Snapshot_Pre_*.json')[0].FullName))
+        $script:Writes | Should -Contain 'NEW container onboarding-access'
+        @($script:Writes | Where-Object { $_ -like 'NEW az role Storage Blob Data Contributor*' }) | Should -HaveCount 0
+        $text = $script:Console -join "`n"
+        $text | Should -Match 'Uploaded to the storage account'
+        $text | Should -Match 'sttemplateabcprd01/onboarding-access/NeologikEnvironmentAccess_'
+    }
+
+    It 'assigns Storage Blob Data Contributor to the administrator and retries when the upload is refused' {
+        Add-CompliantPreWindowState
+        $script:UploadRefusals = 1
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UploadStorageAccountName = 'sttemplateabcprd01' }
+        $code | Should -Be 0
+        $script:Uploads | Should -HaveCount 3
+        $role = @($script:Writes | Where-Object { $_ -like 'NEW az role Storage Blob Data Contributor*' })
+        $role | Should -HaveCount 1
+        $role[0] | Should -Be "NEW az role Storage Blob Data Contributor /subscriptions/$($script:Ids.Subscription)/resourceGroups/$script:RgName/providers/Microsoft.Storage/storageAccounts/sttemplateabcprd01"
+        $script:Sleeps | Should -Contain 20
+        ($script:Console -join "`n") | Should -Match 'assigns Storage Blob Data Contributor'
+    }
+
+    It 'uploads to the storage account of the onboarding first, into its logs and json containers' {
+        Add-CompliantPreWindowState
+        $cfg = New-ConfigFile -Overrides @{ StorageAccount = @{ Name = 'stneodeployabcprduks01'; JsonContainerName = 'json'; LogsContainerName = 'logs' } }
+        $code = Invoke-Run @{ ConfigurationFile = $cfg; UploadStorageAccountName = 'sttemplateabcprd01' }
+        $code | Should -Be 0
+        $script:Uploads | Should -HaveCount 3
+        @($script:Uploads | Where-Object { $_ -like 'logs/NeologikEnvironmentAccess_*.log' }) | Should -HaveCount 1
+        @($script:Uploads | Where-Object { $_ -like 'json/Neologik_EnvironmentAccess_*.json' }) | Should -HaveCount 2
+        ($script:Console -join "`n") | Should -Match 'stneodeployabcprduks01 \(onboarding\)'
+        ($script:Console -join "`n") | Should -Not -Match 'sttemplateabcprd01 \(named\)'
+        Should -Invoke Get-AzStorageAccount -Times 0 -Because 'the configuration file names the storage account'
+    }
+
+    It 'finds the storage account of the onboarding in the resource group when the command gives no configuration file' {
+        Add-CompliantPreWindowState
+        $script:StorageAccounts = @('stfilesneoabcprd01', 'stneodeployabcprduks01', 'sttemplateabcprd01')
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName; UploadStorageAccountName = 'sttemplateabcprd01' }
+        $code | Should -Be 0
+        $script:Uploads | Should -HaveCount 3
+        ($script:Console -join "`n") | Should -Match 'stneodeployabcprduks01 \(onboarding\)'
+        @($script:Uploads | Where-Object { $_ -like 'json/*' }) | Should -HaveCount 2
+    }
+
+    It 'falls back to the named storage account when the storage account of the onboarding cannot be reached' {
+        Add-CompliantPreWindowState
+        $script:StorageAccounts = @('stneodeployabcprduks01')
+        $script:UnreachableAccounts = @('stneodeployabcprduks01')
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UploadStorageAccountName = 'sttemplateabcprd01' }
+        $code | Should -Be 0
+        $script:Uploads | Should -HaveCount 3
+        @($script:Uploads | Where-Object { $_ -like 'onboarding-access/*' }) | Should -HaveCount 3
+        $text = $script:Console -join "`n"
+        $text | Should -Match 'could not upload the files to stneodeployabcprduks01'
+        $text | Should -Match 'sttemplateabcprd01 \(named\)'
+    }
+
+    It 'leaves the files listed when the storage account cannot be reached, without changing the exit code' {
+        Add-CompliantPreWindowState
+        Mock New-AzStorageContext { throw 'Name or service not known: sttemplateabcprd01.blob.core.windows.net' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UploadStorageAccountName = 'sttemplateabcprd01' }
+        $code | Should -Be 0
+        $script:Uploads | Should -HaveCount 0
+        $text = $script:Console -join "`n"
+        $text | Should -Match 'could not upload the files to sttemplateabcprd01'
+        $text | Should -Match 'private endpoint'
+        $text | Should -Match 'FILES TO SEND TO NEOLOGIK'
+        $text | Should -Not -Match 'Uploaded to the storage account'
+    }
+
+    It 'does not upload in a verify-only run' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UploadStorageAccountName = 'sttemplateabcprd01'; Verify = $true }
+        $code | Should -Be 0
+        $script:Uploads | Should -HaveCount 0
+        ($script:Console -join "`n") | Should -Match '-Verify: the script does not upload'
+    }
+
+    It 'refuses a storage account name that is not one, before contacting anything' {
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UploadStorageAccountName = 'Not A Storage Account' }
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'UploadStorageAccountName must be the name of a storage account'
+        Should -Invoke Connect-MgGraph -Times 0
+    }
+
+    It 'lists the log file and the summary file after an early exit' {
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Remove @('TenantId')) }
+        $code | Should -Be 1
+        $text = $script:Console -join "`n"
+        $text | Should -Match 'FILES TO SEND TO NEOLOGIK'
+        $text | Should -Match 'NeologikEnvironmentAccess_\d+_\d+\.log'
+        $text | Should -Match 'Neologik_EnvironmentAccess_PreWindow_'
+        $text | Should -Not -Match 'Snapshot_'
     }
 }
 

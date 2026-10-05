@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.0.13](#version-5013)
 2. [Version 5.0.12](#version-5012)
 2. [Version 5.0.11](#version-5011)
 3. [Version 5.0.10](#version-5010)
@@ -33,7 +34,7 @@ The table shows the version that each script reports.
 | Script | Version of the script | Purpose |
 |---|---|---|
 | `Install-NeologikEnvironment.ps1` | v5.0.7 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.12 | Reduces the access of the deployment identity of an existing environment to the access that version 5 of the Neologik Platform needs. Applies the grants for agents and Apps that work unattended |
+| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.13 | Reduces the access of the deployment identity of an existing environment to the access that version 5 of the Neologik Platform needs. Applies the grants for agents and Apps that work unattended |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
@@ -55,6 +56,19 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | `Update-NeologikEnvironmentAccess.ps1` | The environment access script signs in to Microsoft Graph, to Azure and to Exchange Online in the browser of the workstation first. A device code is the second method. Before this version, a device code was the first method. An organisation that blocks the device code with a Conditional Access policy could not complete the sign-in |
 | `Update-NeologikEnvironmentAccess.ps1` | When a Conditional Access policy refuses a sign-in, the environment access script says so and tries the next method at once |
 | `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` | The document describes the browser sign-in and the device code as the second method |
+
+## Version 5.0.13
+
+**Date**: 2026-10-05
+
+| Item | Change |
+|---|---|
+| `Update-NeologikEnvironmentAccess.ps1` | Every run writes a snapshot file, `Neologik_EnvironmentAccess_Snapshot_Pre_<date and time>.json` after the first run and `..._Post_...` after the later run: the state of the application registrations, the security groups and the deployment identity as the run leaves them, with every item of the summary and no secret value. Neologik compares the two snapshots to confirm the upgrade |
+| `Update-NeologikEnvironmentAccess.ps1` | The run ends with the list `FILES TO SEND TO NEOLOGIK`: the log file, the summary file and the snapshot file, each with its full path. The list also appears after a run that stopped before its steps |
+| `Update-NeologikEnvironmentAccess.ps1` | The environment access script uploads the three files with your Azure session: first to the storage account that the onboarding script created (`stneodeploy...`, found through the configuration file or in the resource group), into the containers `logs` and `json` beside the files of the onboarding; else to the storage account that the new parameter `-UploadStorageAccountName` names, into the container `onboarding-access`. When a storage account refuses the first upload, the environment access script assigns the role Storage Blob Data Contributor on it to your account and tries again while the role takes effect. A storage account that cannot be reached from the workstation leaves the files listed |
+| `Update-NeologikEnvironmentAccess.ps1` | The environment access script records the version `v5.0.13` on the resource group |
+| `Install-NeologikEnvironment.ps1` | No change to the script. The onboarding script records the version `v5.0.13` on the resource group |
+| `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` | The document describes the snapshot file, the list of files and the upload |
 
 ## Version 5.0.12
 
