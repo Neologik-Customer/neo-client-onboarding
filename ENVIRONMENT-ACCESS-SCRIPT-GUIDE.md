@@ -64,7 +64,7 @@ The first run and the later run make one more check before either changes an Azu
 3. Paste the command from Neologik and press Enter.
 4. The environment access script prints a web address and a code. Open the web address in a browser, enter the code and sign in as a Global Administrator. The environment access script waits for up to 15 minutes.
 5. In the first run and in the later run, the environment access script signs in a second time, to Azure. Enter the second code in the same way. In a run with mailbox grants, the environment access script signs in to Exchange Online in the same way.
-6. Read the summary table on screen. Send the summary file and the log file to Neologik.
+6. Read the summary table on screen and the list `FILES TO SEND TO NEOLOGIK` under it. Send the files to Neologik, unless the list says that the run uploaded them.
 
 To see what a run would change, add `-Verify` to the end of the command. The sign-ins are the same. The environment access script reports each pending change as `WOULD` and writes nothing.
 
@@ -217,15 +217,20 @@ The sign-in to Azure and the sign-in to Exchange Online use the same account and
 
 ## What you receive
 
-The environment access script prints a summary table. The environment access script writes two files in the folder of the environment access script.
+The environment access script prints a summary table. The environment access script writes three files in the folder of the environment access script.
 
 | File | Name | Content |
 |---|---|---|
 | The log file | `NeologikEnvironmentAccess_<date and time>.log` | Every message of the run, from the first line. Each failed request to Microsoft Graph, with its status and the request id by which Microsoft can find the request. The summary table |
 | The summary file of the first run | `Neologik_EnvironmentAccess_PreWindow_<date and time>.json` | The summary of the run, see below |
 | The summary file of the later run | `Neologik_EnvironmentAccess_PostWindow_<date and time>.json` | The summary of the run, see below |
+| The snapshot file | `Neologik_EnvironmentAccess_Snapshot_Pre_<date and time>.json` after the first run, `..._Post_...` after the later run | The state that the run leaves. For each application registration: the owners, the unique name, the kinds and expiry dates of credentials, the permissions and the consents. For the deployment identity: the Azure roles and the group memberships. For each security group: the member count. Every item of the summary. No secret value. Neologik compares the Pre and the Post snapshot to confirm that the upgrade changed what the upgrade was meant to change, and nothing else |
 
-The environment access script writes the summary file on every exit, a run that stopped before its steps included. The environment access script writes to the current folder when the folder of the environment access script is not writable. The environment access script writes to the temporary folder when the current folder is not writable. The environment access script reports both paths.
+The environment access script writes the summary file on every exit, a run that stopped before its steps included. The environment access script writes to the current folder when the folder of the environment access script is not writable. The environment access script writes to the temporary folder when the current folder is not writable.
+
+The run ends with the list `FILES TO SEND TO NEOLOGIK`, which names each file with its full path.
+
+The command from Neologik can name a storage account of the environment, with `-UploadStorageAccountName`. The environment access script then uploads the three files to the container `onboarding-access` of that storage account, with your Azure session. The storage accounts of the Neologik Platform refuse shared keys, so the upload needs the role Storage Blob Data Contributor. When the storage account refuses the first upload, the environment access script assigns that role on the storage account to your account. The environment access script then tries again while the role takes effect. The list at the end names the uploaded files too, and Neologik reads them from the storage account. A storage account behind a private endpoint cannot be reached from your workstation. The files then stay on your workstation, the list says so, and you send the files to Neologik.
 
 The summary file holds nine things:
 
@@ -239,7 +244,7 @@ The summary file holds nine things:
 - every item of the summary
 - the path of the log file, and the reason when the run stopped before its steps
 
-Neither file holds a secret. Send both files to Neologik as the record of the run.
+No file holds a secret. Send the three files to Neologik as the record of the run, unless the run uploaded them.
 
 | Result | Meaning |
 |---|---|
@@ -263,7 +268,7 @@ The first run adds only a role or a permission that is absent from the set liste
 
 **Why does the first run keep the wider access until the later run?**
 
-Neologik deploys the new version of the environment between the two runs. When a step of the first run or of the deployment fails, Neologik puts the step right with the access that the deployment identity still holds. Neologik then needs no further request to you. Once the environment is proven, the later run removes the wider access.
+Neologik deploys the new version of the environment between the two runs. When a step of the first run or of the deployment fails, Neologik puts the step right. The deployment identity still holds the access for that, so Neologik needs no further request to you. Once the environment is proven, the later run removes the wider access.
 
 **Why does my account need such wide permissions?**
 
@@ -275,7 +280,7 @@ The environment access script reports the item and moves to the next item. A sec
 
 **What happens when an item fails?**
 
-The environment access script records the failure with the reason, continues with the other items and ends with exit code 1. Send the summary file and the log file to Neologik.
+The environment access script records the failure with the reason, continues with the other items and ends with exit code 1. Send the files that the list at the end names to Neologik, unless the run uploaded them.
 
 **Why does the summary list application registrations that the environment access script did not change?**
 
@@ -283,4 +288,4 @@ The deployment identity manages only the application registrations that the depl
 
 ## Help
 
-Email support@neologik.ai with the summary file, the log file, the name of your organisation and the host name of the environment.
+Email support@neologik.ai with the files that the list at the end of the run names. Give the name of your organisation and the host name of the environment.

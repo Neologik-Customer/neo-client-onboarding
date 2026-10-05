@@ -220,7 +220,7 @@
 
     OUTPUT
 
-    The script prints a summary table. The script also writes two files.
+    The script prints a summary table. The script also writes three files.
       - The log file NeologikEnvironmentAccess_<time stamp>.log, from the first
         line of the run: every message, each failed request to Microsoft Graph
         with its status and request id, and the summary table.
@@ -228,11 +228,19 @@
         stamp>.json. The name holds PreWindow for the first run and PostWindow
         for the later run. The script writes the summary file on every exit, a
         run that stopped before its steps included.
+      - The snapshot file Neologik_EnvironmentAccess_Snapshot_<Pre|Post>_<time
+        stamp>.json: the state of the application registrations, the security
+        groups and the deployment identity as the run leaves them, with every
+        item of the summary. The first run writes the Pre snapshot and the later
+        run the Post snapshot. Neologik compares the two to validate the
+        migration.
 
-    Neither file holds a secret. The script writes both files to the folder of the
+    No file holds a secret. The script writes the files to the folder of the
     script. When the script cannot write to that folder, the script writes to the
     current folder. When the script cannot write to the current folder, the script
-    writes to the temporary folder.
+    writes to the temporary folder. The run ends with the list FILES TO SEND TO
+    NEOLOGIK. With -UploadStorageAccountName the script also uploads the files to
+    the storage account of the environment.
 
 .PARAMETER ConfigurationFile
     The configuration file that Install-NeologikEnvironment.ps1 wrote at onboarding.
@@ -308,6 +316,17 @@
     the access of the deployment identity. Neologik asks for the later run once
     the deployment is proven. The later run needs SubscriptionId and
     ResourceGroupName.
+
+.PARAMETER UploadStorageAccountName
+    The storage account of the environment to which the script uploads the files of
+    the run: the log file, the summary file and the snapshot file, into the container
+    onboarding-access. The command from Neologik names the storage account. The
+    upload uses the Azure session of the signed-in administrator; when the storage
+    account refuses the upload, the script assigns the role Storage Blob Data
+    Contributor on the storage account to the signed-in administrator and tries
+    again. A storage account behind a private endpoint cannot be reached from a
+    workstation; the files then stay on the workstation, listed at the end of the
+    run, for the administrator to send.
 
 .PARAMETER RemoveLegacyGrantAppIds
     The application id of each identity that the environment has stopped using. The
@@ -439,6 +458,9 @@ param(
 
     [Parameter(Mandatory = $false)]
     [switch]$LaterRun,
+
+    [Parameter(Mandatory = $false)]
+    [string]$UploadStorageAccountName,
 
     [Parameter(Mandatory = $false)]
     [switch]$UseAzureCliToken
@@ -582,11 +604,18 @@ $script:State = @{}
 # The version of the onboarding kit. The script records the version on the resource
 # group, in the tag NeologikOnboardingKit, at the end of each run that confirms the
 # Azure roles of the deployment identity.
-$script:KitVersion = 'v5.0.12'
+$script:KitVersion = 'v5.0.13'
 # The log file of the run. The script writes every message to the log file from the
 # first line. The reason a run ended before its steps, for the summary file.
 $script:LogFile = $null
 $script:ExitReason = ''
+# The summary file and the snapshot file of the run, and the blobs the run uploaded.
+$script:SummaryFile = $null
+$script:SnapshotFile = $null
+$script:UploadedFiles = @()
+# The upload retries while the role Storage Blob Data Contributor propagates.
+$script:UploadMaxAttempts = 12
+$script:UploadRetryDelay = 20
 
 # ----- Console, log file and summary ---------------------------------------------
 
@@ -662,7 +691,9 @@ function Exit-NeologikRun {
     param([string]$Reason)
     $script:ExitReason = $Reason
     Add-Summary 'Run' "FAILED: $Reason"
-    return (Write-NeologikSummary)
+    $code = Write-NeologikSummary
+    Write-NeologikFileList
+    return $code
 }
 
 function Get-NeologikProperty {
@@ -1187,6 +1218,12 @@ function Resolve-NeologikInput {
     $state.RemoveLegacyGrantAppIds = @(Get-NeologikProperty $Parameters 'RemoveLegacyGrantAppIds' @() | Where-Object { $_ })
     $state.UseAzureCliToken = [bool](Get-NeologikProperty $Parameters 'UseAzureCliToken' $false)
     $state.LaterRun = [bool](Get-NeologikProperty $Parameters 'LaterRun' $false)
+    # The storage account for the files of the run. A storage account name is 3 to 24
+    # lower-case letters and digits.
+    $state.UploadStorageAccountName = ([string](Get-NeologikProperty $Parameters 'UploadStorageAccountName' '')).Trim().ToLowerInvariant()
+    if ($state.UploadStorageAccountName -and $state.UploadStorageAccountName -notmatch '^[a-z0-9]{3,24}$') {
+        throw [System.ArgumentException]::new("UploadStorageAccountName must be the name of a storage account: 3 to 24 lower-case letters and digits. The value is '$($state.UploadStorageAccountName)'.")
+    }
     $state.Verify = [bool](Get-NeologikProperty $Parameters 'Verify' $false)
     # The command selects the run. A grants file of either kind selects the later run.
     # A command without a grants file selects the first run.
@@ -3961,6 +3998,255 @@ function Invoke-NeologikPermissionReduction {
     Set-NeologikKitVersionTag -ResourceId $rgScope
 }
 
+# ----- Snapshot, upload and the file list ------------------------------------------
+
+function Get-NeologikSnapshotSection {
+    # Runs one read of the snapshot. A read that fails records the reason instead of
+    # the data, so that one refused read never costs the rest of the snapshot.
+    param([Parameter(Mandatory)][scriptblock]$Read)
+    try { return (& $Read) }
+    catch { return @{ error = (Get-NeologikErrorText $_) } }
+}
+
+function Get-NeologikSnapshotApplication {
+    # The facts of one application registration and its service principal: owners,
+    # unique name, credential kinds with their expiries, federated credentials, the
+    # Microsoft Graph application permissions held and the delegated consents. No
+    # secret value is read.
+    param([string]$AppId)
+    $graph = $script:GraphV1
+    $filter = [uri]::EscapeDataString("appId eq '$AppId'")
+    $apps = @(Get-NeologikGraphCollection -Uri "$graph/applications?`$filter=$filter&`$select=id,appId,displayName,uniqueName,passwordCredentials,keyCredentials")
+    $app = @($apps) | Select-Object -First 1
+    if (-not $app) { return @{ appId = $AppId; present = $false } }
+    $objectId = [string](Get-NeologikProperty $app 'id' '')
+    $record = [ordered]@{
+        appId               = $AppId
+        present             = $true
+        displayName         = [string](Get-NeologikProperty $app 'displayName' '')
+        uniqueName          = [string](Get-NeologikProperty $app 'uniqueName' '')
+        passwordCredentials = @(@(Get-NeologikProperty $app 'passwordCredentials' @()) | ForEach-Object {
+                [ordered]@{ displayName = [string](Get-NeologikProperty $_ 'displayName' ''); endDateTime = [string](Get-NeologikProperty $_ 'endDateTime' '') } })
+        keyCredentialCount  = @(Get-NeologikProperty $app 'keyCredentials' @()).Count
+    }
+    $record.owners = Get-NeologikSnapshotSection { @(Get-NeologikGraphCollection -Uri "$graph/applications/$objectId/owners?`$select=id,displayName" | ForEach-Object { [string](Get-NeologikProperty $_ 'id' '') }) }
+    $record.federatedCredentials = Get-NeologikSnapshotSection { @(Get-NeologikGraphCollection -Uri "$graph/applications/$objectId/federatedIdentityCredentials?`$select=name,issuer,subject" | ForEach-Object { [string](Get-NeologikProperty $_ 'name' '') }) }
+    $record.servicePrincipal = Get-NeologikSnapshotSection {
+        $sp = @(Get-MgServicePrincipal -Filter "appId eq '$AppId'" -ErrorAction Stop) | Select-Object -First 1
+        if (-not $sp) { return @{ present = $false } }
+        $graphSp = $script:State.GraphSp
+        $roles = @(Get-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $sp.Id -All -ErrorAction Stop | ForEach-Object {
+                $resourceId = [string](Get-NeologikProperty $_ 'ResourceId' '')
+                $appRoleId = [string](Get-NeologikProperty $_ 'AppRoleId' '')
+                $name = ''
+                if ($graphSp -and $resourceId -eq $graphSp.Id) {
+                    $name = [string](@($graphSp.AppRoles | Where-Object { $_.Id -eq $appRoleId } | ForEach-Object { $_.Value }) | Select-Object -First 1)
+                }
+                [ordered]@{ resourceId = $resourceId; appRoleId = $appRoleId; value = $name } })
+        $grants = @(Get-MgServicePrincipalOauth2PermissionGrant -ServicePrincipalId $sp.Id -All -ErrorAction Stop | ForEach-Object {
+                [ordered]@{ consentType = [string](Get-NeologikProperty $_ 'ConsentType' ''); principalId = [string](Get-NeologikProperty $_ 'PrincipalId' ''); scope = [string](Get-NeologikProperty $_ 'Scope' '') } })
+        return [ordered]@{ present = $true; id = [string]$sp.Id; appRoleAssignments = $roles; oauth2PermissionGrants = $grants }
+    }
+    return $record
+}
+
+function Get-NeologikSnapshotGroup {
+    # One security group: name, direct member count and the applications the group is
+    # assigned to.
+    param([string]$GroupId)
+    $group = Get-MgGroup -GroupId $GroupId -ErrorAction Stop
+    $members = @(Get-MgGroupMember -GroupId $GroupId -All -ErrorAction Stop)
+    $assignments = @(Get-MgGroupAppRoleAssignment -GroupId $GroupId -All -ErrorAction Stop | ForEach-Object { [string]$_.ResourceId })
+    return [ordered]@{ id = $GroupId; displayName = [string](Get-NeologikProperty $group 'DisplayName' ''); memberCount = $members.Count; assignedTo = $assignments }
+}
+
+function Write-NeologikSnapshot {
+    <#
+    Writes the snapshot file of the run: the state of the applications, the groups
+    and the deployment identity as the run leaves them, with every item of the
+    summary. The first run writes the Pre snapshot and the later run the Post
+    snapshot. Neologik compares the two files to validate the migration. The
+    snapshot holds no secret value. A snapshot that cannot be taken is one SKIPPED
+    item; the run continues.
+    #>
+    param([Parameter(Mandatory)][ValidateSet('Pre', 'Post')][string]$Label)
+    $state = $script:State
+    $script:SnapshotFile = $null
+    if (-not $state.ContainsKey('DeploySp') -or -not $state.DeploySp) {
+        Add-Summary 'Snapshot file' 'SKIPPED: the run did not reach the deployment identity, so there is no state to record'
+        return
+    }
+    Write-Log "The script records the $Label snapshot of the environment access" -Level Info
+    try {
+        $appIds = @(@($state.SignInAppClientId, $state.SharePointAppClientId) + @($state.BotAppClientIds) | Where-Object { $_ } | Select-Object -Unique)
+        $applications = @()
+        foreach ($appId in $appIds) { $applications += (Get-NeologikSnapshotSection { Get-NeologikSnapshotApplication -AppId $appId }) }
+        $deploySp = $state.DeploySp
+        $deployment = [ordered]@{
+            clientId         = [string](Get-NeologikProperty $state 'DeploySpClientId' '')
+            objectId         = [string]$deploySp.Id
+            graphRoles       = Get-NeologikSnapshotSection { @(Get-NeologikHeldGraphRole) }
+            memberOf         = Get-NeologikSnapshotSection {
+                @(Get-MgServicePrincipalMemberOf -ServicePrincipalId $deploySp.Id -All -ErrorAction Stop | ForEach-Object {
+                        $extra = Get-NeologikProperty $_ 'AdditionalProperties' @{}
+                        [ordered]@{ id = [string](Get-NeologikProperty $_ 'Id' ''); type = [string](Get-NeologikProperty $extra '@odata.type' ''); displayName = [string](Get-NeologikProperty $extra 'displayName' '') } })
+            }
+            azureRoleAssignments = if ($state.ContainsKey('AzureConnected') -and $state.AzureConnected) {
+                Get-NeologikSnapshotSection { @(Get-AzRoleAssignment -ObjectId $deploySp.Id -ErrorAction Stop | ForEach-Object { [ordered]@{ role = [string]$_.RoleDefinitionName; scope = [string]$_.Scope } }) }
+            } else { @{ error = 'not read: the run did not sign in to Azure' } }
+        }
+        $groupIds = @(@($state.NceUserGroupId, $state.NceContributorsGroupId, $state.NceAdminsGroupId, $state.AdminGroupId) | Where-Object { $_ } | Select-Object -Unique)
+        $groups = @()
+        foreach ($groupId in $groupIds) { $groups += (Get-NeologikSnapshotSection { Get-NeologikSnapshotGroup -GroupId $groupId }) }
+        $azure = if ($state.ContainsKey('AzureConnected') -and $state.AzureConnected) {
+            [ordered]@{
+                resourceGroupTags = Get-NeologikSnapshotSection { $rg = Get-AzResourceGroup -Name $state.ResourceGroupName -ErrorAction Stop; $tags = Get-NeologikProperty $rg 'Tags' @{}; if ($null -eq $tags) { @{} } else { $tags } }
+                sqlServers        = Get-NeologikSnapshotSection {
+                    @(Get-AzSqlServer -ResourceGroupName $state.ResourceGroupName -ErrorAction Stop | ForEach-Object {
+                            $server = $_
+                            $admin = Get-AzSqlServerActiveDirectoryAdministrator -ResourceGroupName $state.ResourceGroupName -ServerName $server.ServerName -ErrorAction Stop
+                            [ordered]@{ server = [string]$server.ServerName; administrator = [string](Get-NeologikProperty $admin 'DisplayName' ''); administratorObjectId = [string](Get-NeologikProperty $admin 'ObjectId' '') } })
+                }
+            }
+        } else { @{ error = 'not read: the run did not sign in to Azure' } }
+        $snapshot = [ordered]@{
+            kitVersion         = $script:KitVersion
+            label              = $Label
+            run                = [string](Get-NeologikProperty $state 'Run' '')
+            tenantId           = [string](Get-NeologikProperty $state 'TenantId' '')
+            subscriptionId     = [string](Get-NeologikProperty $state 'SubscriptionId' '')
+            resourceGroupName  = [string](Get-NeologikProperty $state 'ResourceGroupName' '')
+            signedInAccount    = [string](Get-NeologikProperty $state 'SignedInUpn' '')
+            takenAt            = (Get-Date).ToUniversalTime().ToString('o')
+            deploymentIdentity = $deployment
+            applications       = $applications
+            groups             = $groups
+            azure              = $azure
+            summaryItems       = @($script:Summary)
+        }
+        $json = $snapshot | ConvertTo-Json -Depth 8
+        $fileName = 'Neologik_EnvironmentAccess_Snapshot_{0}_{1}.json' -f $Label, (Get-Date -Format 'yyyyMMdd_HHmmss')
+        foreach ($directory in @(Get-NeologikSummaryDirectory)) {
+            $path = Join-Path $directory $fileName
+            try {
+                Set-Content -LiteralPath $path -Value $json -Encoding UTF8 -ErrorAction Stop
+                $script:SnapshotFile = $path
+                break
+            }
+            catch { Write-Log "The script could not write the snapshot file to $directory. $(Get-NeologikErrorText $_). The script tries the next folder" -Level Warning }
+        }
+        if ($script:SnapshotFile) {
+            Write-Log "  The $Label snapshot is in $($script:SnapshotFile)" -Level Success
+            Add-Summary 'Snapshot file' "Written: $(Split-Path -Leaf $script:SnapshotFile)"
+        }
+        else { Add-Summary 'Snapshot file' 'SKIPPED: the script could not write the snapshot file to any folder' }
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        Write-Log "  The $Label snapshot: FAILED. $reason" -Level Error
+        Add-Summary 'Snapshot file' "SKIPPED: the script could not record the snapshot. $reason"
+    }
+}
+
+function Get-NeologikRunFile {
+    # The files of the run that exist: the log file, the summary file and the snapshot
+    # file, in that order.
+    return @(@($script:LogFile, $script:SummaryFile, $script:SnapshotFile) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) })
+}
+
+function Send-NeologikRunFile {
+    <#
+    Uploads the files of the run to the container 'onboarding-access' of the storage
+    account that -UploadStorageAccountName names, with the Azure session of the
+    signed-in administrator. The storage accounts of the Neologik Platform refuse
+    shared keys, so the upload needs the role Storage Blob Data Contributor; when the
+    first attempt is refused, the function assigns the role to the signed-in
+    administrator on the storage account and tries again while the role propagates.
+    A storage account behind a private endpoint cannot be reached from a
+    workstation; the files then stay listed for the administrator to send. The
+    upload never changes the exit code of the run.
+    #>
+    $state = $script:State
+    $script:UploadedFiles = @()
+    $account = [string](Get-NeologikProperty $state 'UploadStorageAccountName' '')
+    if (-not $account) { return }
+    $files = @(Get-NeologikRunFile)
+    if ($files.Count -eq 0) { return }
+    if (Get-NeologikProperty $state 'Verify' $false) {
+        Write-Log "  -Verify: the script does not upload the files of the run to $account. Send the files listed below" -Level Info
+        return
+    }
+    if (-not ($state.ContainsKey('AzureConnected') -and $state.AzureConnected)) {
+        Write-Log "  The run did not sign in to Azure, so the script does not upload the files to $account. Send the files listed below" -Level Warning
+        return
+    }
+    $container = 'onboarding-access'
+    $scope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)/providers/Microsoft.Storage/storageAccounts/$account"
+    try {
+        if (-not (Import-NeologikModuleSet -Names @('Az.Storage') -MinimumVersion ([version]'2.0.0') -Independent -InstallHint 'Install-Module Az.Storage -Scope CurrentUser -Force')) {
+            Write-Log "  The Az.Storage module is not available, so the script does not upload the files. Send the files listed below" -Level Warning
+            return
+        }
+        $context = New-AzStorageContext -StorageAccountName $account -UseConnectedAccount -ErrorAction Stop
+        $roleAssigned = $false
+        for ($attempt = 1; $attempt -le $script:UploadMaxAttempts; $attempt++) {
+            try {
+                if (-not (Get-AzStorageContainer -Name $container -Context $context -ErrorAction SilentlyContinue)) {
+                    New-AzStorageContainer -Name $container -Context $context -Permission Off -ErrorAction Stop | Out-Null
+                }
+                foreach ($file in $files) {
+                    $blob = Split-Path -Leaf $file
+                    Set-AzStorageBlobContent -File $file -Container $container -Blob $blob -Context $context -Force -ErrorAction Stop | Out-Null
+                    $script:UploadedFiles += "$account/$container/$blob"
+                }
+                Write-Log "  The files of the run are in the storage account: $account/$container ($($files.Count) file(s))" -Level Success
+                return
+            }
+            catch {
+                $script:UploadedFiles = @()
+                $reason = Get-NeologikErrorText $_
+                $refused = $reason -match '(?i)AuthorizationPermissionMismatch|AuthorizationFailure|403|Forbidden|not authorized'
+                if ($refused -and -not $roleAssigned -and $state.SignedInObjectId) {
+                    Write-Log "  The storage account refused the upload. The script assigns Storage Blob Data Contributor on $account to the signed-in administrator and tries again" -Level Warning
+                    try {
+                        Invoke-NeologikWrite -Command 'New-AzRoleAssignment' -Parameters @{ ObjectId = $state.SignedInObjectId; RoleDefinitionName = 'Storage Blob Data Contributor'; Scope = $scope } | Out-Null
+                    }
+                    catch {
+                        if ((Get-NeologikErrorText $_) -notmatch '(?i)RoleAssignmentExists|already exists') { throw }
+                    }
+                    $roleAssigned = $true
+                }
+                elseif (-not $refused) { throw }
+                if ($attempt -lt $script:UploadMaxAttempts) {
+                    Write-Log "  The upload is not yet allowed. The script tries again in $($script:UploadRetryDelay) seconds. Attempt $attempt of $($script:UploadMaxAttempts)" -Level Warning
+                    Start-Sleep -Seconds $script:UploadRetryDelay
+                }
+            }
+        }
+        Write-Log "  The upload to $account did not complete after $($script:UploadMaxAttempts) attempts. Send the files listed below" -Level Warning
+    }
+    catch {
+        $script:UploadedFiles = @()
+        Write-Log "  The script could not upload the files to $account. $(Get-NeologikErrorText $_). A storage account behind a private endpoint cannot be reached from this workstation. Send the files listed below" -Level Warning
+    }
+}
+
+function Write-NeologikFileList {
+    # Prints and logs the files of the run for the administrator to send to Neologik,
+    # and the blobs the run uploaded.
+    $files = @(Get-NeologikRunFile)
+    $lines = @('', 'FILES TO SEND TO NEOLOGIK')
+    if ($files.Count -eq 0) { $lines += '  The run wrote no file. Send the text on screen' }
+    foreach ($file in $files) { $lines += "  $file" }
+    if (@($script:UploadedFiles).Count -gt 0) {
+        $lines += '  Uploaded to the storage account, so Neologik can read the files there:'
+        foreach ($blob in $script:UploadedFiles) { $lines += "    $blob" }
+    }
+    $lines += ''
+    foreach ($line in $lines) { if ($line) { Write-Host $line -ForegroundColor Cyan } else { Write-Host '' } }
+    Add-NeologikLogText (($lines | Where-Object { $_ }) -join "`n")
+}
+
 # ----- The two runs --------------------------------------------------------------
 
 function Invoke-NeologikPreWindowRun {
@@ -4062,6 +4348,7 @@ function Write-NeologikSummary {
             try {
                 Set-Content -LiteralPath $summaryPath -Value $json -Encoding UTF8 -ErrorAction Stop
                 $written = $summaryPath
+                $script:SummaryFile = $summaryPath
                 break
             }
             catch {
@@ -4121,6 +4408,7 @@ function Invoke-NeologikEnvironmentAccess {
         [string]$MailboxGrantsFile,
         [string[]]$RemoveLegacyGrantAppIds,
         [switch]$LaterRun,
+        [string]$UploadStorageAccountName,
         [switch]$UseAzureCliToken
     )
     Set-StrictMode -Version Latest
@@ -4128,6 +4416,9 @@ function Invoke-NeologikEnvironmentAccess {
     $script:Summary = @()
     $script:State = @{}
     $script:ExitReason = ''
+    $script:SummaryFile = $null
+    $script:SnapshotFile = $null
+    $script:UploadedFiles = @()
     # The log file comes first, so that the log file holds every message of the run.
     Start-NeologikLogFile
 
@@ -4154,6 +4445,7 @@ function Invoke-NeologikEnvironmentAccess {
             MailboxGrantsFile       = $MailboxGrantsFile
             RemoveLegacyGrantAppIds = @($RemoveLegacyGrantAppIds)
             LaterRun                = [bool]$LaterRun
+            UploadStorageAccountName = $UploadStorageAccountName
             UseAzureCliToken        = [bool]$UseAzureCliToken
         }
     }
@@ -4179,7 +4471,7 @@ function Invoke-NeologikEnvironmentAccess {
         return (Exit-NeologikRun 'the Microsoft Graph modules did not load. Read the messages above')
     }
     if (-not (Connect-NeologikGraph)) { return (Exit-NeologikRun 'the sign-in to Microsoft Graph did not complete, or the signed-in account is not a Global Administrator. Read the messages above') }
-    if (-not (Resolve-NeologikPrincipal)) { return (Write-NeologikSummary) }
+    if (-not (Resolve-NeologikPrincipal)) { return (Exit-NeologikRun 'the deployment identity or the Microsoft Graph service principal was not found. Read the messages above') }
 
     try {
         if ($script:State.Run -eq 'PostWindow') { Invoke-NeologikPostWindowRun }
@@ -4190,7 +4482,13 @@ function Invoke-NeologikEnvironmentAccess {
         Write-Log "An unexpected error stopped the run. $reason" -Level Error
         Add-Summary 'Run' "FAILED: unexpected error. $reason"
     }
-    return (Write-NeologikSummary)
+    # The snapshot of the state the run leaves, then the summary, then the upload of
+    # the three files and the list of them for the administrator.
+    Write-NeologikSnapshot -Label $(if ($script:State.Run -eq 'PostWindow') { 'Post' } else { 'Pre' })
+    $code = Write-NeologikSummary
+    Send-NeologikRunFile
+    Write-NeologikFileList
+    return $code
 }
 
 # When a caller loads the script with a dot, PowerShell defines the functions and
