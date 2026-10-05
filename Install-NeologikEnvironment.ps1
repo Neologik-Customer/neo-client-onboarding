@@ -219,7 +219,7 @@ $WarningPreference = 'Continue'
 $script:Version = 'v5.0.5'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.0.11'
+$script:KitVersion = 'v5.0.12'
 
 # The time stamp of the run. The names of the log and of the configuration file hold the time stamp.
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'

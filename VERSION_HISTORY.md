@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.0.12](#version-5012)
 2. [Version 5.0.11](#version-5011)
 3. [Version 5.0.10](#version-5010)
 3. [Version 5.0.9](#version-509)
@@ -32,10 +33,25 @@ The table shows the version that each script reports.
 | Script | Version of the script | Purpose |
 |---|---|---|
 | `Install-NeologikEnvironment.ps1` | v5.0.5 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.11 | Reduces the access of the deployment identity of an existing environment to the access that version 5 of the Neologik Platform needs. Applies the grants for agents and Apps that work unattended |
+| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.12 | Confirms the access that the deployment identity of an existing environment needs for version 5 of the Neologik Platform, and reduces the access in the later run. Applies the grants for agents and Apps that work unattended |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.0.12
+
+**Date**: 2026-10-05
+
+| Item | Change |
+|---|---|
+| `Update-NeologikEnvironmentAccess.ps1` | The first run removes nothing. The first run confirms the directory objects, grants the two Microsoft Graph application permissions and the nine Azure roles that the deployment identity needs, and records the version of the onboarding kit. The deployment identity keeps its wider access until the later run, so that Neologik can repair a failed first run or a failed deployment with that access |
+| `Update-NeologikEnvironmentAccess.ps1` | New parameter `-LaterRun`. The later run applies the grants that the files list, when the command names a file, and then reduces the access of the deployment identity: the seven Microsoft Graph application permissions that the deployment identity no longer needs, Contributor and User Access Administrator on the subscription, the directory role Application Administrator, the membership of the Admin User Group, and every other Azure role, directory role and group membership. The later run needs `SubscriptionId` and `ResourceGroupName`, and a signed-in account with Owner or User Access Administrator on the subscription. A later command that names a grants file and not `-LaterRun` applies the file and nothing else, as before |
+| `Update-NeologikEnvironmentAccess.ps1` | The sign-in of the first run no longer requests `RoleManagement.ReadWrite.Directory`. The sign-in of the later run with `-LaterRun` requests `RoleManagement.ReadWrite.Directory` and `GroupMember.ReadWrite.All` |
+| `Update-NeologikEnvironmentAccess.ps1` | The environment access script writes the log file `NeologikEnvironmentAccess_<date and time>.log` beside the script from the first line of the run: every message, each failed request to Microsoft Graph with its status and request id, and the summary table. The log file holds no secret |
+| `Update-NeologikEnvironmentAccess.ps1` | The summary file is written on every exit, a run that stopped before its steps included. The summary file names the version of the onboarding kit, the signed-in account, the log file and the reason a run stopped early |
+| `Update-NeologikEnvironmentAccess.ps1` | The environment access script records the version `v5.0.12` on the resource group |
+| `Install-NeologikEnvironment.ps1` | No change to the script. The onboarding script records the version `v5.0.12` on the resource group |
+| `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` | The document describes the two runs as they now are, the new parameter and the two files of a run |
 
 ## Version 5.0.11
 
