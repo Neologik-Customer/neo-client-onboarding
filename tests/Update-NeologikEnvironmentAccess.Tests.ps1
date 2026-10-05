@@ -45,7 +45,8 @@ BeforeAll {
     function Get-AzResourceGroup { [CmdletBinding()] param($Name) }
     function Update-AzTag { [CmdletBinding()] param($ResourceId, $Tag, $Operation) }
     function Get-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $Scope) }
-    function New-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $Scope) }
+    function New-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $RoleDefinitionId, $Scope, $Condition, $ConditionVersion) }
+    function Set-AzRoleAssignment { [CmdletBinding()] param($InputObject, [switch]$PassThru) }
     function Remove-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $Scope) }
     function Connect-ExchangeOnline { [CmdletBinding()] param([switch]$Device, $ShowBanner, $UserPrincipalName) }
     function Disconnect-ExchangeOnline { [CmdletBinding(SupportsShouldProcess)] param() }
@@ -284,6 +285,7 @@ BeforeAll {
         foreach ($roleName in $script:RequiredSubRoles) {
             $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = $roleName; Scope = $script:SubScope }
         }
+        $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = $script:LimitedSubRole; Scope = $script:SubScope; Condition = $script:LimitedSubRoleCondition; ConditionVersion = $script:LimitedSubRoleConditionVersion }
         $t.DirectoryRoles += @{ Id = $script:Ids.AppAdminRole; RoleTemplateId = $script:AppAdminRoleTemplateId; members = @() }
         # an environment kept with this kit carries its version tag.
         $t.ResourceGroupTags = @{ NeologikOnboardingKit = $script:KitVersion }
@@ -906,9 +908,23 @@ BeforeAll {
             } | ForEach-Object { [pscustomobject]$_ })
     }
     Mock New-AzRoleAssignment {
-        param($ObjectId, $RoleDefinitionName, $Scope)
-        $script:Tenant.AzRoleAssignments += @{ ObjectId = $ObjectId; RoleDefinitionName = $RoleDefinitionName; Scope = $Scope }
-        Add-Write "NEW az role $RoleDefinitionName $Scope"
+        param($ObjectId, $RoleDefinitionName, $RoleDefinitionId, $Scope, $Condition, $ConditionVersion)
+        if (-not $RoleDefinitionName -and $RoleDefinitionId -eq 'f58310d9-a9f6-439a-9e8d-f62e7b41a168') { $RoleDefinitionName = 'Role Based Access Control Administrator' }
+        $entry = @{ ObjectId = $ObjectId; RoleDefinitionName = $RoleDefinitionName; Scope = $Scope }
+        $suffix = ''
+        if ($Condition) { $entry.Condition = $Condition; $entry.ConditionVersion = $ConditionVersion; $suffix = ' limited' }
+        $script:Tenant.AzRoleAssignments += $entry
+        Add-Write "NEW az role $RoleDefinitionName $Scope$suffix"
+    }
+    Mock Set-AzRoleAssignment {
+        param($InputObject)
+        foreach ($entry in $script:Tenant.AzRoleAssignments) {
+            if ($entry.ObjectId -eq $InputObject.ObjectId -and $entry.RoleDefinitionName -eq $InputObject.RoleDefinitionName -and $entry.Scope -eq $InputObject.Scope) {
+                $entry.Condition = $InputObject.Condition
+                $entry.ConditionVersion = $InputObject.ConditionVersion
+            }
+        }
+        Add-Write "LIMIT az role $($InputObject.RoleDefinitionName) $($InputObject.Scope)"
     }
     Mock Remove-AzRoleAssignment {
         param($ObjectId, $RoleDefinitionName, $Scope)
@@ -1824,7 +1840,7 @@ Context 'The first run on a compliant environment' {
     }
 
     It 'declares the kit version the version history opens with' {
-        $history = Get-Content -Raw (Join-Path (Split-Path -Parent $script:ScriptPath) 'VERSION_HISTORY.md')
+        $history = Get-Content -Raw (Join-Path (Split-Path -Parent $script:ScriptPath) 'docs' 'VERSION_HISTORY.md')
         $top = [regex]::Match($history, '(?m)^## Version (\d+\.\d+\.\d+)').Groups[1].Value
         $script:KitVersion | Should -Be "v$top"
     }
@@ -2881,13 +2897,13 @@ Context 'The later run: permission reduction (step 8)' {
         $code | Should -Be 0
         $news = @($script:Writes | Where-Object { $_ -like 'NEW az role*' })
         $removes = @($script:Writes | Where-Object { $_ -like 'REMOVE*' })
-        $news | Should -HaveCount 9
+        $news | Should -HaveCount 10
         $removes | Should -HaveCount 3
         [array]::IndexOf($script:Writes, $removes[0]) | Should -BeGreaterThan ([array]::IndexOf($script:Writes, $news[-1]))
         Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'Removed'
         Get-SummaryResult 'Subscription role to remove: User Access Administrator' | Should -Be 'Removed'
         Get-SummaryResult 'Application Administrator role' | Should -Be 'Removed'
-        @($script:Tenant.AzRoleAssignments | Where-Object { $_.Scope -eq $script:SubScope }).RoleDefinitionName | Should -Be @('Reader', 'Cost Management Contributor')
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.Scope -eq $script:SubScope }).RoleDefinitionName | Should -Be @('Reader', 'Cost Management Contributor', 'Role Based Access Control Administrator')
         @($script:Tenant.DirectoryRoles)[0].members | Should -HaveCount 0
     }
 
@@ -2907,8 +2923,8 @@ Context 'The later run: permission reduction (step 8)' {
         $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         (Get-SummaryResult 'Resource group role: Monitoring Contributor') | Should -Match '^FAILED: insufficient privileges'
-        Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'SKIPPED: the deployment identity does not hold all nine Azure roles'
-        Get-SummaryResult 'Application Administrator role' | Should -Be 'SKIPPED: the deployment identity does not hold all nine Azure roles'
+        Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'SKIPPED: the deployment identity does not hold all ten Azure roles'
+        Get-SummaryResult 'Application Administrator role' | Should -Be 'SKIPPED: the deployment identity does not hold all ten Azure roles'
         Should -Invoke Remove-AzRoleAssignment -Times 0
         Should -Invoke Remove-MgDirectoryRoleMemberDirectoryObjectByRef -Times 0
         @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
@@ -2923,6 +2939,59 @@ Context 'The later run: permission reduction (step 8)' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Subscription role: Reader' | Should -Be 'Already assigned'
+    }
+
+    It 'assigns the limited Role Based Access Control Administrator on the subscription with its condition' {
+        Add-CompliantPreWindowState
+        $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object { -not ($_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope) })
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Assigned'
+        $limited = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })
+        $limited | Should -HaveCount 1
+        $limited[0].Condition | Should -Match 'acdd72a7-3385-48ef-bd42-f606fba81ae7, fbc52c3f-28ad-4303-a892-8a056630b8f1'
+        $limited[0].Condition | Should -Match "ActionMatches\{'Microsoft.Authorization/roleAssignments/write'\}"
+        $limited[0].Condition | Should -Match "ActionMatches\{'Microsoft.Authorization/roleAssignments/delete'\}"
+        $limited[0].ConditionVersion | Should -Be '2.0'
+        @($script:Writes | Where-Object { $_ -like 'NEW az role Role Based Access Control Administrator * limited' }) | Should -HaveCount 1
+        Should -Invoke Set-AzRoleAssignment -Times 0
+    }
+
+    It 'keeps a limited assignment that already carries the condition' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Already assigned'
+        @($script:Writes | Where-Object { $_ -like '*az role*' }) | Should -HaveCount 0
+    }
+
+    It 'reports a Role Based Access Control Administrator held without the limit, and the later run applies the limit' {
+        Add-CompliantPreWindowState
+        foreach ($entry in $script:Tenant.AzRoleAssignments) {
+            if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Remove('Condition'); $entry.Remove('ConditionVersion') }
+        }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Already assigned without the limit. The later run applies the limit'
+        Should -Invoke Set-AzRoleAssignment -Times 0
+        Should -Invoke New-AzRoleAssignment -Times 0
+        $script:Writes = @()
+        $script:Summary = @()
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Limit applied'
+        Should -Invoke Set-AzRoleAssignment -Times 1
+        @($script:Writes | Where-Object { $_ -like 'LIMIT az role Role Based Access Control Administrator *' }) | Should -HaveCount 1
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })[0].Condition | Should -Match 'fbc52c3f-28ad-4303-a892-8a056630b8f1'
+    }
+
+    It 'with -Verify reports the limited role as WOULD ASSIGN and writes nothing' {
+        Add-CompliantPreWindowState
+        $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object { -not ($_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope) })
+        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'WOULD ASSIGN'
+        Should -Invoke New-AzRoleAssignment -Times 0
+        Should -Invoke Set-AzRoleAssignment -Times 0
     }
 
     It 'stops with ACTION REQUIRED when the Azure sign-in fails, touching nothing' {
@@ -3459,7 +3528,7 @@ Context 'The later run: declared set or nothing' {
         $left = @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $script:Ids.DeploySpId })
         @($left | Where-Object { $_.RoleDefinitionName -eq 'Cognitive Services Content Understanding Contributor' }) | Should -HaveCount 1
         @($left | Where-Object { $_.RoleDefinitionName -in @('Azure AI Developer', 'Foundry User') }) | Should -HaveCount 0
-        @($left | Where-Object { $_.Scope -eq $script:SubScope }).RoleDefinitionName | Sort-Object | Should -Be @('Cost Management Contributor', 'Reader')
+        @($left | Where-Object { $_.Scope -eq $script:SubScope }).RoleDefinitionName | Sort-Object | Should -Be @('Cost Management Contributor', 'Reader', 'Role Based Access Control Administrator')
         @($left | Where-Object { $_.Scope -eq $script:RgScope }).RoleDefinitionName | Sort-Object | Should -Be @($script:RequiredRgRoles | Sort-Object)
         @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $script:Ids.AgentIdAdminRole })[0].members | Should -HaveCount 0
         @((Get-FakeGroup -Id $script:Ids.DevTeamGroup).members | ForEach-Object { $_.id }) | Should -Not -Contain $script:Ids.DeploySpId
@@ -3482,9 +3551,9 @@ Context 'The later run: declared set or nothing' {
         $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -ne 'Monitoring Contributor' })
         $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        Get-SummaryResult 'Other Azure roles' | Should -Be 'SKIPPED: the deployment identity does not hold all nine Azure roles'
-        Get-SummaryResult 'Other directory roles' | Should -Be 'SKIPPED: the deployment identity does not hold all nine Azure roles'
-        Get-SummaryResult 'Other group memberships' | Should -Be 'SKIPPED: the deployment identity does not hold all nine Azure roles'
+        Get-SummaryResult 'Other Azure roles' | Should -Be 'SKIPPED: the deployment identity does not hold all ten Azure roles'
+        Get-SummaryResult 'Other directory roles' | Should -Be 'SKIPPED: the deployment identity does not hold all ten Azure roles'
+        Get-SummaryResult 'Other group memberships' | Should -Be 'SKIPPED: the deployment identity does not hold all ten Azure roles'
         Should -Invoke Remove-AzRoleAssignment -Times 0
         Should -Invoke Remove-MgGroupMemberByRef -Times 0
         @((Get-FakeGroup -Id $script:Ids.DevTeamGroup).members | ForEach-Object { $_.id }) | Should -Contain $script:Ids.DeploySpId
@@ -3501,7 +3570,7 @@ Context 'The later run: declared set or nothing' {
 }
 
 Context 'The first run removes nothing (project#3170)' {
-    It 'keeps every wider grant on a legacy environment and assigns the nine roles' {
+    It 'keeps every wider grant on a legacy environment and assigns the ten roles' {
         Add-CompliantDirectoryState
         Add-LegacyAzureState
         Add-UndeclaredState
@@ -3509,7 +3578,7 @@ Context 'The first run removes nothing (project#3170)' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         @($script:Writes | Where-Object { $_ -like 'REMOVE*' }) | Should -HaveCount 0
-        @($script:Writes | Where-Object { $_ -like 'NEW az role*' }) | Should -HaveCount 9
+        @($script:Writes | Where-Object { $_ -like 'NEW az role*' }) | Should -HaveCount 10
         @($script:Summary | Where-Object { $_.Item -match 'to remove|Application Administrator role|Admin User Group membership|^Other ' }) | Should -HaveCount 0
         @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $script:Ids.AppAdminRole })[0].members | Should -Contain $script:Ids.DeploySpId
         @($script:Tenant.AzRoleAssignments | Where-Object { $_.Scope -eq $script:SubScope -and $_.RoleDefinitionName -eq 'Contributor' }) | Should -HaveCount 1

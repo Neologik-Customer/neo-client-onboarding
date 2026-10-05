@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.0.14](#version-5014)
 2. [Version 5.0.13](#version-5013)
 2. [Version 5.0.12](#version-5012)
 2. [Version 5.0.11](#version-5011)
@@ -33,8 +34,8 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.0.7 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.13 | Reduces the access of the deployment identity of an existing environment to the access that version 5 of the Neologik Platform needs. Applies the grants for agents and Apps that work unattended |
+| `Install-NeologikEnvironment.ps1` | v5.0.9 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.14 | Confirms the access that the deployment identity of an existing environment needs for version 5 of the Neologik Platform, and reduces the access in the later run. Applies the grants for agents and Apps that work unattended |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
@@ -46,16 +47,28 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | Item | Change |
 |---|---|
 | `ANALYTICS-REPORTING-GUIDE.md` | New document. What the environment reports to Neologik, what the environment never reports, the retention period and how to withdraw from reporting |
-| `Install-NeologikEnvironment.ps1` | Version v5.0.6. After a failure, the onboarding script prints the closing messages: the path of the log, the permission that is missing, and how to resume. Before this version, the first error message stopped the onboarding script before the closing messages. A run that stops because a permission is missing ends with exit code 2 |
+| `Install-NeologikEnvironment.ps1` | Version v5.0.9. After a failure, the onboarding script prints the closing messages: the path of the log, the permission that is missing, and how to resume. Before this version, the first error message stopped the onboarding script before the closing messages. A run that stops because a permission is missing ends with exit code 2 |
 | `Install-NeologikEnvironment.ps1` | The onboarding script downloads the PowerShell installer of the latest release. Before this version, the address named one fixed version |
 | `Install-NeologikEnvironment.ps1` | The configuration file records both roles of the deployment identity on the subscription: Reader and Cost Management Contributor |
 | `Install-NeologikEnvironment.ps1` | A run resumed from the first checkpoint asks the questions, because the first checkpoint holds no configuration. A resumed run honours `-SkipGuestInvitation` from the command line |
 | `QUICK-REFERENCE.md` | The document describes the resume from the first checkpoint and exit code 2 |
-| `Install-NeologikEnvironment.ps1` | Version v5.0.7. The onboarding script creates the application registration of the deployment identity for a single tenant. The deployment signs in to your tenant only |
+| `Install-NeologikEnvironment.ps1` | The onboarding script creates the application registration of the deployment identity for a single tenant. The deployment signs in to your tenant only |
 | Documents | The documents state why the Platform Sign-in application accepts accounts of more than one tenant: Neologik support staff can sign in with an account of the Neologik tenant, when you allow that tenant |
 | `Update-NeologikEnvironmentAccess.ps1` | The environment access script signs in to Microsoft Graph, to Azure and to Exchange Online in the browser of the workstation first. A device code is the second method. Before this version, a device code was the first method. An organisation that blocks the device code with a Conditional Access policy could not complete the sign-in |
 | `Update-NeologikEnvironmentAccess.ps1` | When a Conditional Access policy refuses a sign-in, the environment access script says so and tries the next method at once |
 | `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` | The document describes the browser sign-in and the device code as the second method |
+
+## Version 5.0.14
+
+**Date**: 2026-10-05
+
+| Item | Change |
+|---|---|
+| `Update-NeologikEnvironmentAccess.ps1` | Step 5 assigns a third role on the subscription: Role Based Access Control Administrator, limited by a condition to two roles, Reader and AppGw for Containers Configuration Manager. The deployment needs the role for the identity of the ingress controller of a secure environment. That identity needs Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster. That resource group is outside the resource group of the environment. The deployment identity can assign those two roles and no other. Step 5 and step 8 now confirm ten roles |
+| `Update-NeologikEnvironmentAccess.ps1` | The deployment identity may already hold the role on the subscription without the limit. The first run then reports the assignment and keeps it. The later run writes the limit onto the assignment |
+| `Update-NeologikEnvironmentAccess.ps1` | The environment access script records the version `v5.0.14` on the resource group |
+| `Install-NeologikEnvironment.ps1` | Version v5.0.8. The onboarding script assigns the same limited role on the subscription, and records the version `v5.0.14` on the resource group |
+| Documents | The documents list the limited role and the reason for it |
 
 ## Version 5.0.13
 

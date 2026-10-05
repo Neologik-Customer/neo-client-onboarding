@@ -48,7 +48,7 @@ It 'records the kit version on the resource group, at the version the version hi
     $script:Called | Should -Contain 'Set-NeologikKitVersionTag'
     $text = Get-Content -Raw $script:ScriptPath
     $text | Should -Match ([regex]::Escape('Update-AzTag -ResourceId $ResourceId -Tag @{ NeologikOnboardingKit = $script:KitVersion } -Operation Merge'))
-    $history = Get-Content -Raw (Join-Path (Split-Path -Parent $PSScriptRoot) 'VERSION_HISTORY.md')
+    $history = Get-Content -Raw (Join-Path (Split-Path -Parent $PSScriptRoot) 'docs' 'VERSION_HISTORY.md')
     $top = [regex]::Match($history, '(?m)^## Version (\d+\.\d+\.\d+)').Groups[1].Value
     $text | Should -Match ([regex]::Escape("`$script:KitVersion = 'v$top'"))
 }
