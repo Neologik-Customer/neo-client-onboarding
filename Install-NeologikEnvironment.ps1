@@ -145,7 +145,7 @@
         -AnswerFile .\inputs.json -SkipPowerShellUpdate -SkipModuleInstall
 
 .NOTES
-    Version: v5.0.5
+    Version: v5.0.8
     Requires: PowerShell 7.4 or later
     Requires: Owner on the subscription and Global Administrator in the tenant
 #>
@@ -216,10 +216,28 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v5.0.5'
+$script:Version = 'v5.0.8'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.0.13'
+$script:KitVersion = 'v5.0.14'
+
+# The third role of the deployment identity on the subscription: Role Based Access
+# Control Administrator, limited by a condition to two roles. The deployment runs the
+# ingress controller of a secure environment with Application Gateway for Containers.
+# Microsoft requires the identity of that controller to hold Reader on the resource
+# group that Azure Kubernetes Service creates for the nodes of the cluster, which is
+# outside the resource group of the environment, and AppGw for Containers Configuration
+# Manager on the resource group of the environment. The condition lets the deployment
+# identity assign those two roles and no other role, and remove only those two.
+$script:LimitedSubRole = 'Role Based Access Control Administrator'
+$script:LimitedSubRoleId = 'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
+# Reader, then AppGw for Containers Configuration Manager.
+$script:LimitedSubRoleAssignableIds = @(
+    'acdd72a7-3385-48ef-bd42-f606fba81ae7',
+    'fbc52c3f-28ad-4303-a892-8a056630b8f1'
+)
+$script:LimitedSubRoleConditionVersion = '2.0'
+$script:LimitedSubRoleCondition = ("((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/write'}})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}})) AND ((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/delete'}})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}}))" -f ($script:LimitedSubRoleAssignableIds -join ', '))
 
 # The time stamp of the run. The names of the log and of the configuration file hold the time stamp.
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -2291,6 +2309,104 @@ function Grant-GraphAppRolePermissions {
     }
 }
 
+function Set-NeologikLimitedSubscriptionRole {
+    <#
+    .SYNOPSIS
+        Assigns the limited Role Based Access Control Administrator role to the
+        deployment identity on the subscription.
+    .DESCRIPTION
+        The role carries a condition that limits the roles the deployment identity may
+        assign to Reader and AppGw for Containers Configuration Manager. An assignment
+        that already carries the condition is reported. An assignment without the
+        condition receives the condition. An absent assignment is created.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ServicePrincipalId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SubscriptionId
+    )
+
+    $scope = "/subscriptions/$SubscriptionId"
+    $roleName = $script:LimitedSubRole
+    $wanted = ($script:LimitedSubRoleCondition -replace '\s', '').ToLowerInvariant()
+    Write-Log "Assigning the role $roleName, limited to two roles..." -Level Info
+
+    try {
+        $assignments = @(Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
+            -RoleDefinitionName $roleName `
+            -Scope $scope `
+            -ErrorAction Stop | Where-Object { $_.Scope -eq $scope })
+    }
+    catch {
+        Write-Log "ERROR: the script cannot read the role assignment $roleName, because a permission is missing" -Level Error
+        Write-Host "`n[X] INSUFFICIENT PERMISSIONS" -ForegroundColor Red
+        Write-Host "The script cannot read the role assignments. The Owner role on the subscription is required." -ForegroundColor Yellow
+        throw "Insufficient permissions: Cannot verify role assignments"
+    }
+
+    $limited = @($assignments | Where-Object { (([string]$_.Condition) -replace '\s', '').ToLowerInvariant() -eq $wanted })
+    if ($limited.Count -gt 0) {
+        Write-Log "$roleName role already assigned with the limit" -Level Info
+        return
+    }
+    if ($assignments.Count -gt 0) {
+        # The role is held without the limit. The script writes the limit onto the assignment.
+        $assignment = $assignments[0]
+        $assignment | Add-Member -NotePropertyName Condition -NotePropertyValue $script:LimitedSubRoleCondition -Force
+        $assignment | Add-Member -NotePropertyName ConditionVersion -NotePropertyValue $script:LimitedSubRoleConditionVersion -Force
+        Set-AzRoleAssignment -InputObject $assignment -ErrorAction Stop | Out-Null
+        Write-Log "$roleName role: the limit is applied to the existing assignment" -Level Success
+        return
+    }
+
+    # A new service principal takes time to reach every server of Microsoft Entra ID. Try again until then
+    $retryCount = 0
+    $maxRetries = 10
+    $roleAssigned = $false
+    while (-not $roleAssigned -and $retryCount -lt $maxRetries) {
+        try {
+            New-AzRoleAssignment -ObjectId $ServicePrincipalId `
+                -RoleDefinitionId $script:LimitedSubRoleId `
+                -Scope $scope `
+                -Condition $script:LimitedSubRoleCondition `
+                -ConditionVersion $script:LimitedSubRoleConditionVersion `
+                -ErrorAction Stop | Out-Null
+
+            Write-Log "$roleName role assigned with the limit" -Level Success
+            $roleAssigned = $true
+        }
+        catch {
+            if ($_.Exception.Message -match "RoleAssignmentExists|already exists") {
+                Write-Log "$roleName role already assigned" -Level Info
+                $roleAssigned = $true
+            }
+            elseif ($_.Exception.Message -match "Forbidden|not authorized") {
+                Write-Log "ERROR: Insufficient permissions to assign $roleName role" -Level Error
+                Write-Log "Required role: Owner on the subscription" -Level Error
+                Write-Host "`n[X] PERMISSION ERROR" -ForegroundColor Red
+                Write-Host "A user who holds the Owner role on the subscription must run this script." -ForegroundColor Yellow
+                throw "Insufficient permissions: Owner role at subscription level required to assign $roleName"
+            }
+            elseif ($_.Exception.Message -match "does not exist|cannot be found|BadRequest") {
+                $retryCount++
+                if ($retryCount -lt $maxRetries) {
+                    Write-Log "Microsoft Entra ID does not yet show the new service principal. The script tries again in 10 seconds. Attempt $retryCount of $maxRetries" -Level Warning
+                    Start-Sleep -Seconds 10
+                }
+                else {
+                    throw
+                }
+            }
+            else {
+                throw
+            }
+        }
+    }
+}
+
 function Set-AppRegistrationRoles {
     <#
     .SYNOPSIS
@@ -2400,9 +2516,13 @@ function Set-AppRegistrationRoles {
             }
         }
 
+        # The third role on the subscription: Role Based Access Control Administrator, limited
+        # to two roles. The variables at the top of the script hold the condition.
+        Set-NeologikLimitedSubscriptionRole -ServicePrincipalId $ServicePrincipalId -SubscriptionId $SubscriptionId
+
         # The roles of the deployment identity on the resource group. The deployment creates role
         # assignments for the identities of the cluster. The deployment identity therefore needs the role
-        # Role Based Access Control Administrator. The role applies to the resource group only.
+        # Role Based Access Control Administrator. The role on the resource group has no limit.
         $rgScope = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName"
         $rgRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
 

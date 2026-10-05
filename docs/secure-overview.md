@@ -6,7 +6,7 @@ This page summarises the access that the onboarding script, `Install-NeologikEnv
 
 A Global Administrator who is also Owner of the subscription runs the onboarding script once. The onboarding script prepares one resource group and the directory objects of one Neologik Platform environment.
 
-The onboarding script grants access on the resource group. The onboarding script grants only two roles on the subscription: Reader and Cost Management Contributor. The deployment identity holds both roles. Neither role allows a change to an Azure resource.
+The onboarding script grants access on the resource group. The onboarding script grants three roles on the subscription: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning two roles. The deployment identity holds the three roles. None of the three allows a change to an Azure resource.
 
 ## Contents
 
@@ -36,7 +36,7 @@ The onboarding script grants access on the resource group. The onboarding script
 
 | Who receives the access | Scope | Access |
 |---|---|---|
-| Deployment identity | Subscription | Reader<br>Cost Management Contributor |
+| Deployment identity | Subscription | Reader<br>Cost Management Contributor<br>Role Based Access Control Administrator, limited to assigning two roles: Reader and AppGw for Containers Configuration Manager |
 | Deployment identity | Resource group | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator |
 | Deployment identity | Microsoft Graph application permissions | `Application.ReadWrite.OwnedBy`<br>`AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Deployment identity | Ownership | The Platform Sign-in application<br>The service principal of the Platform Sign-in application<br>The agent identity blueprint<br>The service principal of the agent identity blueprint |
@@ -53,6 +53,7 @@ The onboarding script grants access on the resource group. The onboarding script
 | Reader on the subscription | Before a deployment, the deployment by Neologik reads the sizes and the quotas that are available in the Azure region |
 | Cost Management Contributor on the subscription | The deployment by Neologik creates and maintains the scheduled cost report of the subscription. The role covers cost configuration only |
 | Role Based Access Control Administrator on the resource group | The deployment by Neologik creates workloads inside the resource group. The deployment by Neologik assigns roles to the identities of those workloads, inside the resource group |
+| Role Based Access Control Administrator on the subscription, limited to two roles | The deployment runs the ingress controller of a secure environment with Application Gateway for Containers. Microsoft requires the identity of that controller to hold two roles. The first is Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster. That resource group is outside the resource group of the environment. The second is AppGw for Containers Configuration Manager on the resource group of the environment. The condition on the role lets the deployment identity assign those two roles and no other role, and remove only those two |
 | `Application.ReadWrite.OwnedBy` | The deployment by Neologik manages the application registrations that the deployment identity owns. The permission covers no other application registration |
 | `AgentIdentityBlueprint.AddRemoveCreds.All` | The deployment by Neologik adds and removes the credentials of the agent identity blueprint |
 | `AgentIdUser.ReadWrite.IdentityParentedBy` | The agent identity blueprint creates the agent user accounts of the agent identities of that agent identity blueprint. The permission covers no other agent user account |
