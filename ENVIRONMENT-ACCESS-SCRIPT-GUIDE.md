@@ -9,7 +9,7 @@
 | The first run | Before an existing environment moves to version 5 of the Neologik Platform | Confirms the directory objects that the Neologik Platform uses, and the roles and permissions that the deployment identity needs. Removes nothing |
 | The later run | After Neologik has deployed and proven the environment | Applies the grants that the files from Neologik list, when the command names a file. Reduces the access of the deployment identity to the roles that the deployment identity needs |
 
-The first run removes nothing. The deployment identity keeps the access it holds today until the later run. Between the two runs, Neologik can put right a failed first run or a failed deployment with that access, without a further request to you.
+The first run removes nothing. The deployment identity keeps the access it holds today until the later run. Between the two runs, Neologik can put right a failed first run or a failed deployment with that access. Neologik then needs no further request to you.
 
 An environment that this version of the onboarding kit onboarded already holds the access that the first run produces. Such an environment needs the first run only when Neologik asks for the first run.
 
@@ -82,7 +82,7 @@ The command selects the first run when the command names neither `-LaterRun` nor
 | Sponsor | The agent identity blueprint has a sponsor. The sponsor is the person who is accountable for the agents of the environment. The summary names the sponsor | The environment access script adds the signed-in Global Administrator as the sponsor when the agent identity blueprint has no sponsor |
 | The permission of the service principal | The service principal holds `AgentIdUser.ReadWrite.IdentityParentedBy`. The permission covers only the agent users of this agent identity blueprint | The environment access script grants the permission when the permission is absent |
 | The federated credentials | The agent identity blueprint holds the three federated credentials through which the Neologik deployment signs in as the agent identity blueprint | The environment access script adds a federated credential when the federated credential is absent |
-| The permissions that the deployment identity keeps | The deployment identity holds `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` | The environment access script grants a permission when the permission is absent. The first run removes no permission; the later run removes the permissions that the deployment identity no longer needs |
+| The permissions that the deployment identity keeps | The deployment identity holds `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` | The environment access script grants a permission when the permission is absent. The first run removes no permission. The later run removes the seven permissions listed under step 8 |
 
 The deployment identity can already own one agent identity blueprint with another short name. The environment access script then uses that agent identity blueprint and creates no second one. The summary then names the agent identity blueprint that the environment access script used.
 
@@ -133,13 +133,13 @@ The environment access script confirms that the deployment identity holds nine A
 | Resource group | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator |
 | Subscription | Reader<br>Cost Management Contributor |
 
-When the deployment identity holds all nine roles, the environment access script records the version of the onboarding kit on the resource group, in the tag `NeologikOnboardingKit`. The environment access script keeps your other tags and writes the tag only when the value differs. The Neologik Platform reads the tag before an upgrade.
+When the deployment identity holds all nine roles, the environment access script records the version of the onboarding kit on the resource group. The record is the tag `NeologikOnboardingKit`. The environment access script keeps your other tags and writes the tag only when the value differs. The Neologik Platform reads the tag before an upgrade.
 
 The first run changes nothing on a managed identity, on a security group or on a user. The first run removes no role, no permission and no membership.
 
 ## The later run
 
-The command selects the later run with `-LaterRun`. Neologik asks for the later run once Neologik has deployed and proven the environment. The later run applies the grants that the files list, when the command names a file, and then reduces the access of the deployment identity. The later run makes none of the checks of the first run.
+The command selects the later run with `-LaterRun`. Neologik asks for the later run once Neologik has deployed and proven the environment. The later run applies the grants that the files list, when the command names a file. The later run then reduces the access of the deployment identity. The later run makes none of the checks of the first run.
 
 A command that names a grants file and not `-LaterRun` applies the file and nothing else. Neologik sends such a command when an agent or an App is to work unattended in Microsoft 365 after the later run.
 
@@ -263,7 +263,7 @@ The first run adds only a role or a permission that is absent from the set liste
 
 **Why does the first run keep the wider access until the later run?**
 
-Neologik deploys the new version of the environment between the two runs. When a step of the first run or of the deployment fails, Neologik puts the step right with the access that the deployment identity still holds, without a further request to you. Once the environment is proven, the later run removes the wider access.
+Neologik deploys the new version of the environment between the two runs. When a step of the first run or of the deployment fails, Neologik puts the step right with the access that the deployment identity still holds. Neologik then needs no further request to you. Once the environment is proven, the later run removes the wider access.
 
 **Why does my account need such wide permissions?**
 
