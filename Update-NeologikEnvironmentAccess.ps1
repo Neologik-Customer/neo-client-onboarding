@@ -239,8 +239,9 @@
     script. When the script cannot write to that folder, the script writes to the
     current folder. When the script cannot write to the current folder, the script
     writes to the temporary folder. The run ends with the list FILES TO SEND TO
-    NEOLOGIK. With -UploadStorageAccountName the script also uploads the files to
-    the storage account of the environment.
+    NEOLOGIK. The script also uploads the files to the storage account of the
+    onboarding when that storage account is found, else to the storage account
+    that -UploadStorageAccountName names.
 
 .PARAMETER ConfigurationFile
     The configuration file that Install-NeologikEnvironment.ps1 wrote at onboarding.
@@ -318,15 +319,19 @@
     ResourceGroupName.
 
 .PARAMETER UploadStorageAccountName
-    The storage account of the environment to which the script uploads the files of
-    the run: the log file, the summary file and the snapshot file, into the container
-    onboarding-access. The command from Neologik names the storage account. The
-    upload uses the Azure session of the signed-in administrator; when the storage
-    account refuses the upload, the script assigns the role Storage Blob Data
-    Contributor on the storage account to the signed-in administrator and tries
-    again. A storage account behind a private endpoint cannot be reached from a
-    workstation; the files then stay on the workstation, listed at the end of the
-    run, for the administrator to send.
+    A storage account of the environment to which the script uploads the files of
+    the run when the storage account of the onboarding is not found or does not take
+    the files. The files of the run are the log file, the summary file and the
+    snapshot file. The script first uploads them to the storage account that the
+    onboarding script created, named by the configuration file or found in the
+    resource group by its name 'stneodeploy...', into the containers logs and json
+    beside the files of the onboarding. Then to the storage account this parameter
+    names, into the container onboarding-access. The upload uses the Azure session
+    of the signed-in administrator; when a storage account refuses the upload, the
+    script assigns the role Storage Blob Data Contributor on that storage account
+    to the signed-in administrator and tries again. A storage account behind a
+    private endpoint cannot be reached from a workstation; the files then stay on
+    the workstation, listed at the end of the run, for the administrator to send.
 
 .PARAMETER RemoveLegacyGrantAppIds
     The application id of each identity that the environment has stopped using. The
@@ -1231,6 +1236,7 @@ function Resolve-NeologikInput {
     # run reduces the access of the deployment identity only with -LaterRun.
     $state.Run = if ($state.LaterRun -or $state.AgentGrantsFile -or $state.MailboxGrantsFile) { 'PostWindow' } else { 'PreWindow' }
     $state.Config = $null
+    $state.OnboardingStorageAccountName = ''
     # The name of the agent identity blueprint holds the short name. The parameter comes
     # first, then the configuration file. The script never reads the short name from a
     # display name.
@@ -1263,6 +1269,10 @@ function Resolve-NeologikInput {
             throw [System.ArgumentException]::new("The configuration file is not the file that the onboarding script wrote: $($state.ConfigurationFile). The file must hold TenantId and AppRegistration.")
         }
         $state.Config = $config
+        # The storage account that the onboarding script created and uploaded its own
+        # files to. The files of this run go there first.
+        $onboardingAccount = ([string](Get-NeologikProperty (Get-NeologikProperty $config 'StorageAccount') 'Name' '')).Trim().ToLowerInvariant()
+        if ($onboardingAccount -match '^[a-z0-9]{3,24}$') { $state.OnboardingStorageAccountName = $onboardingAccount }
         if (-not $state.TenantId) { $state.TenantId = [string](Get-NeologikProperty $config 'TenantId' '') }
         if (-not $state.SubscriptionId) { $state.SubscriptionId = [string](Get-NeologikProperty $config 'SubscriptionId' '') }
         if (-not $state.ResourceGroupName) { $state.ResourceGroupName = [string](Get-NeologikProperty $config 'ResourceGroupName' '') }
@@ -4154,60 +4164,68 @@ function Get-NeologikRunFile {
     return @(@($script:LogFile, $script:SummaryFile, $script:SnapshotFile) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) })
 }
 
-function Send-NeologikRunFile {
+function Get-NeologikUploadTarget {
     <#
-    Uploads the files of the run to the container 'onboarding-access' of the storage
-    account that -UploadStorageAccountName names, with the Azure session of the
-    signed-in administrator. The storage accounts of the Neologik Platform refuse
-    shared keys, so the upload needs the role Storage Blob Data Contributor; when the
-    first attempt is refused, the function assigns the role to the signed-in
-    administrator on the storage account and tries again while the role propagates.
-    A storage account behind a private endpoint cannot be reached from a
-    workstation; the files then stay listed for the administrator to send. The
-    upload never changes the exit code of the run.
+    The storage accounts to try for the files of the run, in order. First the
+    storage account that the onboarding script created, named by the configuration
+    file or found in the resource group by its name 'stneodeploy...'; the onboarding
+    script uploaded its own log and configuration file there, into the containers
+    'logs' and 'json', and the files of this run join them. Then the storage account
+    that -UploadStorageAccountName names, into the container 'onboarding-access'.
     #>
     $state = $script:State
-    $script:UploadedFiles = @()
-    $account = [string](Get-NeologikProperty $state 'UploadStorageAccountName' '')
-    if (-not $account) { return }
-    $files = @(Get-NeologikRunFile)
-    if ($files.Count -eq 0) { return }
-    if (Get-NeologikProperty $state 'Verify' $false) {
-        Write-Log "  -Verify: the script does not upload the files of the run to $account. Send the files listed below" -Level Info
-        return
-    }
-    if (-not ($state.ContainsKey('AzureConnected') -and $state.AzureConnected)) {
-        Write-Log "  The run did not sign in to Azure, so the script does not upload the files to $account. Send the files listed below" -Level Warning
-        return
-    }
-    $container = 'onboarding-access'
-    $scope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)/providers/Microsoft.Storage/storageAccounts/$account"
-    try {
-        if (-not (Import-NeologikModuleSet -Names @('Az.Storage') -MinimumVersion ([version]'2.0.0') -Independent -InstallHint 'Install-Module Az.Storage -Scope CurrentUser -Force')) {
-            Write-Log "  The Az.Storage module is not available, so the script does not upload the files. Send the files listed below" -Level Warning
-            return
+    $targets = @()
+    $onboarding = [string](Get-NeologikProperty $state 'OnboardingStorageAccountName' '')
+    if (-not $onboarding) {
+        try {
+            $found = @(Get-AzStorageAccount -ResourceGroupName $state.ResourceGroupName -ErrorAction Stop |
+                Where-Object { [string](Get-NeologikProperty $_ 'StorageAccountName' '') -like 'stneodeploy*' } |
+                ForEach-Object { [string](Get-NeologikProperty $_ 'StorageAccountName' '') } | Sort-Object)
+            if ($found.Count -gt 0) { $onboarding = $found[0] }
         }
+        catch { Write-Log "  The script could not list the storage accounts of the resource group. $(Get-NeologikErrorText $_)" -Level Warning }
+    }
+    if ($onboarding) { $targets += @{ Account = $onboarding; Kind = 'onboarding'; LogContainer = 'logs'; FileContainer = 'json' } }
+    $named = [string](Get-NeologikProperty $state 'UploadStorageAccountName' '')
+    if ($named -and $named -ne $onboarding) { $targets += @{ Account = $named; Kind = 'named'; LogContainer = 'onboarding-access'; FileContainer = 'onboarding-access' } }
+    return $targets
+}
+
+function Send-NeologikRunFileTo {
+    # Uploads the files of the run to one storage account. Returns $true when every
+    # file is there. The storage accounts of the Neologik Platform refuse shared keys,
+    # so the upload needs the role Storage Blob Data Contributor; when the first
+    # attempt is refused, the function assigns the role to the signed-in administrator
+    # on the storage account and tries again while the role propagates.
+    param([hashtable]$Target, [string[]]$Files)
+    $state = $script:State
+    $account = $Target.Account
+    $scope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)/providers/Microsoft.Storage/storageAccounts/$account"
+    $uploaded = @()
+    try {
         $context = New-AzStorageContext -StorageAccountName $account -UseConnectedAccount -ErrorAction Stop
         $roleAssigned = $false
         for ($attempt = 1; $attempt -le $script:UploadMaxAttempts; $attempt++) {
             try {
-                if (-not (Get-AzStorageContainer -Name $container -Context $context -ErrorAction SilentlyContinue)) {
-                    New-AzStorageContainer -Name $container -Context $context -Permission Off -ErrorAction Stop | Out-Null
-                }
-                foreach ($file in $files) {
+                $uploaded = @()
+                foreach ($file in $Files) {
+                    $container = if ($file -like '*.log') { $Target.LogContainer } else { $Target.FileContainer }
+                    if (-not (Get-AzStorageContainer -Name $container -Context $context -ErrorAction SilentlyContinue)) {
+                        New-AzStorageContainer -Name $container -Context $context -Permission Off -ErrorAction Stop | Out-Null
+                    }
                     $blob = Split-Path -Leaf $file
                     Set-AzStorageBlobContent -File $file -Container $container -Blob $blob -Context $context -Force -ErrorAction Stop | Out-Null
-                    $script:UploadedFiles += "$account/$container/$blob"
+                    $uploaded += "$account/$container/$blob"
                 }
-                Write-Log "  The files of the run are in the storage account: $account/$container ($($files.Count) file(s))" -Level Success
-                return
+                $script:UploadedFiles = $uploaded
+                Write-Log "  The files of the run are in the storage account $account ($($Files.Count) file(s))" -Level Success
+                return $true
             }
             catch {
-                $script:UploadedFiles = @()
                 $reason = Get-NeologikErrorText $_
                 $refused = $reason -match '(?i)AuthorizationPermissionMismatch|AuthorizationFailure|403|Forbidden|not authorized'
                 if ($refused -and -not $roleAssigned -and $state.SignedInObjectId) {
-                    Write-Log "  The storage account refused the upload. The script assigns Storage Blob Data Contributor on $account to the signed-in administrator and tries again" -Level Warning
+                    Write-Log "  The storage account $account refused the upload. The script assigns Storage Blob Data Contributor on $account to the signed-in administrator and tries again" -Level Warning
                     try {
                         Invoke-NeologikWrite -Command 'New-AzRoleAssignment' -Parameters @{ ObjectId = $state.SignedInObjectId; RoleDefinitionName = 'Storage Blob Data Contributor'; Scope = $scope } | Out-Null
                     }
@@ -4223,12 +4241,49 @@ function Send-NeologikRunFile {
                 }
             }
         }
-        Write-Log "  The upload to $account did not complete after $($script:UploadMaxAttempts) attempts. Send the files listed below" -Level Warning
+        Write-Log "  The upload to $account did not complete after $($script:UploadMaxAttempts) attempts" -Level Warning
     }
     catch {
-        $script:UploadedFiles = @()
-        Write-Log "  The script could not upload the files to $account. $(Get-NeologikErrorText $_). A storage account behind a private endpoint cannot be reached from this workstation. Send the files listed below" -Level Warning
+        Write-Log "  The script could not upload the files to $account. $(Get-NeologikErrorText $_). A storage account behind a private endpoint cannot be reached from this workstation" -Level Warning
     }
+    return $false
+}
+
+function Send-NeologikRunFile {
+    <#
+    Uploads the files of the run with the Azure session of the signed-in
+    administrator: first to the storage account of the onboarding, then to the
+    storage account that -UploadStorageAccountName names. The first storage account
+    that takes the files ends the search. When no storage account takes the files,
+    the files stay listed for the administrator to send. The upload never changes the
+    exit code of the run.
+    #>
+    $state = $script:State
+    $script:UploadedFiles = @()
+    $files = @(Get-NeologikRunFile)
+    if ($files.Count -eq 0) { return }
+    if (Get-NeologikProperty $state 'Verify' $false) {
+        Write-Log '  -Verify: the script does not upload the files of the run. Send the files listed below' -Level Info
+        return
+    }
+    if (-not ($state.ContainsKey('AzureConnected') -and $state.AzureConnected)) {
+        Write-Log '  The run did not sign in to Azure, so the script does not upload the files. Send the files listed below' -Level Warning
+        return
+    }
+    if (-not (Import-NeologikModuleSet -Names @('Az.Storage') -MinimumVersion ([version]'2.0.0') -Independent -InstallHint 'Install-Module Az.Storage -Scope CurrentUser -Force')) {
+        Write-Log '  The Az.Storage module is not available, so the script does not upload the files. Send the files listed below' -Level Warning
+        return
+    }
+    $targets = @(Get-NeologikUploadTarget)
+    if ($targets.Count -eq 0) {
+        Write-Log '  No storage account of the onboarding was found and the command names none. Send the files listed below' -Level Info
+        return
+    }
+    foreach ($target in $targets) {
+        Write-Log "  The script uploads the files of the run to the storage account $($target.Account) ($($target.Kind))" -Level Info
+        if (Send-NeologikRunFileTo -Target $target -Files $files) { return }
+    }
+    Write-Log '  No storage account took the files of the run. Send the files listed below' -Level Warning
 }
 
 function Write-NeologikFileList {

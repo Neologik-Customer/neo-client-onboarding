@@ -61,6 +61,7 @@ BeforeAll {
     function Remove-ManagementRoleAssignment { [CmdletBinding(SupportsShouldProcess)] param($Identity) }
     function Test-ServicePrincipalAuthorization { [CmdletBinding()] param($Identity, $Resource) }
     # Az.Storage, for the upload of the files of the run (project#3171).
+    function Get-AzStorageAccount { [CmdletBinding()] param($ResourceGroupName, $Name) }
     function New-AzStorageContext { [CmdletBinding()] param($StorageAccountName, [switch]$UseConnectedAccount) }
     function Get-AzStorageContainer { [CmdletBinding()] param($Name, $Context) }
     function New-AzStorageContainer { [CmdletBinding()] param($Name, $Context, $Permission) }
@@ -773,7 +774,8 @@ BeforeAll {
     Mock Get-NeologikGuestUsersFileDefault { $script:GuestFile }
     # The storage account of the environment (project#3171): the first
     # $script:UploadRefusals uploads are refused as a missing data role is.
-    Mock New-AzStorageContext { param($StorageAccountName) @{ StorageAccountName = $StorageAccountName } }
+    Mock Get-AzStorageAccount { @($script:StorageAccounts | ForEach-Object { @{ StorageAccountName = $_ } }) }
+    Mock New-AzStorageContext { param($StorageAccountName) if ($script:UnreachableAccounts -contains $StorageAccountName) { throw "Name or service not known: $StorageAccountName.blob.core.windows.net" }; @{ StorageAccountName = $StorageAccountName } }
     Mock Get-AzStorageContainer { param($Name) if ($script:StorageContainers -contains $Name) { @{ Name = $Name } } else { $null } }
     Mock New-AzStorageContainer { param($Name) $script:StorageContainers += $Name; Add-Write "NEW container $Name" }
     Mock Set-AzStorageBlobContent {
@@ -991,6 +993,8 @@ BeforeEach {
     $script:AzContextSubscription = $script:Ids.Subscription
     $script:SummaryDirs = @((Join-Path $TestDrive 'summary'))
     $script:StorageContainers = @()
+    $script:StorageAccounts = @()
+    $script:UnreachableAccounts = @()
     $script:Uploads = @()
     $script:UploadRefusals = 0
     # NeologikGuestUsers.txt as the onboarding kit ships it: one Neologik support account.
@@ -3200,7 +3204,8 @@ Context 'The later run: Admin User Group membership' {
         Mock Get-NeologikAvailableModuleVersion { param($Name) switch -Wildcard ($Name) { 'Az.Accounts' { @([version]'5.5.3') } 'Az.Resources' { @([version]'10.0.0') } 'Az.Sql' { @([version]'7.1.0') } default { @([version]'2.38.0') } } }
         $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        @($script:Imports | Where-Object { $_ -like 'Az.*' }) | Should -Be @('Az.Accounts ', 'Az.Resources ', 'Az.Sql ')
+        # Az.Storage is imported for the upload of the files of the run (project#3171).
+        @($script:Imports | Where-Object { $_ -like 'Az.*' }) | Should -Be @('Az.Accounts ', 'Az.Resources ', 'Az.Sql ', 'Az.Storage ')
         Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Already assigned'
         Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not held'
     }
@@ -3486,6 +3491,42 @@ Context 'Snapshot, upload and the file list (project#3171)' {
         $role[0] | Should -Be "NEW az role Storage Blob Data Contributor /subscriptions/$($script:Ids.Subscription)/resourceGroups/$script:RgName/providers/Microsoft.Storage/storageAccounts/sttemplateabcprd01"
         $script:Sleeps | Should -Contain 20
         ($script:Console -join "`n") | Should -Match 'assigns Storage Blob Data Contributor'
+    }
+
+    It 'uploads to the storage account of the onboarding first, into its logs and json containers' {
+        Add-CompliantPreWindowState
+        $cfg = New-ConfigFile -Overrides @{ StorageAccount = @{ Name = 'stneodeployabcprduks01'; JsonContainerName = 'json'; LogsContainerName = 'logs' } }
+        $code = Invoke-Run @{ ConfigurationFile = $cfg; UploadStorageAccountName = 'sttemplateabcprd01' }
+        $code | Should -Be 0
+        $script:Uploads | Should -HaveCount 3
+        @($script:Uploads | Where-Object { $_ -like 'logs/NeologikEnvironmentAccess_*.log' }) | Should -HaveCount 1
+        @($script:Uploads | Where-Object { $_ -like 'json/Neologik_EnvironmentAccess_*.json' }) | Should -HaveCount 2
+        ($script:Console -join "`n") | Should -Match 'stneodeployabcprduks01 \(onboarding\)'
+        ($script:Console -join "`n") | Should -Not -Match 'sttemplateabcprd01 \(named\)'
+        Should -Invoke Get-AzStorageAccount -Times 0 -Because 'the configuration file names the storage account'
+    }
+
+    It 'finds the storage account of the onboarding in the resource group when the command gives no configuration file' {
+        Add-CompliantPreWindowState
+        $script:StorageAccounts = @('stfilesneoabcprd01', 'stneodeployabcprduks01', 'sttemplateabcprd01')
+        $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName; UploadStorageAccountName = 'sttemplateabcprd01' }
+        $code | Should -Be 0
+        $script:Uploads | Should -HaveCount 3
+        ($script:Console -join "`n") | Should -Match 'stneodeployabcprduks01 \(onboarding\)'
+        @($script:Uploads | Where-Object { $_ -like 'json/*' }) | Should -HaveCount 2
+    }
+
+    It 'falls back to the named storage account when the storage account of the onboarding cannot be reached' {
+        Add-CompliantPreWindowState
+        $script:StorageAccounts = @('stneodeployabcprduks01')
+        $script:UnreachableAccounts = @('stneodeployabcprduks01')
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UploadStorageAccountName = 'sttemplateabcprd01' }
+        $code | Should -Be 0
+        $script:Uploads | Should -HaveCount 3
+        @($script:Uploads | Where-Object { $_ -like 'onboarding-access/*' }) | Should -HaveCount 3
+        $text = $script:Console -join "`n"
+        $text | Should -Match 'could not upload the files to stneodeployabcprduks01'
+        $text | Should -Match 'sttemplateabcprd01 \(named\)'
     }
 
     It 'leaves the files listed when the storage account cannot be reached, without changing the exit code' {
