@@ -129,11 +129,12 @@
       The script confirms that the deployment identity holds ten Azure roles:
       seven roles on the resource group and three roles on the subscription. The
       roles on the subscription are Reader, Cost Management Contributor and Role
-      Based Access Control Administrator limited to two roles. The deployment uses
+      Based Access Control Administrator limited to three roles. The deployment uses
       Cost Management Contributor for the daily cost report. The limited role lets
-      the deployment assign Reader and AppGw for Containers Configuration Manager
-      to the identity of the ingress controller of a secure environment, and no
-      other role. The script assigns a role that is absent and removes nothing.
+      the deployment assign Reader, AppGw for Containers Configuration Manager and Cost Management Reader
+      to the identity of the ingress controller of a secure environment, and Cost
+      Management Reader to the identity of the configuration API of the platform,
+      and no other role. The script assigns a role that is absent and removes nothing.
       When the limited role is already held without the limit, the first run
       reports it and the later run applies the limit.
 
@@ -544,20 +545,25 @@ $script:RequiredSubRoles = @(
 )
 
 # The third role on the subscription: Role Based Access Control Administrator, limited
-# by a condition to two roles. The deployment runs the ingress controller of a secure
+# by a condition to three roles. The deployment runs the ingress controller of a secure
 # environment with Application Gateway for Containers. Microsoft requires the identity
 # of that controller to hold Reader on the resource group that Azure Kubernetes
 # Service creates for the nodes of the cluster, which is outside the resource group of
 # the environment, and AppGw for Containers Configuration Manager on the resource
 # group of the environment. The condition lets the deployment identity assign those
-# two roles and no other role, and remove only those two.
+# three roles and no other role, and remove only those three.
+# The platform's configuration API reads the daily cost of the resource group
+# of the nodes for the return on investment report, so the deployment assigns
+# Cost Management Reader on that resource group to the identity of the
+# configuration API.
 # Install-NeologikEnvironment.ps1 assigns the same role with the same condition.
 $script:LimitedSubRole = 'Role Based Access Control Administrator'
 $script:LimitedSubRoleId = 'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
-# Reader, then AppGw for Containers Configuration Manager.
+# Reader, AppGw for Containers Configuration Manager, then Cost Management Reader.
 $script:LimitedSubRoleAssignableIds = @(
     'acdd72a7-3385-48ef-bd42-f606fba81ae7',
-    'fbc52c3f-28ad-4303-a892-8a056630b8f1'
+    'fbc52c3f-28ad-4303-a892-8a056630b8f1',
+    '72fafb9e-0641-4937-9268-a91bfd8191a3'
 )
 $script:LimitedSubRoleConditionVersion = '2.0'
 $script:LimitedSubRoleCondition = ("((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/write'}})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}})) AND ((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/delete'}})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}}))" -f ($script:LimitedSubRoleAssignableIds -join ', '))
