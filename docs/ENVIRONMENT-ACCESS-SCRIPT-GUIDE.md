@@ -62,7 +62,7 @@ The first run and the later run make one more check before either changes an Azu
 1. Place the onboarding kit in a folder on your workstation. The first run reads `NeologikGuestUsers.txt` from the folder of `Update-NeologikEnvironmentAccess.ps1`.
 2. Open PowerShell 7 in that folder.
 3. Paste the command from Neologik and press Enter.
-4. The environment access script opens the sign-in page in your browser. Sign in as a Global Administrator. The environment access script waits for up to 5 minutes.
+4. The environment access script opens the sign-in page in your browser. Sign in as a Global Administrator who also holds Owner or User Access Administrator on the subscription. The account picker may offer another account that is a Global Administrator but holds no role on the subscription, such as a guest account; the Azure steps are skipped for that account and the run must be repeated. The environment access script waits for up to 5 minutes.
 5. In the first run and in the later run, the environment access script signs in a second time, to Azure. The browser uses the same account and does not usually ask again. In a run with mailbox grants, the environment access script signs in to Exchange Online in the same way.
 6. Read the summary table on screen and the list `FILES TO SEND TO NEOLOGIK` under it. Send the files to Neologik, unless the list says that the run uploaded them.
 

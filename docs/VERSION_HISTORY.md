@@ -61,6 +61,7 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | `Install-NeologikEnvironment.ps1` | Version v5.0.10. The limited Role Based Access Control Administrator on the subscription lets the deployment identity assign a third role: Cost Management Reader. The deployment assigns that role on the resource group that Azure Kubernetes Service creates for the nodes of the cluster to the identity of the configuration API of the Neologik Platform, which reads the daily cost of the nodes for the return on investment report. An assignment with the old condition receives the new condition |
 | `Update-NeologikEnvironmentAccess.ps1` | Step 5 applies the same three-role condition to an existing environment. Run the environment access script once on an existing environment so the return on investment report can show the running cost of the nodes |
 | Documents | The documents name the three roles the limited administrator may assign and the reason for the third |
+| `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` | The sign-in step says to choose the account that holds Owner or User Access Administrator on the subscription as well as Global Administrator, because the account picker may offer a Global Administrator guest account without a subscription role |
 
 ## Version 5.0.14
 
