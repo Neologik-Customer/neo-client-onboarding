@@ -216,25 +216,30 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v5.0.9'
+$script:Version = 'v5.0.10'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
 $script:KitVersion = 'v5.0.14'
 
 # The third role of the deployment identity on the subscription: Role Based Access
-# Control Administrator, limited by a condition to two roles. The deployment runs the
+# Control Administrator, limited by a condition to three roles. The deployment runs the
 # ingress controller of a secure environment with Application Gateway for Containers.
 # Microsoft requires the identity of that controller to hold Reader on the resource
 # group that Azure Kubernetes Service creates for the nodes of the cluster, which is
 # outside the resource group of the environment, and AppGw for Containers Configuration
 # Manager on the resource group of the environment. The condition lets the deployment
-# identity assign those two roles and no other role, and remove only those two.
+# identity assign those three roles and no other role, and remove only those three.
+# The platform's configuration API reads the daily cost of the resource group
+# of the nodes for the return on investment report, so the deployment assigns
+# Cost Management Reader on that resource group to the identity of the
+# configuration API.
 $script:LimitedSubRole = 'Role Based Access Control Administrator'
 $script:LimitedSubRoleId = 'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
-# Reader, then AppGw for Containers Configuration Manager.
+# Reader, AppGw for Containers Configuration Manager, then Cost Management Reader.
 $script:LimitedSubRoleAssignableIds = @(
     'acdd72a7-3385-48ef-bd42-f606fba81ae7',
-    'fbc52c3f-28ad-4303-a892-8a056630b8f1'
+    'fbc52c3f-28ad-4303-a892-8a056630b8f1',
+    '72fafb9e-0641-4937-9268-a91bfd8191a3'
 )
 $script:LimitedSubRoleConditionVersion = '2.0'
 $script:LimitedSubRoleCondition = ("((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/write'}})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}})) AND ((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/delete'}})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}}))" -f ($script:LimitedSubRoleAssignableIds -join ', '))
@@ -2327,7 +2332,7 @@ function Set-NeologikLimitedSubscriptionRole {
         deployment identity on the subscription.
     .DESCRIPTION
         The role carries a condition that limits the roles the deployment identity may
-        assign to Reader and AppGw for Containers Configuration Manager. An assignment
+        assign to Reader, AppGw for Containers Configuration Manager and Cost Management Reader. An assignment
         that already carries the condition is reported. An assignment without the
         condition receives the condition. An absent assignment is created.
     #>
@@ -2343,7 +2348,7 @@ function Set-NeologikLimitedSubscriptionRole {
     $scope = "/subscriptions/$SubscriptionId"
     $roleName = $script:LimitedSubRole
     $wanted = ($script:LimitedSubRoleCondition -replace '\s', '').ToLowerInvariant()
-    Write-Log "Assigning the role $roleName, limited to two roles..." -Level Info
+    Write-Log "Assigning the role $roleName, limited to three roles..." -Level Info
 
     try {
         $assignments = @(Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
@@ -2528,7 +2533,7 @@ function Set-AppRegistrationRoles {
         }
 
         # The third role on the subscription: Role Based Access Control Administrator, limited
-        # to two roles. The variables at the top of the script hold the condition.
+        # to three roles. The variables at the top of the script hold the condition.
         Set-NeologikLimitedSubscriptionRole -ServicePrincipalId $ServicePrincipalId -SubscriptionId $SubscriptionId
 
         # The roles of the deployment identity on the resource group. The deployment creates role

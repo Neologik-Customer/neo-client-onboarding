@@ -34,7 +34,7 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.0.9 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Install-NeologikEnvironment.ps1` | v5.0.10 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
 | `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.14 | Confirms the access that the deployment identity of an existing environment needs for version 5 of the Neologik Platform, and reduces the access in the later run. Applies the grants for agents and Apps that work unattended |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
@@ -58,6 +58,9 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | `Update-NeologikEnvironmentAccess.ps1` | When a Conditional Access policy refuses a sign-in, the environment access script says so and tries the next method at once |
 | `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` | The document describes the browser sign-in and the device code as the second method |
 | `README.md` | A new requirement row under Before you start: a customer billed through a Cloud Solution Provider partner asks the partner to enable the cost visibility policy, so the platform's return on investment report can show running costs |
+| `Install-NeologikEnvironment.ps1` | Version v5.0.10. The limited Role Based Access Control Administrator on the subscription lets the deployment identity assign a third role: Cost Management Reader. The deployment assigns that role on the resource group that Azure Kubernetes Service creates for the nodes of the cluster to the identity of the configuration API of the Neologik Platform, which reads the daily cost of the nodes for the return on investment report. An assignment with the old condition receives the new condition |
+| `Update-NeologikEnvironmentAccess.ps1` | Step 5 applies the same three-role condition to an existing environment. Run the environment access script once on an existing environment so the return on investment report can show the running cost of the nodes |
+| Documents | The documents name the three roles the limited administrator may assign and the reason for the third |
 
 ## Version 5.0.14
 
