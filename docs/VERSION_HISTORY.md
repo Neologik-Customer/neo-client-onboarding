@@ -57,6 +57,7 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | `Update-NeologikEnvironmentAccess.ps1` | The environment access script signs in to Microsoft Graph, to Azure and to Exchange Online in the browser of the workstation first. A device code is the second method. Before this version, a device code was the first method. An organisation that blocks the device code with a Conditional Access policy could not complete the sign-in |
 | `Update-NeologikEnvironmentAccess.ps1` | When a Conditional Access policy refuses a sign-in, the environment access script says so and tries the next method at once |
 | `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` | The document describes the browser sign-in and the device code as the second method |
+| `README.md` | A new requirement row under Before you start: a customer billed through a Cloud Solution Provider partner asks the partner to enable the cost visibility policy, so the platform's return on investment report can show running costs |
 
 ## Version 5.0.14
 
