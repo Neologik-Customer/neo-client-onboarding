@@ -50,7 +50,7 @@ The onboarding kit includes each script in full. Approvers can read each script 
 | Platform operator | A person who works in the Neologik Context Engine. A platform operator is a member of the group `Neologik NCE Contributors - <short name>` or the group `Neologik NCE Admins - <short name>` |
 | Short name | The organisation code, the environment type and the environment index, joined together. An example is `abcprd01`. The short name is part of the name of each object that the onboarding script creates |
 | Onboarding script | `Install-NeologikEnvironment.ps1` |
-| Environment access script | `Update-NeologikEnvironmentAccess.ps1` |
+| Grants script | `Grant-NeologikAgentAccess.ps1` |
 | Platform Sign-in application | The application registration that signs your users in to the Neologik Context Engine and to Apps |
 | Agent identity blueprint | The Microsoft Entra Agent ID object that is the parent of each agent identity and each agent user account. The onboarding script creates the agent identity blueprint |
 
@@ -61,7 +61,7 @@ The onboarding kit includes each script in full. Approvers can read each script 
 | Script | When an administrator runs the script | What the script does | Guide |
 |---|---|---|---|
 | `Install-NeologikEnvironment.ps1` | Once, before Neologik deploys the environment | Creates the Azure resources, the security groups, the deployment identity, the Platform Sign-in application and the agent identity blueprint | This document, [TECHNICAL-REFERENCE.md](docs/TECHNICAL-REFERENCE.md) and [QUICK-REFERENCE.md](docs/QUICK-REFERENCE.md) |
-| `Update-NeologikEnvironmentAccess.ps1` | When Neologik asks. Neologik sends the complete command. The first run comes before an environment moves to Neologik Platform version 5. The later run comes after Neologik has deployed and proven the environment | The first run confirms the directory objects of the environment and the roles that the deployment identity needs, and removes nothing. The later run applies the grants in the files that Neologik sends and reduces the access of the deployment identity | [ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md](docs/ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md) |
+| `Grant-NeologikAgentAccess.ps1` | When an agent or an App is to work unattended in Microsoft 365, and again whenever the Neologik Context Engine exports a new grants file | Applies the grants that the two files from the Neologik Context Engine list: the grants to agent users and the mailbox grants of the email channels | [GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md](docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md) |
 | `Export-NeologikCertificate.ps1` | When you prepare your TLS certificate | Builds a PFX file on the workstation. Contacts no service | [PFX-CERT-GUIDE.md](docs/PFX-CERT-GUIDE.md) |
 | `Register-NeologikResourceProviders.ps1` | When the onboarding script reports that an Azure resource provider is still registering | Confirms the Azure resource provider registrations on the subscription | [TECHNICAL-REFERENCE.md](docs/TECHNICAL-REFERENCE.md#resource-provider-registration) |
 | `Upgrade-TeamsAppInstallations.ps1` | After Neologik sends you a new version of the Teams app package | Upgrades the Neologik Teams app that each user has installed, to the latest version in your Teams app catalogue | [TEAMS-APP-UPGRADE-GUIDE.md](docs/TEAMS-APP-UPGRADE-GUIDE.md) |
@@ -80,7 +80,7 @@ This document is in the root of the onboarding kit. Every other document is in t
 | [PFX-CERT-GUIDE.md](docs/PFX-CERT-GUIDE.md) | How to prepare the TLS certificate |
 | [FINISHING-STEPS-GUIDE.md](docs/FINISHING-STEPS-GUIDE.md) | The steps that follow the deployment by Neologik |
 | [AGENT-ACCOUNT-ACCESS-GUIDE.md](docs/AGENT-ACCOUNT-ACCESS-GUIDE.md) | How to give an agent account access to a mailbox, a site or a team |
-| [ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md](docs/ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md) | What the environment access script, `Update-NeologikEnvironmentAccess.ps1`, checks and changes |
+| [GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md](docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md) | What the grants script, `Grant-NeologikAgentAccess.ps1`, applies |
 | [TEAMS-APP-UPGRADE-GUIDE.md](docs/TEAMS-APP-UPGRADE-GUIDE.md) | How to upgrade the Teams app for your users |
 | [TECHNICAL-REFERENCE.md](docs/TECHNICAL-REFERENCE.md) | The onboarding script in detail: parameters, names, steps and output files |
 | [ANALYTICS-REPORTING-GUIDE.md](docs/ANALYTICS-REPORTING-GUIDE.md) | For Approvers. What the environment reports to Neologik, what the environment never reports, how long Neologik keeps the statistics and how to withdraw |

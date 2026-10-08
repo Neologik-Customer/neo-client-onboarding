@@ -43,9 +43,12 @@ secrets/
 *~
 NeologikCheckpoint.json
 
-# Summary files written by Update-NeologikEnvironmentAccess.ps1
+# Files written by Grant-NeologikAgentAccess.ps1
+Neologik_AgentAccess_*.json
+NeologikAgentAccess_*.log
+# Files written by the environment access script of onboarding kit versions up to 5.0.14
 Neologik_EnvironmentAccess_*.json
-# Grants files supplied for Update-NeologikEnvironmentAccess.ps1
+# Grants files supplied for Grant-NeologikAgentAccess.ps1
 agent-grants-*.json
 mailbox-grants-*.json
 
