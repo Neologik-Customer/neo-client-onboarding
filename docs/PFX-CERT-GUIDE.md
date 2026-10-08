@@ -52,7 +52,7 @@ When you do not know which files to request, ask your certificate provider. Ask 
 
    ```powershell
    Unblock-File .\Export-NeologikCertificate.ps1
-   Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
    .\Export-NeologikCertificate.ps1
    ```
 
