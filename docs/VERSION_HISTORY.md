@@ -76,6 +76,7 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` | Removed with the script that the document described |
 | `Install-NeologikEnvironment.ps1` | No change to the script. The onboarding script records the version `v5.0.15` on the resource group |
 | Documents | `README.md`, `FINISHING-STEPS-GUIDE.md` and `AGENT-ACCOUNT-ACCESS-GUIDE.md` name the grants script |
+| `NeologikGuestUsers.txt` | One Neologik support account that no longer works for Neologik is removed from the list |
 
 ## Version 5.0.14
 
