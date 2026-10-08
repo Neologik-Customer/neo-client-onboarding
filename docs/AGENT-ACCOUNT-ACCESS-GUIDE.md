@@ -19,7 +19,7 @@ The name of an agent account has one of two forms.
 
 The agent account has no password. The agent account cannot sign in. The agent uses the agent account only through the permissions that a Global Administrator granted.
 
-A Global Administrator grants the permissions in the later run of the environment access script, `Update-NeologikEnvironmentAccess.ps1`. [ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md](ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md#the-later-run) describes the later run.
+A Global Administrator grants the permissions with the grants script, `Grant-NeologikAgentAccess.ps1`, and the agent grants file that the Neologik Context Engine exports. [GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md](GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md) describes the grants script.
 
 An administrator completes up to four tasks in your tenant.
 

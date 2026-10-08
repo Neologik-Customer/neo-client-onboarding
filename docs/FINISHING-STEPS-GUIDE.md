@@ -214,18 +214,11 @@ When the checklist is complete, follow these steps.
 
 ## Later changes
 
-After onboarding, Neologik may ask a Global Administrator to run the environment access script, `Update-NeologikEnvironmentAccess.ps1`. Neologik asks on one of two occasions.
+When an agent or an App is to work unattended in Microsoft 365, a Global Administrator runs the grants script, `Grant-NeologikAgentAccess.ps1`, with the two files that the Neologik Context Engine exports. The agent grants file lists the grants to agent users. The mailbox grants file lists the mailbox grants of the email channels. The Global Administrator runs the grants script again whenever the Neologik Context Engine exports a new file.
 
-| Run | Occasion | What the environment access script does |
-|---|---|---|
-| [The first run](ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md#the-first-run) | Before the environment moves to version 5 of the Neologik Platform | Confirms the directory objects that the Neologik Platform uses. Reduces the access of the deployment identity to the roles that the deployment identity needs |
-| [The later run](ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md#the-later-run) | When an agent or an App is to work unattended in Microsoft 365 | Applies the grants that the files from Neologik list |
+[GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md](GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md) explains three subjects:
 
-Neologik sends the complete command, with every value filled in.
-
-[ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md](ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md) explains three subjects:
-
-- what the environment access script checks and changes
+- what the grants script applies
 - what the sign-in asks you to approve
 - what you receive at the end of the run
 
