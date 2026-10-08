@@ -7,12 +7,13 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 | Subject | Detail |
 |---|---|
 | Version of the onboarding kit | The version of the onboarding kit follows the version of the Neologik Platform |
-| Record on your resource group | The onboarding script and the environment access script record the version of the onboarding kit on your resource group, in the tag `NeologikOnboardingKit`. The Neologik Platform reads the tag before an upgrade |
+| Record on your resource group | The onboarding script records the version of the onboarding kit on your resource group, in the tag `NeologikOnboardingKit`. The migration script of the Neologik migration package records the version that a migration brings your environment to. The Neologik Platform reads the tag before an upgrade |
 | Versions 5.0.4 and 5.0.5 | The onboarding kit has no version 5.0.4 and no version 5.0.5 |
 
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.0.15](#version-5015)
 2. [Version 5.0.14](#version-5014)
 2. [Version 5.0.13](#version-5013)
 2. [Version 5.0.12](#version-5012)
@@ -35,10 +36,25 @@ The table shows the version that each script reports.
 | Script | Version of the script | Purpose |
 |---|---|---|
 | `Install-NeologikEnvironment.ps1` | v5.0.8 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Update-NeologikEnvironmentAccess.ps1` | Onboarding kit version v5.0.14 | Confirms the access that the deployment identity of an existing environment needs for version 5 of the Neologik Platform, and reduces the access in the later run. Applies the grants for agents and Apps that work unattended |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.15 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.0.15
+
+**Date**: 2026-10-08
+
+| Item | Change |
+|---|---|
+| `Grant-NeologikAgentAccess.ps1` | New script, the grants script. The grants script applies the agent grants file and the mailbox grants file that the Neologik Context Engine exports: the grants to agent users, the Microsoft Graph application permissions of workload identities, the check of the SharePoint consent and the Exchange Online mailbox grants of the email channels. The grants script reads the tenant and the environment from the agent grants file, so the command names the files and nothing else. The grants script signs in to Microsoft Graph and, with a mailbox grants file, to Exchange Online. The grants script signs in to Azure never |
+| `Grant-NeologikAgentAccess.ps1` | The sign-in to Microsoft Graph requests four delegated permissions at most: `Directory.Read.All`, `User.Read`, `AppRoleAssignment.ReadWrite.All` and, with an agent grants file, `DelegatedPermissionGrant.ReadWrite.All` |
+| `Grant-NeologikAgentAccess.ps1` | The run writes the log file `NeologikAgentAccess_<date and time>.log` and the summary file `Neologik_AgentAccess_<date and time>.json`, and ends with the list `FILES TO SEND TO NEOLOGIK` |
+| `Update-NeologikEnvironmentAccess.ps1` | Removed from the onboarding kit. The first run and the later run of an environment that moves to version 5 of the Neologik Platform are now the migration script, `Migrate-NeologikEnvironment.ps1`, which Neologik sends to a migrating customer as the Neologik migration package. The grants runs of the removed script are the grants script above |
+| `GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md` | New document. What the grants script applies, what the sign-in asks you to approve and what you receive |
+| `ENVIRONMENT-ACCESS-SCRIPT-GUIDE.md` | Removed with the script that the document described |
+| `Install-NeologikEnvironment.ps1` | No change to the script. The onboarding script records the version `v5.0.15` on the resource group |
+| Documents | `README.md`, `FINISHING-STEPS-GUIDE.md` and `AGENT-ACCOUNT-ACCESS-GUIDE.md` name the grants script |
 
 ## Version 5.0.14
 
