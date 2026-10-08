@@ -65,7 +65,7 @@ One run of the script upgrades every Neologik Teams app that you uploaded in ste
 
    ```powershell
    Unblock-File .\Upgrade-TeamsAppInstallations.ps1
-   Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
    ```
 
 4. Run the script:
