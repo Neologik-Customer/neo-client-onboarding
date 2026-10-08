@@ -124,7 +124,7 @@ The onboarding script checks both roles before the onboarding script creates any
 
 ### 1. Extract the onboarding kit
 
-Extract the onboarding kit to a folder, for example `C:\Neologik`.
+Extract the onboarding kit to a folder, for example `C:\Neologik`. A zip downloaded from GitHub extracts to a folder inside the folder you choose, named `neo-client-onboarding-main`. The scripts are in that inner folder.
 
 Keep the files together. The onboarding script reads `NeologikGuestUsers.txt` and `resource-providers.txt` from the folder of the onboarding script. The onboarding script also reads `inputs.json` from that folder, if you create the answer file.
 
@@ -142,18 +142,24 @@ The version must be 7.4 or later. If PowerShell 7 is not installed, install Powe
 
 ### 3. Go to the folder of the onboarding kit
 
+Go to the folder that holds the scripts:
+
 ```powershell
 cd C:\Neologik
 ```
+
+For a zip downloaded from GitHub, the folder is `C:\Neologik\neo-client-onboarding-main`.
 
 ### 4. Allow the scripts to run in this session
 
 ```powershell
 Get-ChildItem .\*.ps1 | Unblock-File
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-The first command marks the scripts in the folder as trusted on this workstation. The second command applies to the current PowerShell window only. Windows does not keep the setting after you close the window.
+The first command removes the mark that Windows puts on a downloaded file. Without it, PowerShell refuses the scripts with the words `not digitally signed`. The second command lifts the execution policy for the current PowerShell window only. Windows does not keep the setting after you close the window.
+
+If PowerShell still refuses a script with the words `not digitally signed`, the execution policy is set by Group Policy, which the command above cannot change. Run `Get-ExecutionPolicy -List`: a value other than `Undefined` on the `MachinePolicy` or `UserPolicy` row confirms it. An administrator of that policy allows `RemoteSigned` for the workstation, or you run the scripts from a workstation without the policy.
 
 ### 5. Start the onboarding script
 
