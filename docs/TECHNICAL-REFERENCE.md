@@ -298,6 +298,8 @@ The onboarding script stores the client secret in the Key Vault, as the secret `
 | Microsoft Graph application permissions | `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Security groups | No membership |
 
+The onboarding script counts a role only when the assignment is at the scope shown and carries the condition shown: the limited role on the subscription with its condition, every other role with none. An assignment inherited from the subscription never stands in for a role on the resource group. After the assignments, the onboarding script reads the roles of the deployment identity back, records them in the configuration file (`AppRegistration.SubscriptionRoles`, `AppRegistration.RGRoles` and `AppRegistration.RolesConfirmedAt`) and in the completion summary, and stops the run when a role is missing, naming the role and the scope.
+
 | Microsoft Graph application permission | What the permission allows |
 |---|---|
 | `Application.ReadWrite.OwnedBy` | The deployment identity manages only the application registrations that the deployment identity owns |

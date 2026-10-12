@@ -218,7 +218,7 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v5.0.9'
+$script:Version = 'v5.0.10'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
 $script:KitVersion = 'v5.0.17'
@@ -1856,7 +1856,7 @@ function Set-NeologikRoleAssignments {
 
         $assignRole = {
             param($ObjectId, $RoleName, $Scope, $GroupName)
-            $existing = Get-AzRoleAssignment -ObjectId $ObjectId -RoleDefinitionName $RoleName -Scope $Scope -ErrorAction SilentlyContinue
+            $existing = Test-NeologikRoleAssigned -ObjectId $ObjectId -RoleName $RoleName -Scope $Scope -ErrorAction SilentlyContinue
             if ($existing) {
                 Write-Log "$RoleName already assigned to $GroupName" -Level Info
                 return
@@ -2409,6 +2409,121 @@ function Set-NeologikLimitedSubscriptionRole {
     }
 }
 
+function Test-NeologikRoleAssigned {
+    <#
+    .SYNOPSIS
+        Answers whether a principal holds a role at exactly one scope.
+
+    .DESCRIPTION
+        Get-AzRoleAssignment -Scope returns the assignments at the scope and
+        every assignment inherited from a parent scope. The onboarding script
+        needs the assignment at the scope itself. An inherited assignment can
+        carry a condition that limits it, and the limited role of the
+        deployment identity on the subscription must never stand in for the
+        unlimited role on the resource group. An assignment counts when its
+        scope is the scope asked for and its condition is the condition asked
+        for: none, unless the caller names one.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ObjectId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$RoleName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Scope,
+
+        [string]$Condition = ''
+    )
+
+    $wanted = ($Condition -replace '\s', '').ToLowerInvariant()
+    $assignments = @(Get-AzRoleAssignment -ObjectId $ObjectId -RoleDefinitionName $RoleName -Scope $Scope)
+    foreach ($assignment in $assignments) {
+        if ([string]$assignment.Scope -ne $Scope) { continue }
+        $held = (([string]$assignment.Condition) -replace '\s', '').ToLowerInvariant()
+        if ($held -eq $wanted) { return $true }
+    }
+    return $false
+}
+
+function Confirm-NeologikDeploymentIdentityRoles {
+    <#
+    .SYNOPSIS
+        Reads back the Azure roles of the deployment identity and records what it holds.
+
+    .DESCRIPTION
+        After the role assignments, the onboarding script reads the assignments
+        of the deployment identity at the subscription and at the resource group
+        and compares them with the roles the deployment needs. A role counts
+        only at its own scope and only with the condition the onboarding script
+        gives it: the limited role on the subscription with its condition,
+        every other role without one. A new assignment can take a moment to
+        appear in a read, so the script reads again, up to six times. A role
+        still missing stops the run and names the role and the scope. The
+        configuration file and the completion summary record the roles from
+        this read, never the list the script set out to assign.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ServicePrincipalId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceGroupName,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$SubscriptionRoles,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$ResourceGroupRoles
+    )
+
+    $subScope = "/subscriptions/$SubscriptionId"
+    $rgScope = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName"
+    $wanted = @()
+    foreach ($roleName in $SubscriptionRoles) { $wanted += @{ Role = $roleName; Scope = $subScope; Condition = '' } }
+    $wanted += @{ Role = $script:LimitedSubRole; Scope = $subScope; Condition = $script:LimitedSubRoleCondition }
+    foreach ($roleName in $ResourceGroupRoles) { $wanted += @{ Role = $roleName; Scope = $rgScope; Condition = '' } }
+
+    Write-Log "Reading back the roles of the deployment identity..." -Level Info
+    $missing = @()
+    for ($attempt = 1; $attempt -le 6; $attempt++) {
+        $missing = @($wanted | Where-Object { -not (Test-NeologikRoleAssigned -ObjectId $ServicePrincipalId -RoleName $_.Role -Scope $_.Scope -Condition $_.Condition -ErrorAction Stop) })
+        if ($missing.Count -eq 0) { break }
+        if ($attempt -lt 6) {
+            Write-Log "Azure does not yet show every role of the deployment identity. The script reads again in 10 seconds. Attempt $attempt of 6" -Level Warning
+            Start-Sleep -Seconds 10
+        }
+    }
+
+    $heldSub = @()
+    $heldRg = @()
+    foreach ($entry in $wanted) {
+        if ($missing -contains $entry) { continue }
+        if ($entry.Scope -eq $subScope) { $heldSub += $entry.Role } else { $heldRg += $entry.Role }
+    }
+    foreach ($roleName in $heldSub) { Write-Log "Confirmed: $roleName on the subscription" -Level Success }
+    foreach ($roleName in $heldRg) { Write-Log "Confirmed: $roleName on the resource group" -Level Success }
+
+    if ($script:ConfigData['AppRegistration']) {
+        $script:ConfigData['AppRegistration']['SubscriptionRoles'] = $heldSub
+        $script:ConfigData['AppRegistration']['RGRoles'] = $heldRg
+        $script:ConfigData['AppRegistration']['RolesConfirmedAt'] = if ($missing.Count -eq 0) { Get-Date -Format 'yyyy-MM-dd HH:mm:ss' } else { $null }
+    }
+
+    if ($missing.Count -gt 0) {
+        $names = @($missing | ForEach-Object { "$($_.Role) on $($_.Scope)" })
+        foreach ($name in $names) { Write-Log "MISSING: $name" -Level Error }
+        throw "The deployment identity is missing a role: $($names -join '; '). The deployment cannot run without it. Run the onboarding script again with -FreshRun, signed in as an Owner of the subscription"
+    }
+    return $true
+}
+
 function Set-AppRegistrationRoles {
     <#
     .SYNOPSIS
@@ -2449,10 +2564,7 @@ function Set-AppRegistrationRoles {
             Write-Log "Assigning the role $roleName..." -Level Info
 
             try {
-                $existingAssignment = Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
-                    -RoleDefinitionName $roleName `
-                    -Scope "/subscriptions/$SubscriptionId" `
-                    -ErrorAction Stop
+                $existingAssignment = Test-NeologikRoleAssigned -ObjectId $ServicePrincipalId -RoleName $roleName -Scope "/subscriptions/$SubscriptionId" -ErrorAction Stop
             }
             catch {
                 Write-Log "ERROR: the script cannot read the role assignment $roleName, because a permission is missing" -Level Error
@@ -2531,10 +2643,7 @@ function Set-AppRegistrationRoles {
         foreach ($roleName in $rgRoles) {
             Write-Log "Assigning the role $roleName on the resource group..." -Level Info
 
-            $existingAssignment = Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
-                -RoleDefinitionName $roleName `
-                -Scope $rgScope `
-                -ErrorAction SilentlyContinue
+            $existingAssignment = Test-NeologikRoleAssigned -ObjectId $ServicePrincipalId -RoleName $roleName -Scope $rgScope -ErrorAction SilentlyContinue
 
             if ($existingAssignment) {
                 Write-Log "$roleName role already assigned on the resource group" -Level Info
@@ -2572,6 +2681,14 @@ function Set-AppRegistrationRoles {
                 }
             }
         }
+
+        # Read the roles back. The configuration file records what the deployment identity holds,
+        # and a missing role stops the run here, in front of the administrator.
+        $null = Confirm-NeologikDeploymentIdentityRoles -ServicePrincipalId $ServicePrincipalId `
+            -SubscriptionId $SubscriptionId `
+            -ResourceGroupName $ResourceGroupName `
+            -SubscriptionRoles $roles `
+            -ResourceGroupRoles $rgRoles
 
         # Grant the deployment identity two Microsoft Graph application permissions:
         #   - Application.ReadWrite.OwnedBy: create application registrations, and manage only
@@ -3081,10 +3198,7 @@ function New-NeologikKeyVault {
         # Assign Key Vault Secrets Officer to the signed-in user first, so that the script can store the client secret
         Write-Log "Assigning the role Key Vault Secrets Officer to the signed-in user..." -Level Info
         if ($script:ConfigData['CurrentUserId']) {
-            $existingUserAssignment = Get-AzRoleAssignment -ObjectId $script:ConfigData['CurrentUserId'] `
-                -RoleDefinitionName 'Key Vault Secrets Officer' `
-                -Scope $rgScope `
-                -ErrorAction SilentlyContinue
+            $existingUserAssignment = Test-NeologikRoleAssigned -ObjectId $script:ConfigData['CurrentUserId'] -RoleName 'Key Vault Secrets Officer' -Scope $rgScope -ErrorAction SilentlyContinue
 
             if (-not $existingUserAssignment) {
                 New-AzRoleAssignment -ObjectId $script:ConfigData['CurrentUserId'] `
@@ -3109,10 +3223,7 @@ function New-NeologikKeyVault {
             foreach ($roleName in @('Key Vault Secrets Officer', 'Key Vault Certificates Officer')) {
                 Write-Log "Assigning the role $roleName to $($adminGroup.Name) on the resource group..." -Level Info
 
-                $existingAssignment = Get-AzRoleAssignment -ObjectId $adminGroup.Id `
-                    -RoleDefinitionName $roleName `
-                    -Scope $rgScope `
-                    -ErrorAction SilentlyContinue
+                $existingAssignment = Test-NeologikRoleAssigned -ObjectId $adminGroup.Id -RoleName $roleName -Scope $rgScope -ErrorAction SilentlyContinue
 
                 if ($existingAssignment) {
                     Write-Log "$roleName role already assigned to $($adminGroup.Name) on the resource group" -Level Info
@@ -3617,10 +3728,7 @@ function New-NeologikStorageAccount {
         # Assign Storage Blob Data Contributor to the signed-in user first, so that the script can upload the log and the configuration file
         Write-Log "Assigning the role Storage Blob Data Contributor to the signed-in user..." -Level Info
         if ($script:ConfigData['CurrentUserId']) {
-            $existingUserAssignment = Get-AzRoleAssignment -ObjectId $script:ConfigData['CurrentUserId'] `
-                -RoleDefinitionName 'Storage Blob Data Contributor' `
-                -Scope $rgScope `
-                -ErrorAction SilentlyContinue
+            $existingUserAssignment = Test-NeologikRoleAssigned -ObjectId $script:ConfigData['CurrentUserId'] -RoleName 'Storage Blob Data Contributor' -Scope $rgScope -ErrorAction SilentlyContinue
 
             if (-not $existingUserAssignment) {
                 New-AzRoleAssignment -ObjectId $script:ConfigData['CurrentUserId'] `
@@ -3644,10 +3752,7 @@ function New-NeologikStorageAccount {
         if ($adminGroup) {
             Write-Log "Assigning the role Storage Blob Data Contributor to $($adminGroup.Name) on the resource group..." -Level Info
             
-            $existingAssignment = Get-AzRoleAssignment -ObjectId $adminGroup.Id `
-                -RoleDefinitionName 'Storage Blob Data Contributor' `
-                -Scope $rgScope `
-                -ErrorAction SilentlyContinue
+            $existingAssignment = Test-NeologikRoleAssigned -ObjectId $adminGroup.Id -RoleName 'Storage Blob Data Contributor' -Scope $rgScope -ErrorAction SilentlyContinue
 
             if ($existingAssignment) {
                 Write-Log "Storage Blob Data Contributor role already assigned to $($adminGroup.Name) on the resource group" -Level Info
@@ -3799,10 +3904,7 @@ function New-NeologikManagedIdentities {
             foreach ($roleName in $miDef.Roles) {
                 Write-Log "Assigning the role $roleName to $displayName on the subscription..." -Level Info
 
-                $existingAssignment = Get-AzRoleAssignment -ObjectId $mi.PrincipalId `
-                    -RoleDefinitionName $roleName `
-                    -Scope "/subscriptions/$SubscriptionId" `
-                    -ErrorAction SilentlyContinue
+                $existingAssignment = Test-NeologikRoleAssigned -ObjectId $mi.PrincipalId -RoleName $roleName -Scope "/subscriptions/$SubscriptionId" -ErrorAction SilentlyContinue
 
                 if ($existingAssignment) {
                     Write-Log "$roleName role already assigned" -Level Info
@@ -3841,10 +3943,7 @@ function New-NeologikManagedIdentities {
                 foreach ($roleName in $miDef.RGRoles) {
                     Write-Log "Assigning the role $roleName to $displayName on the resource group..." -Level Info
 
-                    $existingAssignment = Get-AzRoleAssignment -ObjectId $mi.PrincipalId `
-                        -RoleDefinitionName $roleName `
-                        -Scope $rgScope `
-                        -ErrorAction SilentlyContinue
+                    $existingAssignment = Test-NeologikRoleAssigned -ObjectId $mi.PrincipalId -RoleName $roleName -Scope $rgScope -ErrorAction SilentlyContinue
 
                     if ($existingAssignment) {
                         Write-Log "$roleName role already assigned on the resource group" -Level Info
@@ -4165,6 +4264,10 @@ function Export-ConfigurationData {
             Write-Host "App Registration:" -ForegroundColor Yellow
             Write-Host "  Name: $($script:ConfigData['AppRegistration'].Name)"
             Write-Host "  Client ID: $($script:ConfigData['AppRegistration'].ClientId)"
+            if ($script:ConfigData['AppRegistration'].RolesConfirmedAt) {
+                Write-Host "  Roles on the subscription, confirmed:   $(@($script:ConfigData['AppRegistration'].SubscriptionRoles) -join ', ')"
+                Write-Host "  Roles on the resource group, confirmed: $(@($script:ConfigData['AppRegistration'].RGRoles) -join ', ')"
+            }
             Write-Host ""
         }
 
@@ -6036,7 +6139,9 @@ function Start-NeologikOnboarding {
     }
 }
 
-# Run the onboarding
-Start-NeologikOnboarding
+# Run the onboarding. A test dot-sources the script to reach its functions and does not run it.
+if ($MyInvocation.InvocationName -ne '.') {
+    Start-NeologikOnboarding
+}
 
 #endregion
