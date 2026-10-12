@@ -8,8 +8,10 @@
 #   Preview feature:  Microsoft.Compute/EncryptionAtHost   (the provider must also be listed)
 #
 # The onboarding script registers the five providers it creates resources with (Resources,
-# KeyVault, Storage, ManagedIdentity, Compute) first and confirms each before its resource is
-# created. Every other entry is confirmed before the configuration is exported.
+# KeyVault, Storage, ManagedIdentity, Compute) after the check of the roles, and confirms each
+# before its resource is created. The onboarding script registers every other entry after the
+# managed identities, at the end of the run, and confirms every entry before the configuration
+# is exported.
 # Register-NeologikResourceProviders.ps1 submits every entry in file order and waits for the
 # whole list together.
 

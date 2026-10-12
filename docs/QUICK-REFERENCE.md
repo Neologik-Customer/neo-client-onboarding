@@ -130,7 +130,7 @@ The step numbers match the comments in the onboarding script. The first five row
 | Preparation | Asks whether to resume, when an earlier run left a checkpoint. Asks the administrator to accept the terms. Checks PowerShell 7.4 and the modules |
 | Sign-in | Signs in to Azure and to Microsoft Graph. Takes the subscription from the Azure session, or selects the subscription that the parameter `-SubscriptionName` names |
 | Check of the roles | Checks Owner and Global Administrator |
-| Resource providers, first part | Submits the resource provider registrations. Azure completes the registrations while the onboarding script continues |
+| Resource providers, first part | Submits the registrations of the five resource providers that the onboarding script needs for the resources that the onboarding script creates. Azure completes the registrations while the onboarding script continues |
 | Configuration | Collects the values from the answer file or from the questions. Asks the administrator to confirm |
 | 7. Resource group | Creates the resource group with the standard tags and the tag `NeologikOnboardingKit`. Adds the tag `NeologikOnboardingKit` to an existing resource group |
 | 8. Accounts | Invites the Neologik support accounts as guests, or looks up existing accounts, as you chose |
@@ -142,7 +142,7 @@ The step numbers match the comments in the onboarding script. The first five row
 | 12c. Agent identity blueprint | Creates the agent identity blueprint and the service principal of the agent identity blueprint. Creates the owners, the Microsoft Graph application permission of the principal and three federated credentials |
 | 14. Storage account | Creates the storage account and three containers. Turns off public blob access and shared key access. Assigns one storage role to the Admin User Group |
 | 15. Managed identities | Creates the script runner managed identity and the SQL managed identity, and assigns the roles of each |
-| 15b. Resource providers, second part | Confirms each registration |
+| 15b. Resource providers, second part | Submits the registrations of the other resource providers and the preview features that the Neologik Platform requires. Confirms each registration |
 | 16. Export | Writes the configuration file. Uploads the configuration file and the log to the storage account. Deletes the checkpoint |
 
 ## Directory writes
