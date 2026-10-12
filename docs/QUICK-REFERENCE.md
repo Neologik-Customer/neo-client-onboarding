@@ -283,6 +283,15 @@ None of the three files contains a secret. All three files contain personal data
 
 ## Changes to the workstation
 
+Before the first run, you make two changes in the PowerShell window. The preparation steps of `README.md` give both commands. The onboarding script makes neither change.
+
+| Change | What the change does | What remains after the window closes |
+|---|---|---|
+| `Get-ChildItem .\*.ps1 \| Unblock-File` | Removes the mark that Windows puts on each file extracted from a downloaded zip. Without it, PowerShell refuses the scripts with the words `not digitally signed` | The scripts stay unblocked |
+| `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` | Lifts the execution policy for the current PowerShell window only | Nothing. Windows does not keep the setting |
+
+The onboarding script makes these changes:
+
 | Change | When the onboarding script makes the change |
 |---|---|
 | The onboarding script marks the PowerShell Gallery as a trusted repository for the user. The setting remains after the run | The onboarding script installs a module |
