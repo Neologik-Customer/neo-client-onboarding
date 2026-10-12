@@ -57,6 +57,7 @@ The table shows the version that each script reports.
 | Documents | `README.md`, `FINISHING-STEPS-GUIDE.md` and `AGENT-ACCOUNT-ACCESS-GUIDE.md` name the grants script |
 | `NeologikGuestUsers.txt` | One Neologik support account that no longer works for Neologik is removed from the list |
 | Documents | The preparation steps of `README.md` name the inner folder of a zip downloaded from GitHub, lift the execution policy for the window with `Bypass` in place of `RemoteSigned`, and say what to do when Group Policy enforces the policy. The other guides use `Bypass` in the same step |
+| Documents | The approver document, `docs/QUICK-REFERENCE.md`, states the two commands that the administrator runs before the first run. The first command removes the download mark from the scripts. The second command lifts the execution policy for the window. The onboarding script makes neither change |
 
 ## Version 5.0.14
 
