@@ -11,15 +11,17 @@
     2. The script signs in to Azure and to Microsoft Graph with the account of the
        administrator.
     3. The script checks the Owner role and the Global Administrator role.
-    4. The script registers the Azure resource providers that the Neologik Platform
-       requires.
+    4. The script registers the five Azure resource providers that the script needs
+       for the resources that the script creates.
     5. The script invites the Neologik support accounts as guests, when the
        administrator chooses invitation.
     6. The script creates the resource group, the security groups, the deployment
        identity, the Key Vault, the Platform Sign-in application, the agent identity
        blueprint, the deployment storage account and two managed identities. The
        script assigns the roles of each.
-    7. The script writes a configuration file and a log.
+    7. The script registers the other Azure resource providers and the preview
+       features that the Neologik Platform requires, and confirms every registration.
+    8. The script writes a configuration file and a log.
 
     README.md describes how to run the script.
     docs\QUICK-REFERENCE.md lists each change and each permission.
@@ -145,7 +147,7 @@
         -AnswerFile .\inputs.json -SkipPowerShellUpdate -SkipModuleInstall
 
 .NOTES
-    Version: v5.0.8
+    Version: v5.0.9
     Requires: PowerShell 7.4 or later
     Requires: Owner on the subscription and Global Administrator in the tenant
 #>
@@ -216,10 +218,10 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v5.0.8'
+$script:Version = 'v5.0.9'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.0.15'
+$script:KitVersion = 'v5.0.16'
 
 # The third role of the deployment identity on the subscription: Role Based Access
 # Control Administrator, limited by a condition to two roles. The deployment runs the
@@ -3192,8 +3194,10 @@ function New-NeologikKeyVault {
 #region Resource Provider Registration
 
 # The resource providers of the resources that the script creates: the resource group, the Key Vault,
-# the storage account and the managed identities. The script submits these registrations first and confirms
-# each registration before the script creates the resource. resource-providers.txt must list each of these resource providers.
+# the storage account, the managed identities, and Microsoft.Compute for the storage account. The script submits
+# these registrations at step 5c, after the check of the roles, and confirms each registration before the script
+# creates the resource. The script submits every other entry at step 15b, after the managed identities.
+# resource-providers.txt must list each of these resource providers.
 $script:OnboardingProviders = @(
     'Microsoft.Resources',
     'Microsoft.KeyVault',
@@ -3215,9 +3219,10 @@ function Get-PlatformResourceProviderList {
         The function fails in four cases: the file is missing, the file is empty, a
         line has the wrong form, or the file lacks a resource provider that the script
         needs.
-        The function returns Providers and Features. Providers holds the resource
-        providers that the script needs first, then the other resource providers in
-        the order of the file.
+        The function returns Providers, OnboardingProviders, PlatformProviders and
+        Features. Providers holds the resource providers that the script needs first,
+        then the other resource providers in the order of the file. OnboardingProviders
+        holds the first group. PlatformProviders holds the second group.
     #>
     [CmdletBinding()]
     param()
@@ -3261,20 +3266,28 @@ function Get-PlatformResourceProviderList {
         }
     }
 
-    $ordered = @($script:OnboardingProviders) + @($providers | Where-Object { $script:OnboardingProviders -notcontains $_ })
+    $platformProviders = @($providers | Where-Object { $script:OnboardingProviders -notcontains $_ })
+    $ordered = @($script:OnboardingProviders) + $platformProviders
     Write-Log "Resource provider list read from ${path}: $($ordered.Count) resource providers and $($features.Count) preview features" -Level Info
-    return [pscustomobject]@{ Providers = [string[]]$ordered; Features = @($features); Path = $path }
+    return [pscustomobject]@{
+        Providers           = [string[]]$ordered
+        OnboardingProviders = [string[]]@($script:OnboardingProviders)
+        PlatformProviders   = [string[]]$platformProviders
+        Features            = @($features)
+        Path                = $path
+    }
 }
 
 function Start-ResourceProviderRegistration {
     <#
     .SYNOPSIS
-        Submits the registration of each resource provider and each preview feature
-        in the list. The function does not wait for the registrations.
+        Submits the registration of the given resource providers and preview
+        features. The function does not wait for the registrations.
     .DESCRIPTION
-        Azure completes a registration while the script continues. The function
-        submits the resource providers that the script needs first, then the other
-        entries. Wait-ResourceProviderRegistration confirms the registrations later.
+        Azure completes a registration while the script continues. Step 5c submits
+        the resource providers that the script needs. Step 15b submits the other
+        resource providers and the preview features.
+        Wait-ResourceProviderRegistration confirms the registrations later.
 
         The function makes no change to an entry that is already registered in Azure
         or recorded in the checkpoint.
@@ -3285,15 +3298,15 @@ function Start-ResourceProviderRegistration {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]
-        $ProviderList
+        [string[]]$Providers = @(),
+        [hashtable[]]$Features = @()
     )
 
-    Write-Log "Submitting the registrations of $($ProviderList.Providers.Count) resource providers and $($ProviderList.Features.Count) preview features..." -Level Info
+    Write-Log "Submitting the registrations of $($Providers.Count) resource providers and $($Features.Count) preview features..." -Level Info
     $submitted = 0
     $alreadyRegistered = 0
 
-    foreach ($ns in $ProviderList.Providers) {
+    foreach ($ns in $Providers) {
         if ($script:ProviderRegistrations[$ns] -eq 'Registered') { $alreadyRegistered++; continue }
         try {
             $state = (Get-AzResourceProvider -ProviderNamespace $ns -ErrorAction Stop | Select-Object -First 1).RegistrationState
@@ -3315,7 +3328,7 @@ function Start-ResourceProviderRegistration {
         }
     }
 
-    foreach ($f in $ProviderList.Features) {
+    foreach ($f in $Features) {
         $key = "$($f.Provider)/$($f.Feature)"
         if ($script:ProviderRegistrations[$key] -eq 'Registered') { $alreadyRegistered++; continue }
         try {
@@ -3340,7 +3353,7 @@ function Start-ResourceProviderRegistration {
 
     Save-Checkpoint -Label 'ProvidersRequested'
     Write-Host "  Resource providers: $submitted registrations submitted, $alreadyRegistered already registered." -ForegroundColor Gray
-    Write-Host "  Azure completes the registrations while the script continues." -ForegroundColor Gray
+    Write-Host "  Azure completes the registrations. The script confirms each registration before the script needs it." -ForegroundColor Gray
     Write-Log "Resource provider registrations submitted: $submitted. Already registered: $alreadyRegistered" -Level Success
 }
 
@@ -4922,10 +4935,11 @@ function Start-NeologikOnboarding {
         Write-Log "Checking the required roles..." -Level Info
         $null = Test-RequiredPermissions -SubscriptionId $script:ConfigData['SubscriptionId']
 
-        # Step 5c: Submit the registration of each resource provider and each preview feature now. The script
-        # submits the resource providers that the script needs first. Azure completes the registrations while the script continues.
-        # The script confirms each resource provider before the creation of the resource, and the whole list before the export.
-        Start-ResourceProviderRegistration -ProviderList $script:ProviderList
+        # Step 5c: Submit the registration of the five resource providers that the script needs: the resource group,
+        # the Key Vault, the storage account and the managed identities. Azure completes the registrations while the
+        # script continues. The script confirms each resource provider before the creation of the resource. Step 15b
+        # submits every other resource provider and every preview feature, and confirms the whole list before the export.
+        Start-ResourceProviderRegistration -Providers $script:ProviderList.OnboardingProviders
 
         # Step 6: Collect the configuration. A resumed run skips this step
         if (-not $resuming) {
@@ -5938,8 +5952,9 @@ function Start-NeologikOnboarding {
         $null = New-NeologikAgentBlueprint -DeploySpObjectId $appReg.ServicePrincipal.Id `
             -SponsorUserId $script:ConfigData['CurrentUserId']
 
-        # The script has no step 13. Step 5c submits the resource provider registrations.
-        # Step 15b confirms the registrations, before the script writes the configuration file.
+        # The script has no step 13. Step 5c submits the resource provider registrations that the script needs.
+        # Step 15b submits the other registrations and confirms every registration, before the script writes
+        # the configuration file.
 
         # The deployment by Neologik creates and maintains the daily cost report. Onboarding
         # collects the recipients, and the configuration file records the recipients.
@@ -5972,8 +5987,11 @@ function Start-NeologikOnboarding {
             -ScriptRunnerIdentityName ([string]$script:ConfigData['ScriptRunnerIdentityName']) `
             -SqlIdentityName ([string]$script:ConfigData['SqlIdentityName'])
 
-        # Step 15b: Confirm every resource provider and every preview feature in the list. The script reports each
-        # entry that is still in progress, and writes the entry to the configuration file as ResourceProvidersPending.
+        # Step 15b: Submit the registration of every other resource provider and every preview feature in the list.
+        # The deployment of the Neologik Platform needs them. This run does not. Then confirm every resource provider
+        # and every preview feature in the list. The script reports each entry that is still in progress, and writes
+        # the entry to the configuration file as ResourceProvidersPending.
+        Start-ResourceProviderRegistration -Providers $script:ProviderList.PlatformProviders -Features $script:ProviderList.Features
         Complete-ResourceProviderRegistration -ProviderList $script:ProviderList
         Complete-OnboardingStep 'ResourceProviders'
 

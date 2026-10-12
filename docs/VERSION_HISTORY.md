@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.0.16](#version-5016)
 2. [Version 5.0.15](#version-5015)
 2. [Version 5.0.14](#version-5014)
 2. [Version 5.0.13](#version-5013)
@@ -35,11 +36,22 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.0.8 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.15 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
+| `Install-NeologikEnvironment.ps1` | v5.0.9 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.16 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.0.16
+
+**Date**: 2026-10-12
+
+| Item | Change |
+|---|---|
+| `Install-NeologikEnvironment.ps1` | Version v5.0.9. The onboarding script submits the registrations of the five resource providers that the onboarding script needs after the check of the roles, as before. The onboarding script now submits the registrations of the other resource providers and the preview features at the end of the run, after the managed identities. The onboarding script then confirms every registration. The onboarding script records the version `v5.0.16` on the resource group |
+| `Grant-NeologikAgentAccess.ps1` | No change to the script. The grants script reports the onboarding kit version v5.0.16 |
+| `resource-providers.txt` | The notes at the top of the file describe the new order. The list is unchanged |
+| Documents | `docs/QUICK-REFERENCE.md` and `docs/TECHNICAL-REFERENCE.md` describe the new order |
 
 ## Version 5.0.15
 
