@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.0.17](#version-5017)
 2. [Version 5.0.16](#version-5016)
 2. [Version 5.0.15](#version-5015)
 2. [Version 5.0.14](#version-5014)
@@ -36,8 +37,8 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.0.11 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.16 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
+| `Install-NeologikEnvironment.ps1` | v5.0.12 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.17 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
@@ -63,6 +64,17 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | `Install-NeologikEnvironment.ps1` | Version v5.0.10. The limited Role Based Access Control Administrator on the subscription lets the deployment identity assign a third role: Cost Management Reader. The deployment assigns that role on the resource group that Azure Kubernetes Service creates for the nodes of the cluster to the identity of the configuration API of the Neologik Platform, which reads the daily cost of the nodes for the return on investment report. An assignment with the old condition receives the new condition |
 | Documents | The documents name the three roles the limited administrator may assign and the reason for the third |
 | `Install-NeologikEnvironment.ps1` | Version v5.0.11. The rows above that name versions v5.0.9 and v5.0.10 ship as v5.0.11. Onboarding kit version 5.0.16 released a different version v5.0.9 of the onboarding script |
+| `Install-NeologikEnvironment.ps1` | Version v5.0.12. The rows above that name versions v5.0.9, v5.0.10 and v5.0.11 ship as v5.0.12. Onboarding kit version 5.0.17 released a different version v5.0.10 of the onboarding script: the exact-scope role checks and the read-back of the roles of the deployment identity, which this version carries |
+
+## Version 5.0.17
+
+**Date**: 2026-10-12
+
+| Item | Change |
+|---|---|
+| `README.md` | The step "Confirm that Neologik has the configuration file" now matches the completion summary of the onboarding script: when the upload failed, upload the configuration file to the container `json` of the deployment storage account in the Azure portal. The earlier text asked you to send the file to support@neologik.ai |
+| `Install-NeologikEnvironment.ps1` | Version v5.0.10. The onboarding script now counts a role only when the assignment is at the scope the script assigns it, with the condition the script gives it. Earlier versions also counted an assignment inherited from the subscription, so the limited Role Based Access Control Administrator on the subscription stood in for the unlimited role on the resource group, which was never assigned, and the first deployment of the environment failed. After the assignments, the onboarding script now reads the roles of the deployment identity back, records them in the configuration file and in the completion summary, and stops the run when a role is missing, naming the role and the scope. The onboarding script records the version `v5.0.17` on the resource group |
+| `Grant-NeologikAgentAccess.ps1` | No change to the script. The grants script reports the onboarding kit version v5.0.17 |
 
 ## Version 5.0.16
 
