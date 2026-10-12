@@ -388,9 +388,10 @@ The Neologik Platform requires the Azure resource providers and the preview feat
 Azure takes some minutes to register a resource provider. The onboarding script works in this order:
 
 1. The onboarding script checks your roles.
-2. The onboarding script submits every registration and continues with the other steps.
+2. The onboarding script submits the registrations of the five resource providers that the onboarding script needs, and continues with the other steps.
 3. Before the onboarding script creates a resource, the onboarding script confirms the resource provider of that resource.
-4. Before the onboarding script writes the configuration file, the onboarding script confirms every registration.
+4. After the managed identities, the onboarding script submits the registrations of the other resource providers and the preview features.
+5. Before the onboarding script writes the configuration file, the onboarding script confirms every registration.
 
 When a registration is still in progress at the end of the run, the completion summary lists the resource provider. The configuration file lists the resource provider under `ResourceProvidersPending`. Run this command before the deployment:
 
