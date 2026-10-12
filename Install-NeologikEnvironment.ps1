@@ -221,7 +221,7 @@ $WarningPreference = 'Continue'
 $script:Version = 'v5.0.9'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.0.16'
+$script:KitVersion = 'v5.0.17'
 
 # The third role of the deployment identity on the subscription: Role Based Access
 # Control Administrator, limited by a condition to two roles. The deployment runs the

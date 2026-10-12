@@ -240,7 +240,7 @@ The completion summary lists each object that the onboarding script created. The
 
 The onboarding script uploads the configuration file to the deployment storage account. Neologik reads the configuration file from the deployment storage account.
 
-When the completion summary reports that the upload failed, send the configuration file to support@neologik.ai. Keep the log file as the record of the run.
+When the completion summary reports that the upload failed, upload the configuration file in the Azure portal: open the deployment storage account, then **Containers**, then `json`, then **Upload**. Keep the log file as the record of the run.
 
 ### 2. Confirm the resource provider registrations
 
