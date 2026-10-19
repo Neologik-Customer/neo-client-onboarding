@@ -30,7 +30,7 @@ The onboarding script also registers the Azure resource providers that the Neolo
 | Subject | Position |
 |---|---|
 | Resource group | The deployment identity can deploy Azure resources into one resource group |
-| Subscription | The deployment identity holds three roles: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning three roles. None of the three allows a change to an Azure resource. The limited role lets the deployment identity assign exactly three roles: Reader, AppGw for Containers Configuration Manager and Cost Management Reader. The deployment assigns them to the identity of the ingress controller of a secure environment |
+| Subscription | The deployment identity holds three roles: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning three roles. None of the three allows a change to an Azure resource. The limited role lets the deployment identity assign exactly three roles: Reader, AppGw for Containers Configuration Manager and Cost Management Reader. The deployment assigns the first two to the identity of the ingress controller of a secure environment, and the third to the identity of the configuration API of the Neologik Platform on the resource group that Azure Kubernetes Service creates for the nodes of the cluster |
 | Microsoft Graph | The deployment identity holds two Microsoft Graph application permissions: `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Microsoft Entra ID | The deployment identity receives no directory role |
 
