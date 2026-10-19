@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.0.18](#version-5018)
 2. [Version 5.0.17](#version-5017)
 2. [Version 5.0.16](#version-5016)
 2. [Version 5.0.15](#version-5015)
@@ -37,11 +38,21 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.0.10 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.17 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
+| `Install-NeologikEnvironment.ps1` | v5.0.11 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.18 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.0.18
+
+**Date**: 2026-10-19
+
+| Item | Change |
+|---|---|
+| `Install-NeologikEnvironment.ps1` | Version v5.0.11. The Role Based Access Control Administrator role that the deployment identity holds on the subscription is now limited to three roles instead of two: Reader, AppGw for Containers Configuration Manager and Cost Management Reader. The deployment assigns Cost Management Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster to the identity of the configuration API of the Neologik Platform, which reads the daily cost of the nodes for the return on investment report. None of the three roles allows a change to an Azure resource. The onboarding script records the version `v5.0.18` on the resource group |
+| `Grant-NeologikAgentAccess.ps1` | No change to the script. The grants script reports the onboarding kit version v5.0.18 |
+| Guides | `README.md`, `docs/QUICK-REFERENCE.md`, `docs/TECHNICAL-REFERENCE.md` and `docs/secure-overview.md` describe the three roles |
 
 ## Version 5.0.17
 

@@ -18,7 +18,7 @@ Neologik deploys and operates the Neologik Platform through one deployment ident
 | Subject | Position |
 |---|---|
 | Azure resources | The deployment identity deploys Azure resources into one resource group |
-| Azure subscription | The deployment identity holds three roles on the subscription: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning two roles, Reader and AppGw for Containers Configuration Manager. None of the three allows a change to an Azure resource |
+| Azure subscription | The deployment identity holds three roles on the subscription: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning three roles, Reader, AppGw for Containers Configuration Manager and Cost Management Reader. None of the three allows a change to an Azure resource |
 | Microsoft Graph | The deployment identity holds two Microsoft Graph application permissions in your directory: `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Application registrations | The permission `Application.ReadWrite.OwnedBy` lets the deployment identity manage only the application registrations that the deployment identity owns |
 | Agent identity blueprint | The permission `AgentIdentityBlueprint.AddRemoveCreds.All` lets the deployment identity add and remove credentials on the agent identity blueprint of the environment |
