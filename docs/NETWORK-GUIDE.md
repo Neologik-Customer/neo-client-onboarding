@@ -75,9 +75,29 @@ The Kubernetes service range and the Kubernetes DNS address are the same as for 
 
 Every range in this document is a setting of your environment. Neologik sets the ranges before the first deployment. Tell Neologik the ranges that you need before onboarding, with the reason, such as a peering with an existing network.
 
-A range cannot change after the environment is built. The Kubernetes cluster binds to the ranges at creation. A change to a range means a new environment.
+A subnet cannot move after the environment is built, because the Kubernetes cluster binds to the subnets at creation. Azure can add a second address prefix to the virtual network later, for a new subnet. A change to an existing subnet means a new environment.
 
-Keep each subnet at `/16` unless you have a reason to reduce a subnet. The pod subnets need the most addresses, because every pod takes one address. A smaller pod subnet limits how far the cluster can scale.
+### The block to allocate
+
+| Block | Example | What the deployment does with the block |
+|---|---|---|
+| Standard: a `/10` | `10.192.0.0/10` | The standard layout above, unchanged. The environment can grow without a further allocation |
+| Minimum: a `/19` | `10.250.32.0/19` | The reduced layout below. The deployment has built a `neo-secure` environment on a `/19` |
+
+The reduced layout gives each subnet the smallest range that the Azure service in the subnet accepts. The pod subnets take the rest of the block.
+
+| Subnet | Range in the reduced layout | Limit that the range sets |
+|---|---|---|
+| `systempoolpodsubnet` | `/21` | 2,048 addresses for the pods of the system node pool |
+| `userpool1podsubnet` | `/21` | 2,048 addresses for the pods of the workload node pool |
+| `ApplicationGatewayForContainersSubnet` | `/24` | Application Gateway for Containers accepts no smaller subnet |
+| `AzureBastionSubnet` | `/26` | Azure Bastion accepts no smaller subnet |
+| `PrivateEndpointSubnet` | `/26` | 59 private endpoints |
+| `systempoolnodesubnet` | `/27` | 27 nodes in the system node pool |
+| `userpool1nodesubnet` | `/27` | 27 nodes in the workload node pool |
+| `AppSubnet`, `VmSubnet`, `AiServiceSubnet` | `/28` each | One VM and the reserved integrations |
+
+The Kubernetes service range stays outside the block, at `10.210.0.0/16` by default. The range is never routed outside the cluster. The range must not overlap a subnet of the environment or a network peered with the environment. Tell Neologik when the default overlaps one of your networks, and Neologik chooses another range.
 
 ## Private DNS zones
 
@@ -127,7 +147,7 @@ Send Neologik the answers to these questions with the values in [PRE-ONBOARDING-
 | Question | Why Neologik asks |
 |---|---|
 | Will you peer the environment with one of your networks, now or later? | A peering needs an address space with no overlap, and needs your resolvers to forward the private DNS zones |
-| Which of your networks must the address space avoid? | Neologik sets the address space and the subnets before the first deployment. A range cannot change after the environment is built |
+| Which block do you allocate, a `/10` or a `/19`, and which of your networks must the block avoid? | Neologik sets the address space and the subnets before the first deployment. A subnet cannot move after the environment is built |
 | Do you need a different internal DNS zone name? | The default is `neologik.internal` |
 | Which services that the environment calls restrict callers by IP address? | Neologik sends you the outbound address after the deployment, for your allow lists |
 | Who manages the DNS zone of the host name? | That person creates the public DNS record after the deployment |
