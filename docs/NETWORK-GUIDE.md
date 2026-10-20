@@ -48,7 +48,7 @@ The virtual network has the address space `10.0.0.0/8` by default. The deploymen
 | `AzureBastionSubnet` | `10.253.0.0/16` | Azure Bastion, which gives Neologik support access to the deployment VM. Azure fixes the name of this subnet |
 | `ApplicationGatewayForContainersSubnet` | `10.254.0.0/16` | Application Gateway for Containers, the entry point for users |
 
-The Kubernetes cluster also uses an internal service range. The range is not a subnet of the virtual network. The range must not overlap the virtual network or any network peered with the virtual network.
+The Kubernetes cluster also uses an internal service range. The range is not a subnet of the virtual network. The range must not overlap a subnet of the virtual network, or any network peered with the virtual network.
 
 | Internal range | Default value | Purpose |
 |---|---|---|
