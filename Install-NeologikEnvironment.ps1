@@ -218,10 +218,10 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v5.0.13'
+$script:Version = 'v5.0.14'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.0.18'
+$script:KitVersion = 'v5.0.19'
 
 # The third role of the deployment identity on the subscription: Role Based Access
 # Control Administrator, limited by a condition to three roles. The deployment runs the
@@ -2336,7 +2336,9 @@ function Set-NeologikLimitedSubscriptionRole {
         The role carries a condition that limits the roles the deployment identity may
         assign to Reader, AppGw for Containers Configuration Manager and Cost Management Reader. An assignment
         that already carries the condition is reported. An assignment without the
-        condition receives the condition. An absent assignment is created.
+        condition, or with another condition, is removed and created again with
+        the condition, because Azure keeps the condition of an existing assignment
+        on an update. An absent assignment is created.
     #>
     [CmdletBinding()]
     param(
@@ -2371,13 +2373,27 @@ function Set-NeologikLimitedSubscriptionRole {
         return
     }
     if ($assignments.Count -gt 0) {
-        # The role is held without the limit. The script writes the limit onto the assignment.
-        $assignment = $assignments[0]
-        $assignment | Add-Member -NotePropertyName Condition -NotePropertyValue $script:LimitedSubRoleCondition -Force
-        $assignment | Add-Member -NotePropertyName ConditionVersion -NotePropertyValue $script:LimitedSubRoleConditionVersion -Force
-        Set-AzRoleAssignment -InputObject $assignment -ErrorAction Stop | Out-Null
-        Write-Log "$roleName role: the limit is applied to the existing assignment" -Level Success
-        return
+        # The role is held without the limit, or with an older one. Azure keeps the
+        # condition of an existing assignment on an update, so the script removes the
+        # assignment and creates it again below with the limit. Azure answers a read
+        # with the removed assignment for a while, so the script waits until the read
+        # no longer returns it before creating the new one.
+        Remove-AzRoleAssignment -ObjectId $ServicePrincipalId `
+            -RoleDefinitionName $roleName `
+            -Scope $scope `
+            -ErrorAction Stop | Out-Null
+        Write-Log "$roleName role: the existing assignment is removed, so the limit can be applied" -Level Info
+        $removeChecks = 0
+        while ($removeChecks -lt 12) {
+            $remaining = @(Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
+                -RoleDefinitionName $roleName `
+                -Scope $scope `
+                -ErrorAction SilentlyContinue | Where-Object { $_.Scope -eq $scope })
+            if ($remaining.Count -eq 0) { break }
+            $removeChecks++
+            Write-Log "Azure still shows the removed assignment. The script reads again in 5 seconds. Attempt $removeChecks of 12" -Level Warning
+            Start-Sleep -Seconds 5
+        }
     }
 
     # A new service principal takes time to reach every server of Microsoft Entra ID. Try again until then
@@ -2398,8 +2414,23 @@ function Set-NeologikLimitedSubscriptionRole {
         }
         catch {
             if ($_.Exception.Message -match "RoleAssignmentExists|already exists") {
-                Write-Log "$roleName role already assigned" -Level Info
-                $roleAssigned = $true
+                # The assignment exists: with the limit, the script is done; without it,
+                # Azure answered for a removed assignment, and the script tries again.
+                $held = @(Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
+                    -RoleDefinitionName $roleName `
+                    -Scope $scope `
+                    -ErrorAction SilentlyContinue | Where-Object {
+                        $_.Scope -eq $scope -and
+                        (([string]$_.Condition) -replace '\s', '').ToLowerInvariant() -eq $wanted })
+                if ($held.Count -gt 0) {
+                    Write-Log "$roleName role already assigned with the limit" -Level Info
+                    $roleAssigned = $true
+                }
+                else {
+                    $retryCount++
+                    Write-Log "$roleName role: Azure still shows the removed assignment. The script tries again in 10 seconds. Attempt $retryCount of $maxRetries" -Level Warning
+                    Start-Sleep -Seconds 10
+                }
             }
             elseif ($_.Exception.Message -match "Forbidden|not authorized") {
                 Write-Log "ERROR: Insufficient permissions to assign $roleName role" -Level Error
