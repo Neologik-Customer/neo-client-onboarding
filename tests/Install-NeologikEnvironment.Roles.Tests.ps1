@@ -21,6 +21,7 @@ BeforeAll {
     function Get-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $Scope, $SignInName) }
     function New-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $RoleDefinitionId, $Scope, $Condition, $ConditionVersion) }
     function Set-AzRoleAssignment { [CmdletBinding()] param($InputObject, [switch]$PassThru) }
+    function Remove-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $Scope) }
     if (-not (Get-Command Grant-GraphAppRolePermissions -ErrorAction SilentlyContinue)) {
         function Grant-GraphAppRolePermissions { [CmdletBinding()] param($PrincipalId, $PrincipalDescription, $AppRoles) }
     }
@@ -45,8 +46,10 @@ BeforeAll {
     Mock Grant-GraphAppRolePermissions { }
     Mock Get-AzRoleAssignment {
         param($ObjectId, $RoleDefinitionName, $Scope)
+        $visible = $script:Assignments
+        if ($script:StaleReads -gt 0) { $script:StaleReads--; $visible = $script:Assignments + $script:Removed }
         # Azure returns the assignment at the scope and every assignment inherited from a parent scope.
-        @($script:Assignments | Where-Object {
+        @($visible | Where-Object {
                 $_.ObjectId -eq $ObjectId -and
                 ((-not $RoleDefinitionName) -or $_.RoleDefinitionName -eq $RoleDefinitionName) -and
                 ((-not $Scope) -or $Scope.StartsWith($_.Scope, [System.StringComparison]::OrdinalIgnoreCase))
@@ -64,10 +67,19 @@ BeforeAll {
         param($InputObject)
         $script:Writes += "LIMIT $($InputObject.RoleDefinitionName) $($InputObject.Scope)"
     }
+    Mock Remove-AzRoleAssignment {
+        param($ObjectId, $RoleDefinitionName, $Scope)
+        # Azure answers reads with a removed assignment for a while: StaleReads reads keep returning it.
+        $script:Removed += @($script:Assignments | Where-Object { $_.ObjectId -eq $ObjectId -and $_.RoleDefinitionName -eq $RoleDefinitionName -and $_.Scope -eq $Scope })
+        $script:Assignments = @($script:Assignments | Where-Object { -not ($_.ObjectId -eq $ObjectId -and $_.RoleDefinitionName -eq $RoleDefinitionName -and $_.Scope -eq $Scope) })
+        $script:Writes += "REMOVE $RoleDefinitionName $Scope"
+    }
 }
 
 BeforeEach {
     $script:Assignments = @()
+    $script:Removed = @()
+    $script:StaleReads = 0
     $script:Writes = @()
     $script:DropWrites = $false
     $script:ConfigData = @{ AppRegistration = @{ Name = 'Neologik GitHub Service Connection - abcprd01' } }
@@ -141,6 +153,65 @@ Context 'Set-AppRegistrationRoles' {
             Should -Throw -ExpectedMessage "*Role Based Access Control Administrator on $($script:RgScope)*"
         $script:ConfigData['AppRegistration'].RolesConfirmedAt | Should -BeNullOrEmpty
         @($script:ConfigData['AppRegistration'].RGRoles) | Should -BeNullOrEmpty
+    }
+}
+
+Context 'Set-NeologikLimitedSubscriptionRole' {
+
+    BeforeEach {
+        $script:OldCondition = $script:LimitedSubRoleCondition -replace '72fafb9e-0641-4937-9268-a91bfd8191a3', '00000000-0000-0000-0000-000000000000'
+        $script:Limited = $script:Assignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope }
+    }
+
+    It 'writes nothing when the assignment already carries the condition' {
+        $script:Assignments = @(New-Assignment -Role $script:LimitedSubRole -Scope $script:SubScope -Condition $script:LimitedSubRoleCondition)
+        Set-NeologikLimitedSubscriptionRole -ServicePrincipalId $script:Sp -SubscriptionId '810ff294-0000-4000-8000-000000000002'
+        $script:Writes | Should -BeNullOrEmpty
+    }
+
+    It 'replaces an assignment that carries another condition with one that carries the condition' {
+        $script:Assignments = @(New-Assignment -Role $script:LimitedSubRole -Scope $script:SubScope -Condition $script:OldCondition)
+        Set-NeologikLimitedSubscriptionRole -ServicePrincipalId $script:Sp -SubscriptionId '810ff294-0000-4000-8000-000000000002'
+        $script:Writes | Should -Be @("REMOVE $($script:LimitedSubRole) $($script:SubScope)", "NEW $($script:LimitedSubRole) $($script:SubScope) limited")
+        $held = @($script:Assignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })
+        $held.Count | Should -Be 1
+        $held[0].Condition | Should -Be $script:LimitedSubRoleCondition
+    }
+
+    It 'replaces an assignment that carries no condition' {
+        $script:Assignments = @(New-Assignment -Role $script:LimitedSubRole -Scope $script:SubScope)
+        Set-NeologikLimitedSubscriptionRole -ServicePrincipalId $script:Sp -SubscriptionId '810ff294-0000-4000-8000-000000000002'
+        $script:Writes | Should -Be @("REMOVE $($script:LimitedSubRole) $($script:SubScope)", "NEW $($script:LimitedSubRole) $($script:SubScope) limited")
+    }
+
+    It 'waits until Azure no longer shows the removed assignment before creating the new one' {
+        $script:Assignments = @(New-Assignment -Role $script:LimitedSubRole -Scope $script:SubScope -Condition $script:OldCondition)
+        Mock Remove-AzRoleAssignment {
+            param($ObjectId, $RoleDefinitionName, $Scope)
+            $script:Removed += @($script:Assignments | Where-Object { $_.RoleDefinitionName -eq $RoleDefinitionName -and $_.Scope -eq $Scope })
+            $script:Assignments = @($script:Assignments | Where-Object { -not ($_.RoleDefinitionName -eq $RoleDefinitionName -and $_.Scope -eq $Scope) })
+            $script:StaleReads = 3
+            $script:Writes += "REMOVE $RoleDefinitionName $Scope"
+        }
+        Set-NeologikLimitedSubscriptionRole -ServicePrincipalId $script:Sp -SubscriptionId '810ff294-0000-4000-8000-000000000002'
+        Should -Invoke Start-Sleep -Times 3 -Exactly
+        $script:Writes | Should -Be @("REMOVE $($script:LimitedSubRole) $($script:SubScope)", "NEW $($script:LimitedSubRole) $($script:SubScope) limited")
+        $script:StaleReads | Should -Be 0
+    }
+
+    It 'tries again when Azure answers the create with "already exists" for the removed assignment, and stops once the condition is held' {
+        $script:Assignments = @(New-Assignment -Role $script:LimitedSubRole -Scope $script:SubScope -Condition $script:OldCondition)
+        $script:CreateRefusals = 2
+        Mock New-AzRoleAssignment {
+            param($ObjectId, $RoleDefinitionName, $RoleDefinitionId, $Scope, $Condition, $ConditionVersion)
+            if ($script:CreateRefusals -gt 0) { $script:CreateRefusals--; throw 'RoleAssignmentExists: The role assignment already exists.' }
+            $script:Assignments += New-Assignment -Role $script:LimitedSubRole -Scope $Scope -Condition ([string]$Condition)
+            $script:Writes += "NEW $($script:LimitedSubRole) $Scope limited"
+        }
+        Set-NeologikLimitedSubscriptionRole -ServicePrincipalId $script:Sp -SubscriptionId '810ff294-0000-4000-8000-000000000002'
+        $script:Writes | Should -Be @("REMOVE $($script:LimitedSubRole) $($script:SubScope)", "NEW $($script:LimitedSubRole) $($script:SubScope) limited")
+        $held = @($script:Assignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })
+        $held[0].Condition | Should -Be $script:LimitedSubRoleCondition
     }
 }
 

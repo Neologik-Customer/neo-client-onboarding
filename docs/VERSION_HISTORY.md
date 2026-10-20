@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.0.19](#version-5019)
 2. [Version 5.0.18](#version-5018)
 2. [Version 5.0.17](#version-5017)
 2. [Version 5.0.16](#version-5016)
@@ -38,11 +39,20 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.0.11 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.18 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
+| `Install-NeologikEnvironment.ps1` | v5.0.12 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.19 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.0.19
+
+**Date**: 2026-10-20
+
+| Item | Change |
+|---|---|
+| `Install-NeologikEnvironment.ps1` | Version v5.0.12. The onboarding script now replaces an existing Role Based Access Control Administrator assignment on the subscription that lacks the three-role limit. The onboarding script removes the assignment and creates the assignment again with the limit. Before this version, the onboarding script updated the assignment, and Azure kept the earlier limit. The deployment identity then could not assign Cost Management Reader. A run on a new subscription is unchanged |
+| `Grant-NeologikAgentAccess.ps1` | No change to the script. The grants script reports the onboarding kit version v5.0.19 |
 
 ## Version 5.0.18
 
