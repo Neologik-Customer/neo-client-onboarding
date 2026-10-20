@@ -74,6 +74,7 @@ This document is in the root of the onboarding kit. Every other document is in t
 |---|---|
 | [README.md](README.md) | This document. The place to start |
 | [PRE-ONBOARDING-INFO-GATHERING.md](docs/PRE-ONBOARDING-INFO-GATHERING.md) | The values to collect before an administrator runs the onboarding script |
+| [NETWORK-GUIDE.md](docs/NETWORK-GUIDE.md) | The address ranges and the DNS names of an environment, for the person who plans your networks |
 | [QUICK-REFERENCE.md](docs/QUICK-REFERENCE.md) | For Approvers. Each change that the onboarding script makes and each permission that the onboarding script grants |
 | [secure-overview.md](docs/secure-overview.md) | For Approvers. A summary on one page of the access that the onboarding script grants |
 | [CREATE-SP-GUIDE.md](docs/CREATE-SP-GUIDE.md) | How to create the deployment service principal yourself. This step is optional |

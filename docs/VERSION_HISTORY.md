@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.0.20](#version-5020)
 2. [Version 5.0.19](#version-5019)
 2. [Version 5.0.18](#version-5018)
 2. [Version 5.0.17](#version-5017)
@@ -40,10 +41,21 @@ The table shows the version that each script reports.
 | Script | Version of the script | Purpose |
 |---|---|---|
 | `Install-NeologikEnvironment.ps1` | v5.0.12 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.19 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.20 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.0.20
+
+**Date**: 2026-10-20
+
+| Item | Change |
+|---|---|
+| `docs/NETWORK-GUIDE.md` | New guide, for the person who plans your networks. The guide states the address ranges that the deployment builds for each deployment type, and the private DNS zones of a `neo-secure` environment. The guide also states the two public addresses of an environment and the type of the public DNS record. The guide ends with the questions to answer before onboarding. Every range is a setting of your environment, chosen before the first deployment |
+| `README.md` and `docs/PRE-ONBOARDING-INFO-GATHERING.md` | Link the network guide |
+| `Install-NeologikEnvironment.ps1` | No change to the script. The onboarding script records the version `v5.0.20` on the resource group |
+| `Grant-NeologikAgentAccess.ps1` | No change to the script. The grants script reports the onboarding kit version v5.0.20 |
 
 ## Version 5.0.19
 
