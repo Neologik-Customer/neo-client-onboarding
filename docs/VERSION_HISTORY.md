@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.0.22](#version-5022)
 2. [Version 5.0.21](#version-5021)
 2. [Version 5.0.20](#version-5020)
 2. [Version 5.0.19](#version-5019)
@@ -42,10 +43,20 @@ The table shows the version that each script reports.
 | Script | Version of the script | Purpose |
 |---|---|---|
 | `Install-NeologikEnvironment.ps1` | v5.0.12 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.21 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.22 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.0.22
+
+**Date**: 2026-10-21
+
+| Item | Change |
+|---|---|
+| `docs/NETWORK-GUIDE.md` | Names every resource that accepts requests from the internet or an account key. On a Private Endpoint environment the monitoring resources accept requests from the internet. Where used, so do the Video Indexer account and the storage account of the cluster's stop and start schedule. On a Standard environment the schedule's storage account accepts an account key |
+| `Install-NeologikEnvironment.ps1` | No change to the script. The onboarding script records the version `v5.0.22` on the resource group |
+| `Grant-NeologikAgentAccess.ps1` | No change to the script. The grants script reports the onboarding kit version v5.0.22 |
 
 ## Version 5.0.21
 
