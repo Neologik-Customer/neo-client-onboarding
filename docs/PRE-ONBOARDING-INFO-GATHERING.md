@@ -25,7 +25,7 @@ This document lists the values to collect and the decisions to make before you r
 
 | Item | Detail |
 |---|---|
-| Deployment type | `neo-small` or `neo-secure`. A `neo-small` environment has public endpoints, protected by Microsoft Entra ID authorisation. A `neo-secure` environment has private endpoints and a private network. The deployment by Neologik applies the network settings of the deployment type. [NETWORK-GUIDE.md](NETWORK-GUIDE.md) states the address ranges and the DNS names of each deployment type |
+| Deployment type | Standard or Private Endpoint. A Standard environment has public endpoints, protected by Microsoft Entra ID authorisation. A Private Endpoint environment has private endpoints and a private network. The deployment by Neologik applies the network settings of the deployment type. [NETWORK-GUIDE.md](NETWORK-GUIDE.md) states the address ranges and the DNS names of each deployment type |
 | Host name | The fully qualified host name that your users enter to reach the environment, for example `neologik.contoso.com`. Confirm the host name with the person who manages your DNS. Your TLS certificate must be issued for the host name |
 | vCPU quota | The deployment needs enough vCPU quota in the subscription and the Azure region. The standard environment runs two-vCPU nodes in its system pool and four-vCPU nodes in its user pool, both in the Dsv6 family: with the standard pool maximums of 5 system nodes and 10 user nodes that is 50 vCPU of the family. Ask Neologik for the number for your environment |
 
