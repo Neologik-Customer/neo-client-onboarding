@@ -84,7 +84,6 @@ This document is in the root of the onboarding kit. Every other document is in t
 | [GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md](docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md) | What the grants script, `Grant-NeologikAgentAccess.ps1`, applies |
 | [TEAMS-APP-UPGRADE-GUIDE.md](docs/TEAMS-APP-UPGRADE-GUIDE.md) | How to upgrade the Teams app for your users |
 | [TECHNICAL-REFERENCE.md](docs/TECHNICAL-REFERENCE.md) | The onboarding script in detail: parameters, names, steps and output files |
-| [VERSION_HISTORY.md](docs/VERSION_HISTORY.md) | The versions of the onboarding kit |
 
 ### Supporting files
 
