@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.0.23](#version-5023)
 2. [Version 5.0.22](#version-5022)
 2. [Version 5.0.21](#version-5021)
 2. [Version 5.0.20](#version-5020)
@@ -43,7 +44,7 @@ The table shows the version that each script reports.
 | Script | Version of the script | Purpose |
 |---|---|---|
 | `Install-NeologikEnvironment.ps1` | v5.0.14 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.22 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.23 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
@@ -72,6 +73,17 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | `Install-NeologikEnvironment.ps1` | Version v5.0.12. The rows above that name versions v5.0.9, v5.0.10 and v5.0.11 ship as v5.0.12. Onboarding kit version 5.0.17 released a different version v5.0.10 of the onboarding script: the exact-scope role checks and the read-back of the roles of the deployment identity, which this version carries |
 | `Install-NeologikEnvironment.ps1` | Version v5.0.13. The rows above that name versions v5.0.9, v5.0.10, v5.0.11 and v5.0.12 ship as v5.0.13. Onboarding kit version 5.0.18 released a different version v5.0.11 of the onboarding script: the third role, Cost Management Reader, on its own |
 | `Install-NeologikEnvironment.ps1` | Version v5.0.14. The rows above that name versions v5.0.9, v5.0.10, v5.0.11, v5.0.12 and v5.0.13 ship as v5.0.14. Onboarding kit version 5.0.19 released a different version v5.0.12 of the onboarding script: the limited Role Based Access Control Administrator assignment on the subscription is removed and created again with the limit, which this version carries |
+
+## Version 5.0.23
+
+**Date**: 2026-10-21
+
+| Item | Change |
+|---|---|
+| `.gitattributes` | Marks `docs/VERSION_HISTORY.md` `export-ignore`, so the zip of `main` leaves the version history out |
+| `README.md` | The table of documents leaves out the version history |
+| `Install-NeologikEnvironment.ps1` | No change to the script. The onboarding script records the version `v5.0.23` on the resource group |
+| `Grant-NeologikAgentAccess.ps1` | No change to the script. The grants script reports the onboarding kit version v5.0.23 |
 
 ## Version 5.0.22
 
