@@ -284,7 +284,7 @@ $script:Summary = @()
 $script:State = @{}
 # The version of the onboarding kit that ships the script. The header, the log file
 # and the summary file name the version.
-$script:KitVersion = 'v5.0.21'
+$script:KitVersion = 'v5.0.22'
 # The log file of the run. The script writes every message to the log file from the
 # first line. The reason a run ended before its steps, for the summary file.
 $script:LogFile = $null
