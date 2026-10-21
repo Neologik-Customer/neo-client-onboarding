@@ -53,7 +53,7 @@ The table shows the version that each script reports.
 
 | Item | Change |
 |---|---|
-| `docs/NETWORK-GUIDE.md` | Names the two deployment types Standard and Private Endpoint. The guide lists the data services of a Private Endpoint environment, which refuse requests from the internet. The guide also names the three monitoring resources, which accept requests from the internet. The reduced layout gives the workload pods a `/20`, enough to move the workload node pool to a new VM size |
+| `docs/NETWORK-GUIDE.md` | Names the two deployment types Standard and Private Endpoint. The guide lists the data services of a Private Endpoint environment, which refuse requests from the internet. The guide also names the three monitoring resources, which accept requests from the internet. The Standard row names the services that accept Microsoft Entra ID sign-in only, and the NGINX ingress controller. The reduced layout gives the workload pods a `/20`, enough to move the workload node pool to a new VM size |
 | `docs/PRE-ONBOARDING-INFO-GATHERING.md` | Names the two deployment types Standard and Private Endpoint |
 | `Install-NeologikEnvironment.ps1` | No change to the script. The onboarding script records the version `v5.0.21` on the resource group |
 | `Grant-NeologikAgentAccess.ps1` | No change to the script. The grants script reports the onboarding kit version v5.0.21 |

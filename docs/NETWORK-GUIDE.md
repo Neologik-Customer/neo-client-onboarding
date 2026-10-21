@@ -27,7 +27,7 @@ Read this document when you are considering a Private Endpoint environment. Read
 | Deployment type | Network position | Entry point for users |
 |---|---|---|
 | Private Endpoint | The data services of the environment are reached through private endpoints inside the virtual network. The data services are the databases, storage accounts, Azure AI Search, Key Vault, Azure AI services and the container registry. The firewall of each data service refuses a request from the internet. The monitoring resources accept requests from the internet: the Log Analytics workspace, Application Insights and the Azure Monitor workspace | Application Gateway for Containers, with a web application firewall |
-| Standard | The Azure services of the environment have public endpoints. Microsoft Entra ID authorisation and the firewall of each service protect them | A load balancer with a public IP address, in front of the ingress controller of the cluster |
+| Standard | The data services of the environment have public endpoints. The databases, storage accounts, Azure AI Search, Key Vault and Azure AI services accept Microsoft Entra ID sign-in only. Keys and passwords are switched off for these services | A load balancer with a public IP address, in front of the NGINX ingress controller of the cluster |
 
 Both deployment types use the same default address space. A Private Endpoint environment uses more subnets, because the private endpoints, the deployment VM and Azure Bastion each need one.
 
