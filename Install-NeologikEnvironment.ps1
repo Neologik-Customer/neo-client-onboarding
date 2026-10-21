@@ -147,7 +147,6 @@
         -AnswerFile .\inputs.json -SkipPowerShellUpdate -SkipModuleInstall
 
 .NOTES
-    Version: v5.0.11
     Requires: PowerShell 7.4 or later
     Requires: Owner on the subscription and Global Administrator in the tenant
 #>
@@ -221,7 +220,7 @@ $WarningPreference = 'Continue'
 $script:Version = 'v5.0.14'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.0.23'
+$script:KitVersion = 'v5.1.0'
 
 # The third role of the deployment identity on the subscription: Role Based Access
 # Control Administrator, limited by a condition to three roles. The deployment runs the
@@ -316,7 +315,7 @@ $script:ArmMfaClaimsChallenge = 'eyJhY2Nlc3NfdG9rZW4iOnsiYWNycyI6eyJlc3NlbnRpYWw
 function Write-Log {
     <#
     .SYNOPSIS
-        Writes a message to the log file and to the console.
+        Writes a message to the log file and to the console. With -LogFileOnly, to the log file only.
     #>
     [CmdletBinding()]
     param(
@@ -325,7 +324,10 @@ function Write-Log {
 
         [Parameter(Mandatory = $false)]
         [ValidateSet('Info', 'Warning', 'Error', 'Success')]
-        [string]$Level = 'Info'
+        [string]$Level = 'Info',
+
+        [Parameter(Mandatory = $false)]
+        [switch]$LogFileOnly
     )
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -338,6 +340,8 @@ function Write-Log {
     catch {
         Write-Warning "The script could not write to the log file: $_"
     }
+
+    if ($LogFileOnly) { return }
 
     # Write to console. An error message goes to the console in red and throws nothing.
     # Write-Error would throw, because $ErrorActionPreference is 'Stop', and the messages that
@@ -6168,7 +6172,7 @@ function Start-NeologikOnboarding {
     catch {
         Write-Log "Onboarding failed: $_" -Level Error
         # The stack trace goes to the log file only.
-        Write-Log "Stack Trace: $($_.ScriptStackTrace)" -Level Info
+        Write-Log "Stack Trace: $($_.ScriptStackTrace)" -Level Info -LogFileOnly
 
         if ($_.Exception.Message -match "Insufficient permissions:|ERROR: Insufficient permissions") {
             Write-Host "`n[X] The onboarding script stopped: a permission is missing." -ForegroundColor Red
