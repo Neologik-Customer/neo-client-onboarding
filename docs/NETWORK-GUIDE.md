@@ -10,7 +10,7 @@ Read this document when you are considering a Private Endpoint environment. Read
 |---|---|
 | The person who plans your networks | Check that the default ranges do not overlap a network that you will peer with the environment. Tell Neologik the ranges that you want changed, before onboarding |
 | The person who manages your DNS | Create the public DNS record for the host name after the deployment, as described in [FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md). Forward the private DNS zones to Azure when you peer the environment with your own network |
-| Approvers | Note that the environment has one public entry point, the host name, and one public outbound address |
+| Approvers | Note that the environment has one public entry point for users, the host name, and one public outbound address |
 
 ## Contents
 
@@ -26,7 +26,7 @@ Read this document when you are considering a Private Endpoint environment. Read
 
 | Deployment type | Network position | Entry point for users |
 |---|---|---|
-| Private Endpoint | The Azure services of the environment are reached through private endpoints inside the virtual network. The firewall of each service refuses a request from the internet | Application Gateway for Containers, with a web application firewall |
+| Private Endpoint | The data services of the environment are reached through private endpoints inside the virtual network. The data services are the databases, storage accounts, Azure AI Search, Key Vault, Azure AI services and the container registry. The firewall of each data service refuses a request from the internet. The monitoring resources accept requests from the internet: the Log Analytics workspace, Application Insights and the Azure Monitor workspace | Application Gateway for Containers, with a web application firewall |
 | Standard | The Azure services of the environment have public endpoints. Microsoft Entra ID authorisation and the firewall of each service protect them | A load balancer with a public IP address, in front of the ingress controller of the cluster |
 
 Both deployment types use the same default address space. A Private Endpoint environment uses more subnets, because the private endpoints, the deployment VM and Azure Bastion each need one.
@@ -43,7 +43,7 @@ The virtual network has the address space `10.0.0.0/8` by default. The deploymen
 | `userpool1podsubnet` | `10.203.0.0/16` | The pods of the workload node pool. Every Neologik Platform service runs here |
 | `AppSubnet` | `10.205.0.0/16` | Reserved for Azure Container Apps |
 | `AiServiceSubnet` | `10.206.0.0/16` | Network integration of the Azure AI services |
-| `PrivateEndpointSubnet` | `10.220.0.0/16` | The private endpoint of every Azure service of the environment |
+| `PrivateEndpointSubnet` | `10.220.0.0/16` | The private endpoint of every data service of the environment |
 | `VmSubnet` | `10.252.0.0/16` | The deployment VM, which runs the deployments by Neologik |
 | `AzureBastionSubnet` | `10.253.0.0/16` | Azure Bastion, which gives Neologik support access to the deployment VM. Azure fixes the name of this subnet |
 | `ApplicationGatewayForContainersSubnet` | `10.254.0.0/16` | Application Gateway for Containers, the entry point for users |
@@ -84,12 +84,12 @@ A subnet cannot move after the environment is built, because the Kubernetes clus
 | Default layout: a `/10` | `10.192.0.0/10` | The default layout above, unchanged. The environment can grow without a further allocation |
 | Minimum: a `/19` | `10.250.32.0/19` | The reduced layout below. The deployment has built a Private Endpoint environment on a `/19` |
 
-The reduced layout gives each subnet the smallest range that the Azure service in the subnet accepts. The pod subnets take the rest of the block.
+The reduced layout gives each subnet the smallest range that holds the subnet's peak use. The workload pod subnet is the largest. Moving the workload node pool to a new VM size runs both pools side by side.
 
 | Subnet | Range in the reduced layout | Limit that the range sets |
 |---|---|---|
-| `systempoolpodsubnet` | `/21` | 2,048 addresses for the pods of the system node pool |
-| `userpool1podsubnet` | `/21` | 2,048 addresses for the pods of the workload node pool |
+| `systempoolpodsubnet` | `/21` | 2,043 addresses for the pods of the system node pool |
+| `userpool1podsubnet` | `/20` | 4,091 addresses for the pods of the workload node pool, enough for both pools during a move |
 | `ApplicationGatewayForContainersSubnet` | `/24` | Application Gateway for Containers accepts no smaller subnet |
 | `AzureBastionSubnet` | `/26` | Azure Bastion accepts no smaller subnet |
 | `PrivateEndpointSubnet` | `/26` | 59 private endpoints |
@@ -101,7 +101,7 @@ The Kubernetes service range stays outside the block, at `10.210.0.0/16` by defa
 
 ## Private DNS zones
 
-A Private Endpoint environment reaches each Azure service through a private endpoint. The deployment creates one private DNS zone for each kind of Azure service. The deployment links each private DNS zone to the virtual network and records the private address of each endpoint in the matching zone. Inside the virtual network, the public name of each service answers with the private address.
+A Private Endpoint environment reaches each data service through a private endpoint. The deployment creates one private DNS zone for each kind of Azure service. The deployment links each private DNS zone to the virtual network and records the private address of each endpoint in the matching zone. Inside the virtual network, the public name of each service answers with the private address.
 
 | Private DNS zone | Azure service |
 |---|---|
