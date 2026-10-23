@@ -57,7 +57,6 @@ Microsoft.ChangeSafety
 Microsoft.App
 Microsoft.Web
 Microsoft.BotService
-Microsoft.Automation
 Microsoft.ServiceLinker
 Microsoft.SaaS
 Microsoft.Quota

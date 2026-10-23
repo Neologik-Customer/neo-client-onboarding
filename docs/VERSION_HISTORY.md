@@ -74,6 +74,7 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | `Install-NeologikEnvironment.ps1` | Version v5.0.13. The rows above that name versions v5.0.9, v5.0.10, v5.0.11 and v5.0.12 ship as v5.0.13. Onboarding kit version 5.0.18 released a different version v5.0.11 of the onboarding script: the third role, Cost Management Reader, on its own |
 | `Install-NeologikEnvironment.ps1` | Version v5.0.14. The rows above that name versions v5.0.9, v5.0.10, v5.0.11, v5.0.12 and v5.0.13 ship as v5.0.14. Onboarding kit version 5.0.19 released a different version v5.0.12 of the onboarding script: the limited Role Based Access Control Administrator assignment on the subscription is removed and created again with the limit, which this version carries |
 | `docs/NETWORK-GUIDE.md` | The Standard row names the container registry among the services that accept Microsoft Entra ID sign-in only. From Neologik Platform v5.1 the registry's admin user is off |
+| `resource-providers.txt` | The list no longer holds `Microsoft.Automation`. The Neologik Platform no longer creates an Azure Automation account |
 
 ## Version 5.0.23
 
