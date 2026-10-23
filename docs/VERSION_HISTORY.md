@@ -55,6 +55,7 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 
 | Item | Change |
 |---|---|
+| `resource-providers.txt` | The list no longer holds `Microsoft.Automation`. The Neologik Platform no longer creates an Azure Automation account |
 | `ANALYTICS-REPORTING-GUIDE.md` | New document. What the environment reports to Neologik, what the environment never reports, the retention period and how to withdraw from reporting |
 | `Install-NeologikEnvironment.ps1` | Version v5.0.9. After a failure, the onboarding script prints the closing messages: the path of the log, the permission that is missing, and how to resume. Before this version, the first error message stopped the onboarding script before the closing messages. A run that stops because a permission is missing ends with exit code 2 |
 | `Install-NeologikEnvironment.ps1` | The onboarding script downloads the PowerShell installer of the latest release. Before this version, the address named one fixed version |
@@ -74,7 +75,6 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | `Install-NeologikEnvironment.ps1` | Version v5.0.13. The rows above that name versions v5.0.9, v5.0.10, v5.0.11 and v5.0.12 ship as v5.0.13. Onboarding kit version 5.0.18 released a different version v5.0.11 of the onboarding script: the third role, Cost Management Reader, on its own |
 | `Install-NeologikEnvironment.ps1` | Version v5.0.14. The rows above that name versions v5.0.9, v5.0.10, v5.0.11, v5.0.12 and v5.0.13 ship as v5.0.14. Onboarding kit version 5.0.19 released a different version v5.0.12 of the onboarding script: the limited Role Based Access Control Administrator assignment on the subscription is removed and created again with the limit, which this version carries |
 | `docs/NETWORK-GUIDE.md` | The Standard row names the container registry among the services that accept Microsoft Entra ID sign-in only. From Neologik Platform v5.1 the registry's admin user is off |
-| `resource-providers.txt` | The list no longer holds `Microsoft.Automation`. The Neologik Platform no longer creates an Azure Automation account |
 
 ## Version 5.0.23
 
