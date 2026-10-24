@@ -28,10 +28,10 @@ Microsoft.ContainerRegistry
 Microsoft.ContainerInstance
 Microsoft.KubernetesConfiguration
 Microsoft.Network
-Microsoft.ServiceNetworking      # Application Gateway for Containers (neo-secure deployments)
-Microsoft.NetworkFunction        # Application Gateway for Containers (neo-secure deployments)
+Microsoft.ServiceNetworking      # Application Gateway for Containers (Private Endpoint deployments)
+Microsoft.NetworkFunction        # Application Gateway for Containers (Private Endpoint deployments)
 
-# Virtual machine schedules (neo-secure deployments)
+# Virtual machine schedules (Private Endpoint deployments)
 Microsoft.DevTestLab
 
 # Data, search and AI
