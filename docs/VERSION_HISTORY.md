@@ -58,6 +58,8 @@ This version is on the line of Neologik Platform v5.1.
 
 | Item | Change |
 |---|---|
+| `resource-providers.txt` | The list no longer holds `Microsoft.Automation`. The Neologik Platform no longer creates an Azure Automation account |
+| `resource-providers.txt` | The comments name the infrastructure type Private Endpoint, as the guides do, where they said neo-secure |
 | `ANALYTICS-REPORTING-GUIDE.md` | New document. What the environment reports to Neologik, what the environment never reports, the retention period and how to withdraw from reporting |
 | `Install-NeologikEnvironment.ps1` | Version v5.0.14. After a failure, the onboarding script prints the closing messages: the path of the log, the permission that is missing, and how to resume. Before this version, the first error message stopped the onboarding script before the closing messages. A run that stops because a permission is missing ends with exit code 2 |
 | `Install-NeologikEnvironment.ps1` | The stack trace of a failure goes to the log file only |
@@ -74,6 +76,8 @@ This version is on the line of Neologik Platform v5.1.
 | `PRE-ONBOARDING-INFO-GATHERING.md` | The vCPU quota row names the node sizes and the vCPU total of the family |
 | Documents | The documents state why the Platform Sign-in application accepts accounts of more than one tenant: Neologik support staff can sign in with an account of the Neologik tenant, when you allow that tenant |
 | `README.md` | A new requirement row under Before you start: a customer billed through a Cloud Solution Provider partner asks the partner to enable the cost visibility policy, so the platform's return on investment report can show running costs |
+| `docs/NETWORK-GUIDE.md` | The Standard row names the container registry among the services that accept Microsoft Entra ID sign-in only. From Neologik Platform v5.1 the registry's admin user is off |
+| `docs/NETWORK-GUIDE.md` | On a Private Endpoint environment the Video Indexer account is reached through a private endpoint, and the account's private DNS zone joins the table. The endpoint that collects the cluster's metrics accepts requests from the internet. On both deployment types the Log Analytics workspace, Application Insights and the storage account of the stop and start schedule accept Microsoft Entra ID sign-in only. These changes come with Neologik Platform v5.1 |
 
 ## Version 5.0.23
 
