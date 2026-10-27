@@ -32,6 +32,7 @@ The grants script is the same for every customer and every environment. The two 
 | Requirement | Reason |
 |---|---|
 | PowerShell 7.4 or later | The grants script stops on an earlier version |
+| A workstation with a desktop and a browser | The grants script opens the sign-in page in the browser of the workstation. You complete the sign-in in the browser |
 | A Global Administrator account in your tenant | Only a Global Administrator can create a grant to an agent user account and grant a Microsoft Graph application permission |
 | Exchange Administrator or Global Administrator, for a run with a mailbox grants file | The mailbox grants are made in Exchange Online |
 | The agent grants file, the mailbox grants file or both | The files list the grants to apply. Each file names your tenant |
@@ -61,8 +62,8 @@ Before the grants script changes anything, the grants script confirms three fact
 
    Leave out the parameter of a file that you do not have.
 
-4. The grants script prints a web address and a code. Open the web address in a browser on any device, enter the code and sign in as a Global Administrator. The grants script waits for up to 15 minutes and reports every 30 seconds that the grants script still waits.
-5. In a run with a mailbox grants file, the grants script signs in to Exchange Online in the same way. Sign in as an Exchange Administrator or as a Global Administrator.
+4. The grants script opens the sign-in page in your browser. Sign in as a Global Administrator. The grants script waits for up to 5 minutes and reports every 30 seconds that the grants script still waits.
+5. In a run with a mailbox grants file, the grants script signs in to Exchange Online in the same way. The browser uses the same account and does not usually ask again. Sign in as an Exchange Administrator or as a Global Administrator.
 6. Read the summary table on screen and the list `FILES TO SEND TO NEOLOGIK` under it. Send the files to Neologik.
 
 The grants script takes your tenant and the short name of your environment from the agent grants file. The command needs no other value. Three optional parameters cover the exceptions.
@@ -72,6 +73,8 @@ The grants script takes your tenant and the short name of your environment from 
 | `-TenantId <tenant id>` | The command names a mailbox grants file alone, and the mailbox grants file does not name the tenant |
 | `-SolutionShortName <short name>` | The command names a mailbox grants file alone, or the agent grants file does not name the environment, and your tenant holds more than one Neologik environment |
 | `-SharePointAppClientId <client id>` | Neologik asks for the parameter. The grants script then finds the SharePoint application of the environment by the client id |
+
+When the browser sign-in does not complete, the grants script prints a web address and a code. Open the web address in a browser on any device, enter the code and sign in. The grants script waits for up to 15 minutes. Some organisations block this sign-in with a Conditional Access policy. The grants script then says so and tries the next method.
 
 To see what a run would change, add `-Verify` to the end of the command. The sign-ins are the same. The grants script reports each pending change as `WOULD` and writes nothing.
 

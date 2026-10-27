@@ -84,6 +84,7 @@ This document is in the root of the onboarding kit. Every other document is in t
 | [GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md](docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md) | What the grants script, `Grant-NeologikAgentAccess.ps1`, applies |
 | [TEAMS-APP-UPGRADE-GUIDE.md](docs/TEAMS-APP-UPGRADE-GUIDE.md) | How to upgrade the Teams app for your users |
 | [TECHNICAL-REFERENCE.md](docs/TECHNICAL-REFERENCE.md) | The onboarding script in detail: parameters, names, steps and output files |
+| [ANALYTICS-REPORTING-GUIDE.md](docs/ANALYTICS-REPORTING-GUIDE.md) | For Approvers. What the environment reports to Neologik, what the environment never reports, how long Neologik keeps the statistics and how to withdraw |
 
 ### Supporting files
 
@@ -117,6 +118,7 @@ This document is in the root of the onboarding kit. Every other document is in t
 | PowerShell | PowerShell 7.4 or later. Windows PowerShell 5.1 cannot run the onboarding script |
 | Host name | The fully qualified host name of the environment. An example is `neologik.contoso.com`. Agree the host name with Neologik and with the person who manages your DNS |
 | Values | The values listed in [PRE-ONBOARDING-INFO-GATHERING.md](docs/PRE-ONBOARDING-INFO-GATHERING.md) |
+| Cost data for the return on investment report | If you buy Azure through a Cloud Solution Provider partner on the Azure Plan, ask the partner to set your cost visibility policy to **Yes** in the partner tenant: **Cost Management + Billing**, the billing scope, **Customers**, your organisation, **Settings**, **Policies**, **Azure Usage**. Without it the platform's return on investment report shows running costs as unavailable. A directly billed subscription needs nothing. A Microsoft Azure Sponsorship subscription cannot report running costs |
 
 The onboarding script checks both roles before the onboarding script creates anything. The onboarding script stops if either role is missing.
 

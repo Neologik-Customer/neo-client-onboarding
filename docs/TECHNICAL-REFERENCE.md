@@ -16,8 +16,8 @@ This document describes the onboarding script, `Install-NeologikEnvironment.ps1`
 
 | Item | Value |
 |---|---|
-| Version of the onboarding script | v5.0.8 |
-| Version of the onboarding kit | v5.0.14 |
+| Version of the onboarding script | The value of `$script:Version` in `Install-NeologikEnvironment.ps1`. The onboarding script prints the version when a run starts |
+| Version of the onboarding kit | The value of `$script:KitVersion` in `Install-NeologikEnvironment.ps1`. The onboarding script records the version on the resource group |
 
 The onboarding kit has a version, and each script has a separate version. The version of the onboarding kit follows the version of the Neologik Platform. The version of a script changes when the script changes.
 
@@ -252,7 +252,7 @@ When you choose tags, the onboarding script tags the resource group and each oth
 | `Solution` | The short name, for example `abcprd01` |
 | `DeploymentDate` | The date of the run |
 
-The onboarding script also adds the tag `NeologikOnboardingKit` to the resource group. The tag records the version of the onboarding kit, `v5.0.9`. The onboarding script adds the tag `NeologikOnboardingKit` even when you choose no tags. The Neologik Platform reads the tag before an upgrade.
+The onboarding script also adds the tag `NeologikOnboardingKit` to the resource group. The tag records the version of the onboarding kit that ran, the value of `$script:KitVersion`. The onboarding script adds the tag `NeologikOnboardingKit` even when you choose no tags. The Neologik Platform reads the tag before an upgrade.
 
 ### Guest users
 
@@ -317,7 +317,7 @@ The onboarding script creates the application `Neologik Platform Sign-in - <shor
 |---|---|
 | Owner | The onboarding script makes the deployment identity an owner of the Platform Sign-in application and of the service principal of the Platform Sign-in application |
 | Security groups | The onboarding script assigns the groups `Neologik NCE Contributors - <short name>` and `Neologik NCE Admins - <short name>` to the Platform Sign-in application |
-| Sign-in audience | Multi-tenant |
+| Sign-in audience | Multi-tenant. Neologik support staff can then sign in with an account of the Neologik tenant, when you allow that tenant |
 | Redirect address | `https://<host>/nce` |
 | Group claims | The security groups assigned to the Platform Sign-in application |
 | Client secret | The onboarding script creates a client secret when the Key Vault holds no client secret for the Platform Sign-in application. The client secret is valid for 365 days. The onboarding script stores the client secret in the Key Vault, as the secret `sp-admin-<solution name>-auth-secret` |

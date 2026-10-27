@@ -155,11 +155,11 @@ The onboarding script reads each directory object before a write. The onboarding
 | Security group | `New-MgGroup` | Display name and description. Security enabled. Not mail enabled | The security group is absent |
 | Name of a security group | `Update-MgGroup` | Display name and description | The tenant holds the group `Neologik NCE Contributors - <short name>` under one of two other names that the onboarding script recognises. The security group keeps the id and the members. A new environment holds no security group with either name |
 | Member of a security group | `New-MgGroupMember` | The invited accounts, the existing accounts and the signed-in administrator. Each account joins all four security groups | The account is not already a member |
-| Deployment application | `New-MgApplication` | Display name `Neologik GitHub Service Connection - <short name>`. Multi-tenant sign-in audience | The onboarding script creates the deployment identity, and the application is absent |
+| Deployment application | `New-MgApplication` | Display name `Neologik GitHub Service Connection - <short name>`. Single-tenant sign-in audience | The onboarding script creates the deployment identity, and the application is absent |
 | Deployment service principal | `New-MgServicePrincipal` | Created from the deployment application | The service principal is absent |
 | Client secret of the deployment identity | `Add-MgApplicationPassword` | Display name `auth`. Valid for 365 days | Each run in which the onboarding script creates or manages the deployment identity. See [Secrets](#secrets) |
 | Microsoft Graph application permissions of the deployment identity | `POST /servicePrincipals/{id}/appRoleAssignments` | `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` | The deployment identity does not already hold the permission |
-| Platform Sign-in application | `New-MgApplication` | Display name `Neologik Platform Sign-in - <short name>`. Unique name `sp-admin-<solution name>`. Multi-tenant sign-in audience. Group claims for assigned groups. Redirect address `https://<host>/nce`. Access token version 2 | No application has the unique name |
+| Platform Sign-in application | `New-MgApplication` | Display name `Neologik Platform Sign-in - <short name>`. Unique name `sp-admin-<solution name>`. Multi-tenant sign-in audience, so that Neologik support staff can sign in with an account of the Neologik tenant when you allow that tenant. Group claims for assigned groups. Redirect address `https://<host>/nce`. Access token version 2 | No application has the unique name |
 | Display name of the Platform Sign-in application | `Update-MgApplication` | Display name | The existing display name differs |
 | Service principal of the Platform Sign-in application | `New-MgServicePrincipal` | Created from the Platform Sign-in application | The service principal is absent |
 | Client secret of the Platform Sign-in application | `Add-MgApplicationPassword` | Display name `auth`. Valid for 365 days | The Key Vault holds no secret with the name `sp-admin-<solution name>-auth-secret` |
@@ -349,7 +349,7 @@ The onboarding script writes a checkpoint at these points:
 | Where the run stopped | What to do |
 |---|---|
 | After the administrator confirmed the configuration | Run the onboarding script again and resume. The onboarding script skips the terms and the questions. Each step runs again and uses the objects that the earlier run created |
-| Before the administrator confirmed the configuration | Run the onboarding script again with the parameter `-FreshRun`. The parameter deletes the checkpoint |
+| Before the administrator confirmed the configuration | Run the onboarding script again and resume. The checkpoint holds no configuration, so the onboarding script asks the questions again |
 
 ### Failure
 
@@ -362,6 +362,7 @@ The onboarding script writes a checkpoint at these points:
 |---|---|
 | 0 | The run completed, or the administrator declined the terms. The onboarding script also ends with exit code 0 after an update of PowerShell |
 | 1 | The run failed. The onboarding script shows the error and stops |
+| 2 | The run stopped because the account lacks a permission. The onboarding script names the permission and keeps the checkpoint. Obtain the permission, then run the onboarding script again and resume |
 
 ## Summary of permissions by scope
 

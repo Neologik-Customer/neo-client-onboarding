@@ -27,7 +27,7 @@ BeforeAll {
     function Get-MgServicePrincipal { [CmdletBinding()] param($Filter, [switch]$All) }
     function Get-MgServicePrincipalAppRoleAssignment { [CmdletBinding()] param($ServicePrincipalId, [switch]$All) }
     function New-MgServicePrincipalAppRoleAssignment { [CmdletBinding()] param($ServicePrincipalId, $PrincipalId, $ResourceId, $AppRoleId) }
-    function Connect-ExchangeOnline { [CmdletBinding()] param([switch]$Device, $ShowBanner) }
+    function Connect-ExchangeOnline { [CmdletBinding()] param([switch]$Device, $ShowBanner, $UserPrincipalName) }
     function Disconnect-ExchangeOnline { [CmdletBinding(SupportsShouldProcess)] param() }
     function Get-OrganizationConfig { [CmdletBinding()] param() }
     function Enable-OrganizationCustomization { [CmdletBinding()] param() }
@@ -383,6 +383,13 @@ BeforeAll {
         }
         return @{ StatusCode = 200; Body = @{ access_token = 'eyJ0b2tlbg'; refresh_token = 'rt-1' } }
     }
+    # The browser sign-in: by default no browser opens, so a run falls back to the
+    # device code above. The context 'Browser sign-in' opens the browser.
+    Mock Start-NeologikLoopbackListener {
+        [pscustomobject]@{ Port = 50999 } | Add-Member -MemberType ScriptMethod -Name Stop -Value { } -PassThru
+    }
+    Mock Open-NeologikBrowser { param($Uri) $script:BrowserUris += $Uri; $script:BrowserOpens }
+    Mock Test-NeologikDesktop { $script:Desktop }
     Mock Get-NeologikSummaryDirectory { @($script:SummaryDirs) }
     Mock Invoke-NeologikGraphRaw { param($Method, $Uri, $Body) Invoke-FakeGraph -Method $Method -Uri $Uri -Body $Body }
     Mock Connect-MgGraph { $script:Connected = $true }
@@ -482,6 +489,9 @@ BeforeEach {
     $script:Installs = @()
     $script:Imports = @()
     $script:TokenRequests = @()
+    $script:BrowserUris = @()
+    $script:BrowserOpens = $false
+    $script:Desktop = $false
     $script:Connected = $false
     $script:ExchangeConnected = $false
     $script:ExchangeDisconnected = $false
@@ -800,7 +810,7 @@ Context 'Sign-in and preflight' {
         # Bounded: polled at once and after each of the twelve 10-second waits, never more.
         @($script:TokenRequests | Where-Object { $_.Uri -match '/token$' }).Count | Should -Be 13
         ($script:Sleeps | Measure-Object -Sum).Sum | Should -Be 120
-        $console | Should -Match 'The sign-in to Microsoft Graph did not complete\. The script tried three methods'
+        $console | Should -Match 'The sign-in to Microsoft Graph did not complete\. The script tried four methods'
         Should -Invoke Get-MgServicePrincipal -Times 0
     }
 
@@ -891,6 +901,186 @@ Context 'The agent grants file (step 1)' {
         $console | Should -Match 'Step 1: the grants to agent users'
         $console | Should -Match 'The grants run is complete'
     }
+
+Context 'Browser sign-in' {
+    BeforeAll {
+        # An access token that names the account admin@contoso.com. The script reads the
+        # claims and never checks the signature.
+        $claims = ConvertTo-NeologikBase64Url ([System.Text.Encoding]::UTF8.GetBytes('{"upn":"admin@contoso.com"}'))
+        $script:AdminJwt = "eyJhbGciOiJub25lIn0.$claims.sig"
+        function Get-BrowserQuery {
+            # The parameters of the sign-in address that the script opened, by position.
+            param([int]$Index)
+            ConvertFrom-NeologikQueryString ($script:BrowserUris[$Index].Split('?', 2)[1])
+        }
+    }
+
+    BeforeEach {
+        $script:BrowserOpens = $true
+        # The browser returns the code with the state of the address that the script opened.
+        Mock Wait-NeologikLoopbackRequest {
+            param($Listener, $TimeoutSeconds, $Label)
+            $query = Get-BrowserQuery -Index ($script:BrowserUris.Count - 1)
+            @{ code = "code-$Label"; state = $query.state }
+        }
+        Mock Invoke-NeologikTokenRequest {
+            param($Uri, $Body)
+            $script:TokenRequests += @{ Uri = $Uri; Body = $Body }
+            if ($Uri -match '/devicecode$') {
+                return @{ StatusCode = 200; Body = @{ device_code = 'dc-1'; user_code = 'ABCD-EFGH'; verification_uri = 'https://microsoft.com/devicelogin'; expires_in = 900; interval = 5 } }
+            }
+            return @{ StatusCode = 200; Body = @{ access_token = $script:AdminJwt; refresh_token = 'rt-1' } }
+        }
+    }
+
+    It 'signs in to Graph in the browser first and asks for no device code' {
+        Add-AgentIdentities
+        $code = Invoke-Run @{ AgentGrantsFile = (New-GrantsFile -Grants @((New-AgentGrantEntry))) }
+        $code | Should -Be 0
+        @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' }).Count | Should -Be 0
+        $script:BrowserUris | Should -HaveCount 1 -Because 'the grants run signs in to Microsoft Graph only'
+
+        $graphUri = $script:BrowserUris[0]
+        $graphUri | Should -Match "^https://login\.microsoftonline\.com/$($script:Ids.Tenant)/oauth2/v2\.0/authorize\?"
+        $graphQuery = Get-BrowserQuery -Index 0
+        $graphQuery.client_id | Should -Be '14d82eec-204b-4c2f-b7e8-296a70dab67e'
+        $graphQuery.redirect_uri | Should -Be 'http://localhost:50999/'
+        $graphQuery.code_challenge_method | Should -Be 'S256'
+        $graphQuery.prompt | Should -Be 'select_account'
+        @($graphQuery.scope -split ' ') | Should -Contain 'Directory.Read.All'
+        $graphToken = @($script:TokenRequests | Where-Object { $_.Body.client_id -eq '14d82eec-204b-4c2f-b7e8-296a70dab67e' }) | Select-Object -First 1
+        $graphToken.Uri | Should -Match '/token$'
+        $graphToken.Body.grant_type | Should -Be 'authorization_code'
+        $graphToken.Body.code | Should -Be 'code-Microsoft Graph'
+        $graphToken.Body.redirect_uri | Should -Be 'http://localhost:50999/'
+        # The proof key: the challenge in the address is the hash of the verifier in the token request.
+        $hash = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::ASCII.GetBytes($graphToken.Body.code_verifier))
+        $graphQuery.code_challenge | Should -Be (ConvertTo-NeologikBase64Url $hash)
+
+        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $AccessToken -is [securestring] -and -not $UseDeviceCode }
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'opens the sign-in page in the browser of this computer'
+        $console | Should -Not -Match 'Enter the code'
+        $console | Should -Not -Match ([regex]::Escape($script:AdminJwt))
+    }
+
+    It 'falls back to the device code when the browser sign-in does not complete in time' {
+        Add-AgentIdentities
+        Mock Wait-NeologikLoopbackRequest { $null }
+        $code = Invoke-Run @{ AgentGrantsFile = (New-GrantsFile -Grants @((New-AgentGrantEntry))) }
+        $code | Should -Be 0
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'The sign-in to Microsoft Graph in the browser did not complete within 5 minutes'
+        $console | Should -Match 'Enter the code: ABCD-EFGH'
+        @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' }).Count | Should -Be 1
+    }
+
+    It 'falls back to the device code when no browser opens' {
+        Add-AgentIdentities
+        $script:BrowserOpens = $false
+        $code = Invoke-Run @{ AgentGrantsFile = (New-GrantsFile -Grants @((New-AgentGrantEntry))) }
+        $code | Should -Be 0
+        ($script:Console -join "`n") | Should -Match 'The sign-in to Microsoft Graph in the browser did not start\. The script tries a device code'
+        Should -Invoke Wait-NeologikLoopbackRequest -Times 0
+    }
+
+    It 'names a Conditional Access refusal in the browser and falls back to the device code' {
+        Add-AgentIdentities
+        Mock Wait-NeologikLoopbackRequest {
+            $query = Get-BrowserQuery -Index ($script:BrowserUris.Count - 1)
+            @{ error = 'access_denied'; error_description = 'AADSTS53003: Access has been blocked by Conditional Access policies.'; state = $query.state }
+        }
+        $code = Invoke-Run @{ AgentGrantsFile = (New-GrantsFile -Grants @((New-AgentGrantEntry))) }
+        $code | Should -Be 0
+        ($script:Console -join "`n") | Should -Match 'A Conditional Access policy of the tenant refused the sign-in to Microsoft Graph with the browser\. AADSTS53003'
+        @($script:TokenRequests | Where-Object { $_.Body.grant_type -eq 'authorization_code' }).Count | Should -Be 0
+        @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' }).Count | Should -Be 1
+    }
+
+    It 'ignores an answer whose state this run did not request' {
+        Add-AgentIdentities
+        Mock Wait-NeologikLoopbackRequest { @{ code = 'code-other'; state = 'another-state' } }
+        $code = Invoke-Run @{ AgentGrantsFile = (New-GrantsFile -Grants @((New-AgentGrantEntry))) }
+        $code | Should -Be 0
+        ($script:Console -join "`n") | Should -Match 'returned an answer that this run did not request'
+        @($script:TokenRequests | Where-Object { $_.Body.grant_type -eq 'authorization_code' }).Count | Should -Be 0
+    }
+
+    It 'names a Conditional Access refusal of the device code and tries the next method at once' {
+        Add-AgentIdentities
+        $script:BrowserOpens = $false
+        Mock Invoke-NeologikTokenRequest {
+            param($Uri, $Body)
+            if ($Uri -match '/devicecode$') {
+                return @{ StatusCode = 200; Body = @{ device_code = 'dc-1'; user_code = 'ABCD-EFGH'; verification_uri = 'https://microsoft.com/devicelogin'; expires_in = 900; interval = 5 } }
+            }
+            return @{ StatusCode = 400; Body = @{ error = 'invalid_grant'; error_codes = @(53003); error_description = 'AADSTS53003: Access has been blocked by Conditional Access policies.' } }
+        }
+        $code = Invoke-Run @{ AgentGrantsFile = (New-GrantsFile -Grants @((New-AgentGrantEntry))) }
+        $code | Should -Be 0
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'A Conditional Access policy of the tenant refused the sign-in to Microsoft Graph with a device code'
+        $console | Should -Match 'The script now tries the Azure CLI session of this workstation'
+        ($script:Sleeps | Measure-Object -Sum).Sum | Should -Be 0
+    }
+
+    It 'signs in to Exchange Online in the browser first, with the account of the Graph sign-in' {
+        Add-CompliantExchangeState
+        $script:Desktop = $true
+        $code = Invoke-Run @{ MailboxGrantsFile = (New-MailboxFile) }
+        $code | Should -Be 0
+        Should -Invoke Connect-ExchangeOnline -Times 1 -ParameterFilter { -not $Device -and $UserPrincipalName -eq 'admin@contoso.com' }
+        Should -Invoke Connect-ExchangeOnline -Times 0 -ParameterFilter { $Device }
+    }
+
+    It 'falls back to the Exchange Online device code when the browser sign-in fails' {
+        Add-CompliantExchangeState
+        $script:Desktop = $true
+        Mock Connect-ExchangeOnline { param([switch]$Device) if (-not $Device) { throw 'The browser sign-in was cancelled' }; $script:ExchangeConnected = $true }
+        $code = Invoke-Run @{ MailboxGrantsFile = (New-MailboxFile) }
+        $code | Should -Be 0
+        Should -Invoke Connect-ExchangeOnline -Times 1 -ParameterFilter { $Device }
+        ($script:Console -join "`n") | Should -Match 'The sign-in to Exchange Online in the browser did not complete\. The browser sign-in was cancelled\. The script tries a device code'
+        $script:ExchangeConnected | Should -BeTrue
+    }
+}
+
+Context 'Browser sign-in: the loopback listener' {
+    It 'reads the result of the sign-in from a real loopback request and answers the browser' {
+        # The real listener: the default mock replaces the command name, not the function.
+        $listener = & (Get-Command -Name Start-NeologikLoopbackListener -CommandType Function)
+        $http = [System.Net.Http.HttpClient]::new()
+        try {
+            $task = $http.GetAsync("http://localhost:$($listener.Port)/?code=abc%2B1&state=xyz")
+            $query = Wait-NeologikLoopbackRequest -Listener $listener -TimeoutSeconds 10 -Label 'Test'
+            $query.code | Should -Be 'abc+1'
+            $query.state | Should -Be 'xyz'
+            $response = $task.GetAwaiter().GetResult()
+            [int]$response.StatusCode | Should -Be 200
+            $response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | Should -Match 'The sign-in is complete\. Return to the PowerShell window\.'
+        }
+        finally {
+            $listener.Stop()
+            $http.Dispose()
+        }
+    }
+
+    It 'answers a request with no result with 404 and gives up when the time ends' {
+        # The real listener: the default mock replaces the command name, not the function.
+        $listener = & (Get-Command -Name Start-NeologikLoopbackListener -CommandType Function)
+        $http = [System.Net.Http.HttpClient]::new()
+        try {
+            $task = $http.GetAsync("http://localhost:$($listener.Port)/favicon.ico")
+            $query = Wait-NeologikLoopbackRequest -Listener $listener -TimeoutSeconds 2 -Label 'Test'
+            $query | Should -BeNullOrEmpty
+            [int]($task.GetAwaiter().GetResult().StatusCode) | Should -Be 404
+        }
+        finally {
+            $listener.Stop()
+            $http.Dispose()
+        }
+    }
+}
 
     It 'does nothing beyond the SharePoint marker for a file with no entries' {
         $grants = New-GrantsFile -Grants @() -SharePoint $false
