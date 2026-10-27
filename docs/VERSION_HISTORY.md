@@ -52,7 +52,7 @@ The table shows the version that each script reports.
 
 ## Version 5.1.0
 
-**Date**: 2026-10-21
+**Date**: 2026-10-27
 
 This version is on the line of Neologik Platform v5.1.
 
