@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.1.0](#version-510)
 2. [Version 5.0.23](#version-5023)
 2. [Version 5.0.22](#version-5022)
 2. [Version 5.0.21](#version-5021)
@@ -44,37 +45,37 @@ The table shows the version that each script reports.
 | Script | Version of the script | Purpose |
 |---|---|---|
 | `Install-NeologikEnvironment.ps1` | v5.0.14 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.0.23 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.0 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
 
-## Version NEXT
+## Version 5.1.0
 
-This version is on the line of Neologik Platform v5.1 and is not yet released.
+**Date**: 2026-10-27
+
+This version is on the line of Neologik Platform v5.1.
 
 | Item | Change |
 |---|---|
 | `resource-providers.txt` | The list no longer holds `Microsoft.Automation`. The Neologik Platform no longer creates an Azure Automation account |
 | `resource-providers.txt` | The comments name the infrastructure type Private Endpoint, as the guides do, where they said neo-secure |
 | `ANALYTICS-REPORTING-GUIDE.md` | New document. What the environment reports to Neologik, what the environment never reports, the retention period and how to withdraw from reporting |
-| `Install-NeologikEnvironment.ps1` | Version v5.0.9. After a failure, the onboarding script prints the closing messages: the path of the log, the permission that is missing, and how to resume. Before this version, the first error message stopped the onboarding script before the closing messages. A run that stops because a permission is missing ends with exit code 2 |
+| `Install-NeologikEnvironment.ps1` | Version v5.0.14. After a failure, the onboarding script prints the closing messages: the path of the log, the permission that is missing, and how to resume. Before this version, the first error message stopped the onboarding script before the closing messages. A run that stops because a permission is missing ends with exit code 2 |
+| `Install-NeologikEnvironment.ps1` | The stack trace of a failure goes to the log file only |
 | `Install-NeologikEnvironment.ps1` | The onboarding script downloads the PowerShell installer of the latest release. Before this version, the address named one fixed version |
 | `Install-NeologikEnvironment.ps1` | The configuration file records both roles of the deployment identity on the subscription: Reader and Cost Management Contributor |
 | `Install-NeologikEnvironment.ps1` | A run resumed from the first checkpoint asks the questions, because the first checkpoint holds no configuration. A resumed run honours `-SkipGuestInvitation` from the command line |
-| `QUICK-REFERENCE.md` | The document describes the resume from the first checkpoint and exit code 2 |
 | `Install-NeologikEnvironment.ps1` | The onboarding script creates the application registration of the deployment identity for a single tenant. The deployment signs in to your tenant only |
-| Documents | The documents state why the Platform Sign-in application accepts accounts of more than one tenant: Neologik support staff can sign in with an account of the Neologik tenant, when you allow that tenant |
+| `Install-NeologikEnvironment.ps1` | The help block of the onboarding script states no version. The onboarding script prints the version when a run starts. Version v5.0.13 of the onboarding script was not released |
 | `Grant-NeologikAgentAccess.ps1` | The grants script signs in to Microsoft Graph and to Exchange Online in the browser of the workstation first. A device code is the second method. Before this version, a device code was the first method. An organisation that blocks the device code with a Conditional Access policy could not complete the sign-in |
-| `Grant-NeologikAgentAccess.ps1` | When a Conditional Access policy refuses a sign-in, the grants script says so and tries the next method at once |
-| `GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md` | The document describes the browser sign-in and the device code as the second method |
+| `Grant-NeologikAgentAccess.ps1` | When a Conditional Access policy refuses a sign-in, the grants script says so and tries the next method at once. The grants script reports the onboarding kit version v5.1.0 |
+| `GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md` | The document describes the browser sign-in, and the device code as the second method |
+| `QUICK-REFERENCE.md` | The document describes the resume from the first checkpoint and exit code 2 |
+| `TECHNICAL-REFERENCE.md` | The document says where to read the version of the onboarding script and the version of the onboarding kit, instead of stating a number |
+| `PRE-ONBOARDING-INFO-GATHERING.md` | The vCPU quota row names the node sizes and the vCPU total of the family |
+| Documents | The documents state why the Platform Sign-in application accepts accounts of more than one tenant: Neologik support staff can sign in with an account of the Neologik tenant, when you allow that tenant |
 | `README.md` | A new requirement row under Before you start: a customer billed through a Cloud Solution Provider partner asks the partner to enable the cost visibility policy, so the platform's return on investment report can show running costs |
-| `Install-NeologikEnvironment.ps1` | Version v5.0.10. The limited Role Based Access Control Administrator on the subscription lets the deployment identity assign a third role: Cost Management Reader. The deployment assigns that role on the resource group that Azure Kubernetes Service creates for the nodes of the cluster to the identity of the configuration API of the Neologik Platform, which reads the daily cost of the nodes for the return on investment report. An assignment with the old condition receives the new condition |
-| Documents | The documents name the three roles the limited administrator may assign and the reason for the third |
-| `Install-NeologikEnvironment.ps1` | Version v5.0.11. The rows above that name versions v5.0.9 and v5.0.10 ship as v5.0.11. Onboarding kit version 5.0.16 released a different version v5.0.9 of the onboarding script |
-| `Install-NeologikEnvironment.ps1` | Version v5.0.12. The rows above that name versions v5.0.9, v5.0.10 and v5.0.11 ship as v5.0.12. Onboarding kit version 5.0.17 released a different version v5.0.10 of the onboarding script: the exact-scope role checks and the read-back of the roles of the deployment identity, which this version carries |
-| `Install-NeologikEnvironment.ps1` | Version v5.0.13. The rows above that name versions v5.0.9, v5.0.10, v5.0.11 and v5.0.12 ship as v5.0.13. Onboarding kit version 5.0.18 released a different version v5.0.11 of the onboarding script: the third role, Cost Management Reader, on its own |
-| `Install-NeologikEnvironment.ps1` | Version v5.0.14. The rows above that name versions v5.0.9, v5.0.10, v5.0.11, v5.0.12 and v5.0.13 ship as v5.0.14. Onboarding kit version 5.0.19 released a different version v5.0.12 of the onboarding script: the limited Role Based Access Control Administrator assignment on the subscription is removed and created again with the limit, which this version carries |
 | `docs/NETWORK-GUIDE.md` | The Standard row names the container registry among the services that accept Microsoft Entra ID sign-in only. From Neologik Platform v5.1 the registry's admin user is off |
 | `docs/NETWORK-GUIDE.md` | On a Private Endpoint environment the Video Indexer account is reached through a private endpoint, and the account's private DNS zone joins the table. The endpoint that collects the cluster's metrics accepts requests from the internet. On both deployment types the Log Analytics workspace, Application Insights and the storage account of the stop and start schedule accept Microsoft Entra ID sign-in only. These changes come with Neologik Platform v5.1 |
 
