@@ -23,7 +23,7 @@ The agent account has no password. The agent account cannot sign in. The agent u
 
 A Global Administrator grants the permissions with the grants script, `Grant-NeologikAgentAccess.ps1`, and the agent grants file that the Neologik Context Engine exports. [GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md](GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md) describes the grants script.
 
-An administrator completes up to four tasks in your tenant.
+An administrator completes up to five tasks in your tenant.
 
 | Task | Who acts | When the task applies |
 |---|---|---|
@@ -31,6 +31,7 @@ An administrator completes up to four tasks in your tenant.
 | [2. Give access to a shared mailbox](#task-2-give-access-to-a-shared-mailbox) | An Exchange Administrator | The agent reads the shared mailbox or sends email from the shared mailbox |
 | [3. Give access to a SharePoint site](#task-3-give-access-to-a-sharepoint-site) | An owner of the site or a SharePoint Administrator | The agent reads files from a library on the site, or delivers files to the site |
 | [4. Add the agent account to a Teams team](#task-4-add-the-agent-account-to-a-teams-team) | A Teams Administrator | The agent reads a channel of the team |
+| [5. Give the SharePoint application access to a SharePoint site](#task-5-give-the-sharepoint-application-access-to-a-sharepoint-site) | A Global Administrator | The Neologik Platform reads files from the site through a SharePoint connection |
 
 The Neologik Context Engine shows the exact name of the agent account of each agent. The Neologik Context Engine also shows when each task is complete.
 
@@ -41,9 +42,10 @@ The Neologik Context Engine shows the exact name of the agent account of each ag
 3. [Task 2: Give access to a shared mailbox](#task-2-give-access-to-a-shared-mailbox)
 4. [Task 3: Give access to a SharePoint site](#task-3-give-access-to-a-sharepoint-site)
 5. [Task 4: Add the agent account to a Teams team](#task-4-add-the-agent-account-to-a-teams-team)
-6. [Check the result](#check-the-result)
-7. [Questions](#questions)
-8. [Help](#help)
+6. [Task 5: Give the SharePoint application access to a SharePoint site](#task-5-give-the-sharepoint-application-access-to-a-sharepoint-site)
+7. [Check the result](#check-the-result)
+8. [Questions](#questions)
+9. [Help](#help)
 
 ## Before you start
 
@@ -209,6 +211,35 @@ Install-Module MicrosoftTeams -Scope CurrentUser
 Connect-MicrosoftTeams
 Add-TeamUser -GroupId <group object id of the team> -User neologik-agent-<key>-<short name>@contoso.com
 ```
+
+## Task 5: Give the SharePoint application access to a SharePoint site
+
+The SharePoint application of the environment is `Neologik SharePoint Access - <short name>`. The application holds the Microsoft Graph application permission `Sites.Selected`. `Sites.Selected` reaches no SharePoint site until an administrator grants the application access to that site.
+
+Run task 5 once for each site that the Neologik Platform reads. A Global Administrator runs the commands, because the sign-in needs the delegated permission `Sites.FullControl.All`. The commands grant one site. The application gains no access to any other site.
+
+1. In the Microsoft Entra admin centre, select **App registrations**, then **All applications**.
+2. Find `Neologik SharePoint Access - <short name>`, and copy the **Application (client) ID**.
+3. Run these commands with your values:
+
+   ```powershell
+   # Once for each workstation.
+   Install-Module Microsoft.Graph.Sites -Scope CurrentUser
+
+   Connect-MgGraph -Scopes 'Sites.FullControl.All'
+
+   $hostName = '<your tenant>.sharepoint.com'
+   $siteName = '<site>'
+   $appId    = '<application (client) id>'
+   $appName  = 'Neologik SharePoint Access - <short name>'
+
+   $site = Get-MgSite -SiteId "${hostName}:/sites/$siteName"
+   $body = @{ roles = @('read'); grantedToIdentities = @(@{ application = @{ id = $appId; displayName = $appName } }) }
+   $permission = New-MgSitePermission -SiteId $site.Id -BodyParameter $body
+   Get-MgSitePermission -SiteId $site.Id -PermissionId $permission.Id | Format-List Id, Roles
+   ```
+
+   The last command prints the role `read`.
 
 ## Check the result
 

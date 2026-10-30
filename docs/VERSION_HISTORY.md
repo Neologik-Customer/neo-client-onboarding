@@ -59,6 +59,7 @@ This version is on the line of Neologik Platform v5.1. This version changes the 
 
 | Item | Change |
 |---|---|
+| `docs/AGENT-ACCOUNT-ACCESS-GUIDE.md` | Task 5 gives the steps that give the SharePoint application access to a SharePoint site |
 | `docs/PRE-ONBOARDING-INFO-GATHERING.md` | The vCPU quota row and the quota check name the Dsv7 family. The deployment service principal row says how to give the client secret |
 | `docs/AGENT-ACCOUNT-ACCESS-GUIDE.md` | The name of an agent account holds the account prefix and the short name of the environment. The labels of the **Access** tab match the screen |
 | `docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md`, `docs/FINISHING-STEPS-GUIDE.md`, `README.md` | The documents say where each grants file comes from. The **Admin** page exports the agent grants file, and Neologik sends the mailbox grants file |
