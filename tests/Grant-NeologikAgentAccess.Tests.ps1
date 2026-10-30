@@ -662,7 +662,7 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
     It 'rejects a mailbox grants file of the wrong shape, and adopted ids that are not GUIDs' {
         $file = New-MailboxFile -Raw -RawContent '{"IdentityAppId": "x"}'
         (Invoke-Run @{ MailboxGrantsFile = $file }) | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'not the file that the Neologik Context Engine exports'
+        ($script:Console -join "`n") | Should -Match 'does not have the expected form'
         $script:Console = @()
         $file = New-MailboxFile -Entries @() -AdoptedIdentityAppIds @('not-a-guid')
         (Invoke-Run @{ MailboxGrantsFile = $file }) | Should -Be 1
@@ -1407,8 +1407,8 @@ Context 'The mailbox grants file (step 2)' {
         $file = New-MailboxFile -Entries @() -AdoptedIdentityAppIds @($script:Ids.LegacyAppId.ToUpperInvariant())
         $code = Invoke-Run @{ MailboxGrantsFile = $file; RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId) }
         $code | Should -Be 0
-        Get-SummaryResult "Mailbox grant to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Kept. An email channel still uses the identity'
-        ($script:Console -join "`n") | Should -Match 'an email channel still uses the identity\. The script keeps the role assignments'
+        Get-SummaryResult "Mailbox grant to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Kept. An email channel uses the identity'
+        ($script:Console -join "`n") | Should -Match 'an email channel uses the identity\. The script keeps the role assignments'
         @($x.Assignments) | Should -HaveCount 1
         @($x.ServicePrincipals) | Should -HaveCount 1
         $script:Writes | Should -HaveCount 0
@@ -1426,7 +1426,7 @@ Context 'The mailbox grants file (step 2)' {
         $file = New-MailboxFile -Entries @() -AdoptedIdentityAppIds @($script:Ids.LegacyAppId)
         $code = Invoke-Run @{ MailboxGrantsFile = $file; RemoveLegacyGrantAppIds = @($script:Ids.LegacyAppId, $otherAppId) }
         $code | Should -Be 0
-        Get-SummaryResult "Mailbox grant to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Kept. An email channel still uses the identity'
+        Get-SummaryResult "Mailbox grant to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Kept. An email channel uses the identity'
         Get-SummaryResult "Mailbox grant to remove: $otherAppId" | Should -Be 'Removed: 1 role assignment(s)'
         @($x.Assignments | Where-Object { $_.RoleAssigneeName -eq $script:Ids.LegacyObjectId }) | Should -HaveCount 1
         @($x.ServicePrincipals | Where-Object { $_.AppId -eq $otherAppId }) | Should -HaveCount 0
@@ -1438,7 +1438,7 @@ Context 'The mailbox grants file (step 2)' {
         $code = Invoke-Run @{ MailboxGrantsFile = $file; TenantId = $script:Ids.Tenant }
         $code | Should -Be 0
         Get-SummaryResult 'Mailbox grant: support@contoso.com for neo-support' | Should -Be 'Granted: 3 role(s) added'
-        ($script:Console -join "`n") | Should -Match 'Email channels: 1\. Identities that an email channel still uses: 0'
+        ($script:Console -join "`n") | Should -Match 'Email channels: 1\. Identities that an email channel uses: 0'
     }
 
     It 'applies both files in one run, the agent grants file first' {
@@ -1533,7 +1533,7 @@ Context 'Summary, files and exit code' {
             $result | Should -Match $script:AttentionPattern
         }
         foreach ($result in @('Present', 'Already granted', 'Granted: User.Read', 'Removed: 1 role assignment(s)', 'Not present', 'Not needed', 'Updated: a b',
-                'Kept. An email channel still uses the identity')) {
+                'Kept. An email channel uses the identity')) {
             $result | Should -Not -Match $script:AttentionPattern
         }
     }

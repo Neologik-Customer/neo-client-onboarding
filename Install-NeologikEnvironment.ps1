@@ -97,7 +97,7 @@
     script stores the client secret in the Key Vault, as the secret
     'neologik-deployment-service-principle-secret'.
 
-    This parameter is optional. Without this parameter, the script stores no client
+    Without this parameter, the script stores no client
     secret. Add the client secret to the Key Vault before the first deployment.
 
     The key 'existingServicePrincipalSecret' in the answer file has the same effect.
@@ -224,7 +224,7 @@ $script:KitVersion = 'v5.1.1'
 
 # The third role of the deployment identity on the subscription: Role Based Access
 # Control Administrator, limited by a condition to three roles. The deployment runs the
-# ingress controller of a secure environment with Application Gateway for Containers.
+# ingress controller of a Private Endpoint environment with Application Gateway for Containers.
 # Microsoft requires the identity of that controller to hold Reader on the resource
 # group that Azure Kubernetes Service creates for the nodes of the cluster, which is
 # outside the resource group of the environment, and AppGw for Containers Configuration
@@ -2042,7 +2042,7 @@ function Get-NeologikExistingAppRegistration {
         function creates nothing.
     .DESCRIPTION
         The script calls the function when you created the deployment service
-        principal and gave the object ID. The client secret is optional. The function
+        principal and gave the object ID. The function
         creates no application registration, no service principal and no client
         secret. The caller assigns the roles with Set-AppRegistrationRoles, exactly as
         for a deployment service principal that the script creates.
@@ -5620,7 +5620,7 @@ function Start-NeologikOnboarding {
             $customValid = $false
             while (-not $customValid) {
                 Write-Host ""
-                Write-Host "Custom resource tags, optional:" -ForegroundColor Cyan
+                Write-Host "Custom resource tags:" -ForegroundColor Cyan
                 Write-Host "  Enter key=value pairs separated by commas. A key can hold letters, digits, '.', '_'" -ForegroundColor Gray
                 Write-Host "  and '-'. A custom tag replaces a standard tag of the same name." -ForegroundColor Gray
                 Write-Host "  Example: " -NoNewline -ForegroundColor Gray
