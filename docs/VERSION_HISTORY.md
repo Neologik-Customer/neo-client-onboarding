@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.1.1](#version-511)
 2. [Version 5.1.0](#version-510)
 2. [Version 5.0.23](#version-5023)
 2. [Version 5.0.22](#version-5022)
@@ -44,11 +45,37 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.0.14 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.0 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the two files that the Neologik Context Engine exports |
+| `Install-NeologikEnvironment.ps1` | v5.0.15 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.1 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.1.1
+
+**Date**: 2026-10-30
+
+This version is on the line of Neologik Platform v5.1. This version changes the onboarding script and documents.
+
+| Item | Change |
+|---|---|
+| `docs/AGENT-ACCOUNT-ACCESS-GUIDE.md` | Task 5 gives the steps that give the SharePoint application access to a SharePoint site |
+| `docs/PRE-ONBOARDING-INFO-GATHERING.md` | The vCPU quota row and the quota check name the Dsv7 family. The deployment service principal row says how to give the client secret |
+| `docs/AGENT-ACCOUNT-ACCESS-GUIDE.md` | The name of an agent account holds the account prefix and the short name of the environment. The labels of the **Access** tab match the screen |
+| `docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md`, `docs/FINISHING-STEPS-GUIDE.md`, `README.md` | The documents say where each grants file comes from. The **Admin** page exports the agent grants file, and Neologik sends the mailbox grants file |
+| `docs/QUICK-REFERENCE.md`, `docs/secure-overview.md`, `README.md` | The documents state what the three roles on the subscription change. The documents write Private Endpoint environment. The condition on the limited role names three roles |
+| `docs/QUICK-REFERENCE.md` | The list in `resource-providers.txt` holds 34 resource providers. The log records the stack trace after a failure |
+| `docs/TECHNICAL-REFERENCE.md` | After a failed upload of the configuration file, an administrator uploads the file in the Azure portal. The onboarding script lists a pending resource provider before the completion summary |
+| `docs/NETWORK-GUIDE.md` | The deployment storage account is a data service of a Private Endpoint environment from the first deployment. You allocate an address block only when a default range must change |
+| `README.md`, `docs/FINISHING-STEPS-GUIDE.md` | The documents give the on-screen name Neologik Admin Tool. The finishing steps name the **Outstanding tasks** section of the home page |
+| `README.md`, `docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md`, `docs/PRE-ONBOARDING-INFO-GATHERING.md`, `docs/TECHNICAL-REFERENCE.md`, `docs/secure-overview.md` | The documents say what happens when you leave a step or a value out |
+| `README.md`, `docs/PFX-CERT-GUIDE.md`, `docs/TECHNICAL-REFERENCE.md` | The documents state that Neologik copies the TLS certificate, with the private key, into Neologik's central Key Vault. The documents say who builds and imports a certificate from uploaded files |
+| `docs/ANALYTICS-REPORTING-GUIDE.md` | The guide lists the operator account of a configuration change and the outstanding tasks. The guide also lists the automatic updates and the names in a fault. The guide states what an agreed log query does. The guide states the retention period and what the masking of message patterns replaces |
+| `docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md`, `docs/AGENT-ACCOUNT-ACCESS-GUIDE.md`, `docs/NETWORK-GUIDE.md` | The documents state each fact at this version, with no comparison with an earlier version |
+| `README.md`, `docs/secure-overview.md`, `docs/QUICK-REFERENCE.md` | The documents for Approvers state that Neologik copies the TLS certificate into Neologik's central Key Vault |
+| `Install-NeologikEnvironment.ps1` | Version v5.0.15. Comments and on-screen text state each fact at this version. The onboarding script no longer asks for cost report recipients, and the answer file no longer takes the key `budgetCostReportEmailRecipients`. The onboarding script ignores that key in an older answer file. Nothing in the platform read the addresses, and the deployment sends no cost report. The configuration file no longer holds the two fields for the recipients. The onboarding script records the version `v5.1.1` on the resource group |
+| `README.md`, `docs/PRE-ONBOARDING-INFO-GATHERING.md`, `docs/QUICK-REFERENCE.md`, `docs/TECHNICAL-REFERENCE.md`, `docs/secure-overview.md`, `inputs-example.json` | The documents no longer describe a cost report. The documents state what Cost Management Contributor does |
+| `Grant-NeologikAgentAccess.ps1` | Comments, help text and on-screen messages state each fact at this version. `Compare-Code.ps1` proves the code unchanged. The grants script reports the onboarding kit version v5.1.1 |
 
 ## Version 5.1.0
 

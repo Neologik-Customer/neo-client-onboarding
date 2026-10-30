@@ -30,7 +30,7 @@ The onboarding script also registers the Azure resource providers that the Neolo
 | Subject | Position |
 |---|---|
 | Resource group | The deployment identity can deploy Azure resources into one resource group |
-| Subscription | The deployment identity holds three roles: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning three roles. None of the three allows a change to an Azure resource. The limited role lets the deployment identity assign exactly three roles: Reader, AppGw for Containers Configuration Manager and Cost Management Reader. The deployment assigns the first two to the identity of the ingress controller of a secure environment, and the third to the identity of the configuration API of the Neologik Platform on the resource group that Azure Kubernetes Service creates for the nodes of the cluster |
+| Subscription | The deployment identity holds three roles: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning three roles. These roles change no Azure resource other than cost configuration, support requests and assignments of the three assignable roles. The limited role lets the deployment identity assign exactly three roles: Reader, AppGw for Containers Configuration Manager and Cost Management Reader. The deployment assigns the first two to the identity of the ingress controller of a Private Endpoint environment, and the third to the identity of the configuration API of the Neologik Platform on the resource group that Azure Kubernetes Service creates for the nodes of the cluster |
 | Microsoft Graph | The deployment identity holds two Microsoft Graph application permissions: `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Microsoft Entra ID | The deployment identity receives no directory role |
 
@@ -115,7 +115,7 @@ Sometimes the onboarding script cannot make the check for Global Administrator. 
 
 | Input | Content |
 |---|---|
-| The answer file, `inputs.json`. The answer file is in the folder of the onboarding script, or the parameter `-AnswerFile` names the answer file | The organisation code, the organisation name and the host name. The environment type, the Azure region and the environment index. The resource names, the cost report recipients and the tags. The choices about guests and existing accounts. The deployment service principal that you created |
+| The answer file, `inputs.json`. The answer file is in the folder of the onboarding script, or the parameter `-AnswerFile` names the answer file | The organisation code, the organisation name and the host name. The environment type, the Azure region and the environment index. The resource names and the tags. The choices about guests and existing accounts. The deployment service principal that you created |
 | Command-line parameters | The organisation code, the environment type and the Azure region. The tenant, the subscription and the name of the Key Vault. The deployment service principal that you created. The switches `-NonInteractive`, `-AcceptTerms`, `-FreshRun`, `-SkipModuleInstall`, `-SkipGuestInvitation` and `-SkipPowerShellUpdate` |
 | `NeologikGuestUsers.txt` | The Neologik support accounts that the onboarding script invites as guests, when you choose invitation |
 | `resource-providers.txt` | The list of resource providers and preview features |
@@ -189,10 +189,10 @@ The deployment by Neologik creates agent identities and agent users as the agent
 
 | Object | Command | Scope | Roles or properties |
 |---|---|---|---|
-| Resource providers and preview features | `Register-AzResourceProvider`, `Register-AzProviderFeature` | Subscription | The list in `resource-providers.txt`: 35 resource providers and 2 preview features |
+| Resource providers and preview features | `Register-AzResourceProvider`, `Register-AzProviderFeature` | Subscription | The list in `resource-providers.txt`: 34 resource providers and 2 preview features |
 | Resource group | `New-AzResourceGroup`, `Update-AzTag` | Subscription | The name `rg-<solution name>`, in the Azure region that you chose, with tags. The tag `NeologikOnboardingKit` records the version of the onboarding kit. The onboarding script adds the tag and keeps your existing tags |
 | Roles of the Admin User Group | `New-AzRoleAssignment` | Resource group | The thirteen roles in the table below. No role on the subscription |
-| Roles of the deployment identity | `New-AzRoleAssignment` | Subscription | `Reader`, `Cost Management Contributor`, and `Role Based Access Control Administrator` with a condition that limits the roles the deployment identity may assign to `Reader` and `AppGw for Containers Configuration Manager` |
+| Roles of the deployment identity | `New-AzRoleAssignment` | Subscription | `Reader`, `Cost Management Contributor`, and `Role Based Access Control Administrator` with a condition that limits the roles the deployment identity may assign to `Reader`, `AppGw for Containers Configuration Manager` and `Cost Management Reader` |
 | Roles of the deployment identity | `New-AzRoleAssignment` | Resource group | `Contributor`<br>`Key Vault Certificates Officer`<br>`Key Vault Secrets Officer`<br>`Storage Blob Data Contributor`<br>`Azure Kubernetes Service RBAC Cluster Admin`<br>`Monitoring Contributor`<br>`Role Based Access Control Administrator` |
 | Key Vault | `New-AzKeyVault`, `Update-AzKeyVault` | Resource group | The name `kv<short name>`, or the name that you give. Azure role-based access control, set at creation. Tags. The onboarding script does not change the settings of an existing Key Vault |
 | Role of the administrator for the secrets | `New-AzRoleAssignment` | Resource group | `Key Vault Secrets Officer` for the signed-in administrator. The onboarding script needs the role to store the client secrets |
@@ -253,6 +253,8 @@ After the deployment, the Neologik Platform grants the deployment identity one f
 | Client secret of a deployment service principal that you created | You | The same Key Vault secret | Never. The checkpoint does not hold the value |
 | Client secret of the Platform Sign-in application | The onboarding script. The client secret is valid for 365 days | The Key Vault secret `sp-admin-<solution name>-auth-secret` | Never |
 
+The TLS certificate is separate from these secrets. An administrator imports the certificate into your Key Vault. Neologik then copies the certificate, private key included, into Neologik's central Key Vault. Each deployment of the ingress reads the certificate from Neologik's central Key Vault.
+
 ### A client secret in the answer file
 
 When you put the client secret in the answer file, the answer file holds the value on disk. To avoid that, give the client secret on the command line or at the question on screen. The question on screen hides the characters that you type.
@@ -276,7 +278,7 @@ A second run adds no client secret to the Platform Sign-in application while the
 | File | Location | Content |
 |---|---|---|
 | `NeologikOnboarding_<timestamp>.log` | The folder of the onboarding script. The onboarding script uploads a copy to the container `logs` | The log of the run |
-| `Neologik_<org><index>_Configuration_<timestamp>.json` | The folder of the onboarding script. The onboarding script uploads a copy to the container `json` | The name and the id of each object created. The roles assigned. The host name. The sign-in name of the administrator. The addresses of the accounts invited or added. The cost report recipients. The expiry date of the client secret |
+| `Neologik_<org><index>_Configuration_<timestamp>.json` | The folder of the onboarding script. The onboarding script uploads a copy to the container `json` | The name and the id of each object created. The roles assigned. The host name. The sign-in name of the administrator. The addresses of the accounts invited or added. The expiry date of the client secret |
 | `NeologikCheckpoint.json` | The folder of the onboarding script, while a run is incomplete | The configuration collected so far, in the same form as the configuration file. The onboarding script deletes the checkpoint when the run completes |
 
 None of the three files contains a secret. All three files contain personal data, namely sign-in names and email addresses. Handle the three files as personal data.
@@ -321,7 +323,7 @@ The onboarding script makes these changes:
 | The addresses of the accounts invited or added |
 | The progress of the resource provider registrations |
 | The path of the configuration file |
-| After a failure, the error |
+| After a failure, the error and the stack trace of the onboarding script |
 
 The log contains no secret and no token.
 

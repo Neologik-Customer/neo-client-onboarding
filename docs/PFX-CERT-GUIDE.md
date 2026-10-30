@@ -16,7 +16,7 @@ This guide explains three tasks:
 2. how to build the PFX file with the script `Export-NeologikCertificate.ps1`
 3. how to import the PFX file into the Key Vault of the environment
 
-Keep the PFX file and the password of the PFX file. Do not send the PFX file or the password to Neologik.
+Keep the PFX file and the password of the PFX file. Do not send the PFX file or the password to Neologik. After the import, Neologik copies the certificate, private key included, into Neologik's central Key Vault.
 
 You may already hold a PFX file that contains the private key and the full certificate chain. In that case, go to [Import the PFX file into the Key Vault](#import-the-pfx-file-into-the-key-vault).
 
@@ -32,7 +32,7 @@ You may already hold a PFX file that contains the private key and the full certi
 
 | File | Usual extension | Source |
 |---|---|---|
-| Private key | `.key` | You generate the private key together with the certificate signing request. The private key stays with you |
+| Private key | `.key` | You generate the private key together with the certificate signing request. The PFX file holds the private key. After the import, Neologik copies the certificate, with the private key, into Neologik's central Key Vault |
 | Server certificate | `.crt` or `.cer` | The certificate authority issues the server certificate in answer to the certificate signing request |
 | Certificate authority bundle | `.pem`, `.crt` or `.p7b` | The certificate authority provides the bundle. The bundle holds the intermediate certificates and the root certificate of the certificate authority |
 
@@ -101,6 +101,8 @@ To install OpenSSL yourself before the run, follow [Install OpenSSL](#1-install-
 4. Select **Create**.
 
 The Key Vault uses the password for the import only and does not store the password.
+
+Neologik then copies the certificate, private key included, from the Key Vault of the environment into Neologik's central Key Vault. Each deployment of the ingress reads the certificate from Neologik's central Key Vault. Azure role-based access control protects Neologik's central Key Vault.
 
 After the import, keep the PFX file and the password in a secure place, or delete the PFX file.
 

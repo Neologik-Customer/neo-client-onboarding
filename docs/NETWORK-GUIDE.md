@@ -2,7 +2,7 @@
 
 ## Overview
 
-The deployment by Neologik builds one virtual network inside your subscription. Every address range in the virtual network is a setting of your environment, chosen before the deployment. You allocate no addresses yourself. This document states the default ranges and the DNS names that the deployment creates. Check them against your existing networks before onboarding.
+The deployment by Neologik builds one virtual network inside your subscription. Every address range in the virtual network is a setting of your environment, chosen before the deployment. You allocate an address block only when a default range must change. This document states the default ranges and the DNS names that the deployment creates. Check them against your existing networks before onboarding.
 
 Read this document when you are considering a Private Endpoint environment. Read the document also when you plan to connect a Neologik Platform environment to your own network.
 
@@ -26,7 +26,7 @@ Read this document when you are considering a Private Endpoint environment. Read
 
 | Deployment type | Network position | Entry point for users |
 |---|---|---|
-| Private Endpoint | The data services of the environment are reached through private endpoints inside the virtual network. The data services are the databases, data storage accounts, Azure AI Search, Key Vault, Azure AI services and the container registry. Where used, the Video Indexer account is a data service too. The firewall of each data service refuses a request from the internet. The Log Analytics workspace, Application Insights and the Azure Monitor workspace accept requests from the internet. So does the endpoint that collects the cluster's metrics. Where used, so does the storage account of the cluster's stop and start schedule. The Log Analytics workspace, Application Insights and the storage account of the stop and start schedule accept Microsoft Entra ID sign-in only | Application Gateway for Containers, with a web application firewall |
+| Private Endpoint | The data services of the environment are reached through private endpoints inside the virtual network. The data services are the databases, data storage accounts, Azure AI Search, Key Vault, Azure AI services and the container registry. Where used, the Video Indexer account is a data service too. From the first deployment, the deployment storage account is a data service too. The firewall of each data service refuses a request from the internet. The Log Analytics workspace, Application Insights and the Azure Monitor workspace accept requests from the internet. So does the endpoint that collects the cluster's metrics. Where used, so does the storage account of the cluster's stop and start schedule. The Log Analytics workspace, Application Insights and the storage account of the stop and start schedule accept Microsoft Entra ID sign-in only | Application Gateway for Containers, with a web application firewall |
 | Standard | The data services of the environment have public endpoints. The databases, data storage accounts, Azure AI Search, Key Vault, Azure AI services and the container registry accept Microsoft Entra ID sign-in only. So do the Log Analytics workspace, Application Insights and, where used, the storage account of the cluster's stop and start schedule. Keys and passwords are switched off for these services | A load balancer with a public IP address, in front of the NGINX ingress controller of the cluster |
 
 Both deployment types use the same default address space. A Private Endpoint environment uses more subnets, because the private endpoints, the deployment VM and Azure Bastion each need one.
@@ -82,7 +82,7 @@ A subnet cannot move after the environment is built, because the Kubernetes clus
 | Block | Example | What the deployment does with the block |
 |---|---|---|
 | Default layout: a `/10` | `10.192.0.0/10` | The default layout above, unchanged. The environment can grow without a further allocation |
-| Minimum: a `/19` | `10.250.32.0/19` | The reduced layout below. The deployment has built a Private Endpoint environment on a `/19` |
+| Minimum: a `/19` | `10.250.32.0/19` | The reduced layout below. A Private Endpoint environment fits on a `/19` |
 
 The reduced layout gives each subnet the smallest range that holds the subnet's peak use. The workload pod subnet is the largest. Moving the workload node pool to a new VM size runs both pools side by side.
 
