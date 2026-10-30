@@ -10,7 +10,7 @@ This document is for Approvers, Administrators and anyone who reviews what leave
 |---|---|
 | What is reported | Counts, totals, timestamps and fixed labels about health, versions, configuration, usage and faults. The names and ids of configuration objects. The operator account behind each configuration change. Outstanding tasks |
 | What is never reported | Conversation content, documents, the name of an end user, raw log lines and secrets |
-| Direction | Outbound from your environment only. Neologik cannot reach into your environment through this reporting. The one exception is the log query relay, which runs only with your recorded agreement |
+| Direction | Outbound from your environment only. Neologik opens no connection into your environment |
 | Where Neologik keeps the statistics | Neologik's own Azure subscription in the UK South region of the United Kingdom |
 | How long | The retention period in your agreement. 24 months unless your agreement states otherwise |
 | How to withdraw | Ask Neologik at support@neologik.ai |
@@ -20,19 +20,20 @@ This document is for Approvers, Administrators and anyone who reviews what leave
 1. [How reporting works](#how-reporting-works)
 2. [What is reported](#what-is-reported)
 3. [What is never reported](#what-is-never-reported)
-4. [The log query relay](#the-log-query-relay)
-5. [Information read from Azure outside your environment](#information-read-from-azure-outside-your-environment)
-6. [How Neologik protects the statistics](#how-neologik-protects-the-statistics)
-7. [Retention and deletion](#retention-and-deletion)
-8. [Withdrawing from reporting or narrowing it](#withdrawing-from-reporting-or-narrowing-it)
-9. [Changes to what is reported](#changes-to-what-is-reported)
-10. [Questions](#questions)
+4. [Information read from Azure outside your environment](#information-read-from-azure-outside-your-environment)
+5. [How Neologik protects the statistics](#how-neologik-protects-the-statistics)
+6. [Retention and deletion](#retention-and-deletion)
+7. [Withdrawing from reporting or narrowing it](#withdrawing-from-reporting-or-narrowing-it)
+8. [Changes to what is reported](#changes-to-what-is-reported)
+9. [Questions](#questions)
 
 ## How reporting works
 
 A single small software component runs inside your environment. On a fixed schedule the component prepares the reported items inside your environment. The component then sends only those items to Neologik's analytics service over an encrypted connection.
 
-The component makes outbound connections only. Neologik cannot reach into your environment through the component. The set of items the component can report is fixed in the released software. Neologik can reduce or stop reporting remotely. Neologik cannot widen reporting without releasing new software to your environment. [The log query relay](#the-log-query-relay) is the one exception. The log query relay runs only with your recorded agreement.
+The component makes outbound connections only. Neologik opens no connection into your environment. The set of items the component can report is fixed in the released software. Neologik can reduce or stop reporting remotely. Neologik cannot widen reporting without releasing new software to your environment.
+
+With your recorded agreement, Neologik's automated fault review can run read-only queries on your environment's logs. The component masks each result before it leaves your environment. Neologik staff can read the masked results.
 
 ## What is reported
 
@@ -48,7 +49,7 @@ Most reported items are counts, totals, timestamps and fixed labels. The other i
 | Feedback | Per agent per day: counts of positive, negative and commented feedback. Never the comment text |
 | AI model estate | Model deployments on the AI account of your environment: names, versions, provisioned capacity, daily request and throttling counts, peak usage against the allowance |
 | Faults and errors | Error and warning patterns with daily counts: exception type names, method names, event reasons and status codes. The name of the service, the Azure resource or the host that a fault concerns |
-| Message patterns | Error and warning messages, cut to 200 characters. The masking runs inside your environment. The masking replaces pod names, web addresses, file names, GUIDs, hexadecimal values and numbers. Other words of the message stay in the pattern |
+| Message patterns | Error and warning messages, cut to 200 characters. The masking runs inside your environment. The masking replaces email addresses, pod names, web addresses, file names, GUIDs, hexadecimal values and numbers. Other words of the message stay in the pattern |
 | Document processing | Per search index: file counts, sizes and error counts |
 | Schedule | The start and stop times and days of the cluster of your environment |
 | Automatic updates | The settings of the automatic update window. One entry for each update window. Each entry holds the kind of update, the outcome and the target release. Each entry also holds a link to the update run and a short message about the outcome |
@@ -63,23 +64,7 @@ Agent and search index display names are reported so that Neologik staff can dis
 - Secrets, connection strings or keys.
 - Tenant identifiers or subscription identifiers.
 
-Two technical controls enforce this. The database account of the component can read only a dedicated set of summary views. The database account has no permission on any table that holds content. The transport format holds only numbers, fixed labels, the names and ids that the table lists, and masked message patterns. A masked message pattern holds only the words of an error or warning message. The log query relay, which runs only with your recorded agreement, is the one exception.
-
-## The log query relay
-
-The log query relay stays off unless you record your agreement with Neologik. Without that agreement, the component answers no query from Neologik.
-
-With your agreement, an automated Neologik review of a fault can read the log records of your environment.
-
-| Subject | Detail |
-|---|---|
-| How a query reaches your environment | The component asks Neologik's analytics service for waiting queries every 20 seconds, over the same outbound connection |
-| What a query reads | The Log Analytics workspace of your environment, through the identity of the component. The analytics service accepts a query only when the query starts with one of these tables: `AppExceptions`, `AppDependencies`, `AppTraces`, `AppRequests`, `KubeEvents`, `ContainerLogV2` or `AGWAccessLogs` |
-| Limits | 200 rows and 168 hours for each query |
-| What leaves your environment | The rows, after the component masks each text cell inside your environment. The masking replaces email addresses, pod names, web addresses, file names, GUIDs, hexadecimal values and numbers. The component cuts each text cell to 300 characters. Other words of a log record stay in the text cell. Dates, numbers and true or false values in a column of their own stay as they are |
-| Who reads the rows | The automated Neologik review and Neologik staff. The automated review uses a Claude model from Anthropic |
-| What Neologik keeps | Each query and the masked rows, in Neologik's analytics service |
-| How to turn the log query relay off | Ask Neologik at support@neologik.ai |
+Two technical controls enforce this. The database account of the component can read only a dedicated set of summary views. The database account has no permission on any table that holds content. The transport format holds only numbers, fixed labels, the names and ids that the table lists, and masked message patterns. A masked message pattern holds only the words of an error or warning message. An agreed log query, described above, is the one exception.
 
 ## Information read from Azure outside your environment
 

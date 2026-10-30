@@ -112,7 +112,6 @@ When the answer file holds the organisation code, the organisation name and the 
 | `environmentType` | `dev` or `prd` |
 | `azureRegion` | The Azure region |
 | `environmentIndex` | `01` to `99` |
-| `budgetCostReportEmailRecipients` | A list of email addresses for the daily cost report. The value `none` turns the report off |
 | `applyResourceTags` | `true` or `false` |
 | `resourceTagsCustom` | Further tags, written as an object or as a string of `key=value` pairs |
 | `solutionName`, `solutionShortName` | The solution name and the short name. See [Naming](#naming) |
@@ -433,7 +432,7 @@ The configuration file holds these sections:
 | `NceAuthApp` | The Platform Sign-in application: the name and the client id |
 | `AgentBlueprint` | The agent identity blueprint: the name, the ids and the names of the federated credentials |
 | `KeyVault`, `StorageAccount`, `ManagedIdentities` | The name and the id of each resource |
-| Accounts | The sign-in name of the administrator who ran the onboarding script, the addresses of the accounts invited or added, and the cost report recipients |
+| Accounts | The sign-in name of the administrator who ran the onboarding script, and the addresses of the accounts invited or added |
 | `ResourceProvidersPending` | Each registration that is still in progress |
 
 Neither file contains a secret. Both files contain sign-in names and email addresses.
