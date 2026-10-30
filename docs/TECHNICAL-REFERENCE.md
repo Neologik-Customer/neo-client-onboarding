@@ -73,7 +73,7 @@ The onboarding kit has a version, and each script has a separate version. The ve
 
 ## Parameters
 
-Every parameter is optional. When you give no value for a parameter, the onboarding script takes the value from the answer file or asks a question.
+You can run the onboarding script with no parameter. When you give no value for a parameter, the onboarding script takes the value from the answer file or asks a question.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -395,7 +395,7 @@ Azure takes some minutes to register a resource provider. The onboarding script 
 4. After the managed identities, the onboarding script submits the registrations of the other resource providers and the preview features.
 5. Before the onboarding script writes the configuration file, the onboarding script confirms every registration.
 
-When a registration is still in progress at the end of the run, the completion summary lists the resource provider. The configuration file lists the resource provider under `ResourceProvidersPending`. Run this command before the deployment:
+A registration can still be in progress at the end of the run. The onboarding script then lists the resource provider before the completion summary. The configuration file lists the resource provider under `ResourceProvidersPending`. Run this command before the deployment:
 
 ```powershell
 .\Register-NeologikResourceProviders.ps1
@@ -421,7 +421,7 @@ The account that runs `Register-NeologikResourceProviders.ps1` needs Contributor
 
 The onboarding script writes both files to the folder of the onboarding script. The onboarding script then uploads the configuration file to the container `json` and the log to the container `logs` of the deployment storage account.
 
-When the upload of the configuration file fails, the completion summary reports the failure. Send the configuration file to Neologik by email.
+When the upload of the configuration file fails, the completion summary reports the failure. Upload the configuration file in the Azure portal: open the deployment storage account, then **Containers**, then `json`, then **Upload**.
 
 The configuration file holds these sections:
 
@@ -476,7 +476,7 @@ The Key Vault uses the password for the import only. Do not send the password to
 | A role assignment reports "BadRequest" | Microsoft Entra ID has not yet copied a new service principal or managed identity to every server | No action. The onboarding script tries again |
 | The onboarding script reports that a resource already exists | An earlier run created the resource | No action. The onboarding script uses the existing resource |
 | The run stopped before the end | An error occurred, somebody closed the window, or the connection failed | Run the onboarding script again. Type `Y` at the question `Resume from this checkpoint? (Y/N, default: Y)`. The onboarding script restores your answers. Each step uses the resources that the earlier run created |
-| "Resource providers still registering" | Azure has not completed a registration | Wait a few minutes. When the run stopped, run the onboarding script again and resume. When the completion summary lists the resource provider, run `Register-NeologikResourceProviders.ps1` |
+| "Resource providers still registering" | Azure has not completed a registration | Wait a few minutes. When the run stopped, run the onboarding script again and resume. When the onboarding script lists the resource provider before the completion summary, run `Register-NeologikResourceProviders.ps1` |
 | "Resource provider list not found" | `resource-providers.txt` is not in the folder of the onboarding script | Copy `resource-providers.txt` from the onboarding kit to the folder of the onboarding script |
 
 ## Help

@@ -27,7 +27,7 @@ This document lists the values to collect and the decisions to make before you r
 |---|---|
 | Deployment type | Standard or Private Endpoint. A Standard environment has public endpoints, protected by Microsoft Entra ID authorisation. A Private Endpoint environment has private endpoints and a private network. The deployment by Neologik applies the network settings of the deployment type. [NETWORK-GUIDE.md](NETWORK-GUIDE.md) states the address ranges and the DNS names of each deployment type |
 | Host name | The fully qualified host name that your users enter to reach the environment, for example `neologik.contoso.com`. Confirm the host name with the person who manages your DNS. Your TLS certificate must be issued for the host name |
-| vCPU quota | The deployment needs enough vCPU quota in the subscription and the Azure region. The standard environment runs two-vCPU nodes in its system pool and four-vCPU nodes in its user pool, both in the Dsv6 family: with the standard pool maximums of 5 system nodes and 10 user nodes that is 50 vCPU of the family. Ask Neologik for the number for your environment |
+| vCPU quota | The deployment needs enough vCPU quota in the subscription and the Azure region. The standard environment runs two-vCPU nodes in its system pool and four-vCPU nodes in its user pool, both in the Dsv7 family: with the standard pool maximums of 5 system nodes and 10 user nodes that is 50 vCPU of the family. When the Azure region or the quota does not allow Dsv7, Neologik chooses Dsv6, then Dasv7. Ask Neologik for the number for your environment |
 
 ### Check the vCPU quota
 
@@ -36,7 +36,7 @@ The onboarding script does not check the vCPU quota. Check the vCPU quota in the
 1. Open **Subscriptions** and select the subscription.
 2. Select **Usage + quotas**.
 3. Filter by the Azure region of the environment.
-4. Search for **Dsv6**. The line **Standard Dsv6 Family vCPUs** shows the usage and the limit.
+4. Search for **Dsv7**. The line **Standard Dsv7 Family vCPUs** shows the usage and the limit.
 
 To raise the limit, select the quota line and select **New Quota Request**.
 
@@ -70,7 +70,7 @@ To raise the limit, select the quota line and select **New Quota Request**.
 | Resource tags | Decide whether the onboarding script tags the resources that the onboarding script creates. Decide which further tags to add. Choose tags when an Azure Policy in your subscription refuses a resource without tags | The onboarding script tags the resources |
 | Cost report recipients | The email addresses that receive the daily Azure cost report. You can choose no recipient | The cost report address of Neologik |
 | Neologik guest users | Decide whether the onboarding script invites the Neologik support accounts in `NeologikGuestUsers.txt` as guests. The alternative is to create accounts for Neologik support staff in your own tenant. For the alternative, have the exact address of each account ready. Each address must match the mail address or the user principal name of the account | The onboarding script invites the accounts |
-| Deployment service principal | Decide whether the onboarding script creates the deployment service principal, or you create the deployment service principal. To create the deployment service principal yourself, follow [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md). Have the object ID of the enterprise application ready. The client secret is optional | The onboarding script creates the deployment service principal |
+| Deployment service principal | Decide whether the onboarding script creates the deployment service principal, or you create the deployment service principal. To create the deployment service principal yourself, follow [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md). Have the object ID of the enterprise application ready. Give the client secret to the onboarding script. Alternatively, add the client secret to the Key Vault before the first deployment | The onboarding script creates the deployment service principal |
 
 The onboarding script asks no question about agents. A platform operator creates agents and channels in the Neologik Context Engine after Neologik deploys the environment.
 

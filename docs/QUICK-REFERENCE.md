@@ -30,7 +30,7 @@ The onboarding script also registers the Azure resource providers that the Neolo
 | Subject | Position |
 |---|---|
 | Resource group | The deployment identity can deploy Azure resources into one resource group |
-| Subscription | The deployment identity holds three roles: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning three roles. None of the three allows a change to an Azure resource. The limited role lets the deployment identity assign exactly three roles: Reader, AppGw for Containers Configuration Manager and Cost Management Reader. The deployment assigns the first two to the identity of the ingress controller of a secure environment, and the third to the identity of the configuration API of the Neologik Platform on the resource group that Azure Kubernetes Service creates for the nodes of the cluster |
+| Subscription | The deployment identity holds three roles: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning three roles. These roles change no Azure resource other than cost configuration, support requests and assignments of the three assignable roles. The limited role lets the deployment identity assign exactly three roles: Reader, AppGw for Containers Configuration Manager and Cost Management Reader. The deployment assigns the first two to the identity of the ingress controller of a Private Endpoint environment, and the third to the identity of the configuration API of the Neologik Platform on the resource group that Azure Kubernetes Service creates for the nodes of the cluster |
 | Microsoft Graph | The deployment identity holds two Microsoft Graph application permissions: `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Microsoft Entra ID | The deployment identity receives no directory role |
 
@@ -189,10 +189,10 @@ The deployment by Neologik creates agent identities and agent users as the agent
 
 | Object | Command | Scope | Roles or properties |
 |---|---|---|---|
-| Resource providers and preview features | `Register-AzResourceProvider`, `Register-AzProviderFeature` | Subscription | The list in `resource-providers.txt`: 35 resource providers and 2 preview features |
+| Resource providers and preview features | `Register-AzResourceProvider`, `Register-AzProviderFeature` | Subscription | The list in `resource-providers.txt`: 34 resource providers and 2 preview features |
 | Resource group | `New-AzResourceGroup`, `Update-AzTag` | Subscription | The name `rg-<solution name>`, in the Azure region that you chose, with tags. The tag `NeologikOnboardingKit` records the version of the onboarding kit. The onboarding script adds the tag and keeps your existing tags |
 | Roles of the Admin User Group | `New-AzRoleAssignment` | Resource group | The thirteen roles in the table below. No role on the subscription |
-| Roles of the deployment identity | `New-AzRoleAssignment` | Subscription | `Reader`, `Cost Management Contributor`, and `Role Based Access Control Administrator` with a condition that limits the roles the deployment identity may assign to `Reader` and `AppGw for Containers Configuration Manager` |
+| Roles of the deployment identity | `New-AzRoleAssignment` | Subscription | `Reader`, `Cost Management Contributor`, and `Role Based Access Control Administrator` with a condition that limits the roles the deployment identity may assign to `Reader`, `AppGw for Containers Configuration Manager` and `Cost Management Reader` |
 | Roles of the deployment identity | `New-AzRoleAssignment` | Resource group | `Contributor`<br>`Key Vault Certificates Officer`<br>`Key Vault Secrets Officer`<br>`Storage Blob Data Contributor`<br>`Azure Kubernetes Service RBAC Cluster Admin`<br>`Monitoring Contributor`<br>`Role Based Access Control Administrator` |
 | Key Vault | `New-AzKeyVault`, `Update-AzKeyVault` | Resource group | The name `kv<short name>`, or the name that you give. Azure role-based access control, set at creation. Tags. The onboarding script does not change the settings of an existing Key Vault |
 | Role of the administrator for the secrets | `New-AzRoleAssignment` | Resource group | `Key Vault Secrets Officer` for the signed-in administrator. The onboarding script needs the role to store the client secrets |
@@ -321,7 +321,7 @@ The onboarding script makes these changes:
 | The addresses of the accounts invited or added |
 | The progress of the resource provider registrations |
 | The path of the configuration file |
-| After a failure, the error |
+| After a failure, the error and the stack trace of the onboarding script |
 
 The log contains no secret and no token.
 

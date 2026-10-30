@@ -6,7 +6,7 @@ This page summarises the access that the onboarding script, `Install-NeologikEnv
 
 A Global Administrator who is also Owner of the subscription runs the onboarding script once. The onboarding script prepares one resource group and the directory objects of one Neologik Platform environment.
 
-The onboarding script grants access on the resource group. The onboarding script grants three roles on the subscription: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning three roles. The deployment identity holds the three roles. None of the three allows a change to an Azure resource.
+The onboarding script grants access on the resource group. The onboarding script grants three roles on the subscription: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning three roles. The deployment identity holds the three roles. These roles change no Azure resource other than cost configuration, support requests and assignments of the three assignable roles.
 
 ## Contents
 
@@ -22,7 +22,7 @@ The onboarding script grants access on the resource group. The onboarding script
 |---|---|---|
 | Resource group | `rg-<solution name>` | Holds every Azure resource of the environment |
 | Security groups | `Neologik User Group - <short name>`<br>`Neologik NCE Contributors - <short name>`<br>`Neologik NCE Admins - <short name>`<br>`Neologik Admin User Group - <short name>` | Give access to the agents, to the Neologik Context Engine and to the Azure resources |
-| Guest invitations | The accounts in `NeologikGuestUsers.txt` | The Neologik support accounts. Invitation is optional. You can create the accounts in your tenant instead |
+| Guest invitations | The accounts in `NeologikGuestUsers.txt` | The Neologik support accounts. You choose invitation at a question on screen. You can create the accounts in your tenant instead |
 | Deployment identity | `Neologik GitHub Service Connection - <short name>` | Neologik deploys the Neologik Platform as this service principal. You can create the service principal yourself instead |
 | Platform Sign-in application | `Neologik Platform Sign-in - <short name>` | Signs users in to the Neologik Context Engine and to Apps |
 | Agent identity blueprint | `Neologik Agent Blueprint - default - <short name>` | The parent of the agent identities and the agent user accounts that the Neologik Platform creates |
@@ -51,9 +51,9 @@ The onboarding script grants access on the resource group. The onboarding script
 | Permission | Reason |
 |---|---|
 | Reader on the subscription | Before a deployment, the deployment by Neologik reads the sizes and the quotas that are available in the Azure region |
-| Cost Management Contributor on the subscription | The deployment by Neologik creates and maintains the scheduled cost report of the subscription. The role covers cost configuration only |
+| Cost Management Contributor on the subscription | The deployment by Neologik creates and maintains the scheduled cost report of the subscription. The role covers cost configuration and support requests only |
 | Role Based Access Control Administrator on the resource group | The deployment by Neologik creates workloads inside the resource group. The deployment by Neologik assigns roles to the identities of those workloads, inside the resource group |
-| Role Based Access Control Administrator on the subscription, limited to three roles | The deployment runs the ingress controller of a secure environment with Application Gateway for Containers. Microsoft requires the identity of that controller to hold two roles. The first is Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster. That resource group is outside the resource group of the environment. The second is AppGw for Containers Configuration Manager on the resource group of the environment. The third role is Cost Management Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster: the identity of the configuration API of the Neologik Platform holds it and reads the daily cost of the nodes for the return on investment report. The condition on the role lets the deployment identity assign those three roles and no other role, and remove only those three |
+| Role Based Access Control Administrator on the subscription, limited to three roles | The deployment runs the ingress controller of a Private Endpoint environment with Application Gateway for Containers. Microsoft requires the identity of that controller to hold two roles. The first is Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster. That resource group is outside the resource group of the environment. The second is AppGw for Containers Configuration Manager on the resource group of the environment. The third role is Cost Management Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster: the identity of the configuration API of the Neologik Platform holds it and reads the daily cost of the nodes for the return on investment report. The condition on the role lets the deployment identity assign those three roles and no other role, and remove only those three |
 | `Application.ReadWrite.OwnedBy` | The deployment by Neologik manages the application registrations that the deployment identity owns. The permission covers no other application registration |
 | `AgentIdentityBlueprint.AddRemoveCreds.All` | The deployment by Neologik adds and removes the credentials of the agent identity blueprint |
 | `AgentIdUser.ReadWrite.IdentityParentedBy` | The agent identity blueprint creates the agent user accounts of the agent identities of that agent identity blueprint. The permission covers no other agent user account |

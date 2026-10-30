@@ -2,16 +2,16 @@
 
 ## Overview
 
-`Grant-NeologikAgentAccess.ps1` is the grants script. A Global Administrator runs the grants script when an agent or an App of the Neologik Platform is to work unattended in Microsoft 365. The grants script applies two files that the Neologik Context Engine exports.
+`Grant-NeologikAgentAccess.ps1` is the grants script. A Global Administrator runs the grants script when an agent or an App of the Neologik Platform is to work unattended in Microsoft 365. The grants script applies two files.
 
 | File | What the file lists | What the grants script applies |
 |---|---|---|
 | The agent grants file, `agent-grants-<environment>.json` | Each agent and each App that works unattended, with the permissions that the agent or the App needs | One grant to the agent user account of each agent and each App, the Microsoft Graph application permissions of workload identities, and the check of the SharePoint consent |
 | The mailbox grants file, `mailbox-grants-<environment>.json` | Each email channel, with the mailbox that the email channel reads | The three Exchange Online roles that let the identity of the email channel read and send from that one mailbox |
 
-Neologik sends the files, or a platform operator downloads the files from the Admin page of the Neologik Context Engine. The command names one file or both.
+Neologik sends the two files. A platform operator can also download the agent grants file. In the Neologik Context Engine, open **Admin**, then select **Download** under **Grants file**. An email channel that shows **Awaiting mailbox grant** also shows **Download grant script** on the **Channels** tab. An Exchange Administrator can run that script instead of the mailbox grants file. The command of the grants script names one file or both.
 
-The grants script reads the current state before each change. The grants script changes only what differs from the file. A Global Administrator can run the grants script again at any time, and runs the grants script again whenever the Neologik Context Engine exports a new file. With `-Verify` the grants script reports each change that a run would make, and writes nothing.
+The grants script reads the current state before each change. The grants script changes only what differs from the file. A Global Administrator can run the grants script again at any time, and runs the grants script again whenever either file changes. With `-Verify` the grants script reports each change that a run would make, and writes nothing.
 
 The grants script is the same for every customer and every environment. The two files are the part that belongs to your environment.
 
@@ -52,7 +52,7 @@ Before the grants script changes anything, the grants script confirms three fact
 
 ## How to run the grants script
 
-1. Place the onboarding kit in a folder on your workstation, and the files from the Neologik Context Engine beside the grants script.
+1. Place the onboarding kit in a folder on your workstation, and the two files beside the grants script.
 2. Open PowerShell 7 in that folder.
 3. Run the command.
 
@@ -66,7 +66,7 @@ Before the grants script changes anything, the grants script confirms three fact
 5. In a run with a mailbox grants file, the grants script signs in to Exchange Online in the same way. The browser uses the same account and does not usually ask again. Sign in as an Exchange Administrator or as a Global Administrator.
 6. Read the summary table on screen and the list `FILES TO SEND TO NEOLOGIK` under it. Send the files to Neologik.
 
-The grants script takes your tenant and the short name of your environment from the agent grants file. The command needs no other value. Three optional parameters cover the exceptions.
+The grants script takes your tenant and the short name of your environment from the agent grants file. The command needs no other value. Three further parameters cover the exceptions.
 
 | Parameter | When to add the parameter |
 |---|---|
