@@ -97,7 +97,7 @@
     script stores the client secret in the Key Vault, as the secret
     'neologik-deployment-service-principle-secret'.
 
-    This parameter is optional. Without this parameter, the script stores no client
+    Without this parameter, the script stores no client
     secret. Add the client secret to the Key Vault before the first deployment.
 
     The key 'existingServicePrincipalSecret' in the answer file has the same effect.
@@ -217,14 +217,14 @@ $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
 # Script version
-$script:Version = 'v5.0.14'
+$script:Version = 'v5.0.15'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.1.0'
+$script:KitVersion = 'v5.1.1'
 
 # The third role of the deployment identity on the subscription: Role Based Access
 # Control Administrator, limited by a condition to three roles. The deployment runs the
-# ingress controller of a secure environment with Application Gateway for Containers.
+# ingress controller of a Private Endpoint environment with Application Gateway for Containers.
 # Microsoft requires the identity of that controller to hold Reader on the resource
 # group that Azure Kubernetes Service creates for the nodes of the cluster, which is
 # outside the resource group of the environment, and AppGw for Containers Configuration
@@ -277,9 +277,6 @@ $script:FreshRunMode = $FreshRun.IsPresent
 # The client secret of a deployment service principal that you created. The script holds the client secret
 # here and not in ConfigData. The checkpoint and the configuration file therefore never hold the client secret. The value is empty on a resumed run.
 $script:ExistingSpSecretResolved = ""
-
-# The default recipients of the daily cost report. The script uses the default when the answer file names no recipient.
-$script:DefaultBudgetCostReportEmailRecipients = @('support_budget_alerts@neologik.ai')
 
 # The addresses of the Neologik guest users, read from NeologikGuestUsers.txt
 $script:GuestUsersFile = Join-Path $PSScriptRoot "NeologikGuestUsers.txt"
@@ -2045,7 +2042,7 @@ function Get-NeologikExistingAppRegistration {
         function creates nothing.
     .DESCRIPTION
         The script calls the function when you created the deployment service
-        principal and gave the object ID. The client secret is optional. The function
+        principal and gave the object ID. The function
         creates no application registration, no service principal and no client
         secret. The caller assigns the roles with Set-AppRegistrationRoles, exactly as
         for a deployment service principal that the script creates.
@@ -2607,8 +2604,8 @@ function Set-AppRegistrationRoles {
         # the resource group only. The deployment identity needs two roles on the subscription:
         #   - Reader: the deployment reads usage and quota. Azure holds usage and quota for the subscription
         #     and the Azure region.
-        #   - Cost Management Contributor: the deployment creates and maintains the daily cost
-        #     report. The role manages cost configuration only and allows no change to a resource.
+        #   - Cost Management Contributor: the deployment deletes any retired budget, cost view and
+        #     scheduled cost email. The role covers cost configuration and support requests only.
         $roles = @('Reader', 'Cost Management Contributor')
 
         foreach ($roleName in $roles) {
@@ -4225,8 +4222,6 @@ function Export-ConfigurationData {
             'UserAccount' = $script:ConfigData['UserAccount']
             'AzureRegion' = $script:ConfigData['AzureRegion']
             'HostName' = $script:ConfigData['HostName']
-            'BudgetEmailAddresses' = $script:ConfigData['BudgetEmailAddresses']
-            'BudgetEmailFrequency' = $script:ConfigData['BudgetEmailFrequency']
             'ResourceProvidersPending' = @($script:ConfigData['ResourceProvidersPending'])
             'ResourceTagsEnabled' = [bool]$script:ConfigData['ResourceTagsEnabled']
             'ResourceTagsCustom' = $exportCustomTags
@@ -4605,27 +4600,6 @@ function Test-AnswerFileComplete {
     return $true
 }
 
-function Resolve-BudgetEmailRecipients {
-    <#
-    .SYNOPSIS
-        Reads the value 'budgetCostReportEmailRecipients' of the answer file into a
-        list of addresses. The function accepts a list, or a string of addresses
-        separated by commas. The value 'none' or an empty list turns the cost report
-        off. The function throws when an address has the wrong form.
-    #>
-    [CmdletBinding()]
-    param($Value)
-
-    $items = @()
-    foreach ($entry in @($Value)) {
-        $items += @(([string]$entry) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    }
-    if ($items.Count -eq 1 -and $items[0].ToLower() -eq 'none') { return @() }
-    $invalid = @($items | Where-Object { $_ -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$' })
-    if ($invalid.Count -gt 0) { throw "email addresses that are not valid: $($invalid -join ', ')." }
-    return $items
-}
-
 function Get-CafRegionCodes {
     <#
     .SYNOPSIS
@@ -4780,17 +4754,6 @@ function Set-ConfigFromAnswerFile {
     if ($sqlErr) { throw "sqlIdentityName '$($script:ConfigData['SqlIdentityName'])': $sqlErr" }
 
     # A platform operator creates agents and channels in the Neologik Context Engine after the deployment.
-
-    # The recipients of the daily cost report. The value is optional, and the default value applies when the answer file names no recipient.
-    # An empty list turns the report off. The deployment by Neologik creates and maintains the report.
-    $bcrAns = Get-Answer 'budgetCostReportEmailRecipients'
-    if ($null -ne $bcrAns) {
-        $script:ConfigData['BudgetEmailAddresses'] = @(Resolve-BudgetEmailRecipients $bcrAns)
-    }
-    else {
-        $script:ConfigData['BudgetEmailAddresses'] = @($script:DefaultBudgetCostReportEmailRecipients)
-    }
-    $script:ConfigData['BudgetEmailFrequency'] = 'Daily'
 
     # Tags. The answer file can hold a boolean, whose default value is to apply the tags. The answer file
     # can also hold custom tags, as an object or as a string of key=value pairs separated by commas. The
@@ -5596,60 +5559,6 @@ function Start-NeologikOnboarding {
         # deployment. A channel uses the standard security group for users that this script creates, or an existing
         # security group that an administrator names. The Neologik Platform creates no security group.
 
-        # The recipients of the daily Azure cost report
-        # The deployment by Neologik creates and maintains the report, with the role Cost Management
-        # Contributor that this script assigns. Onboarding collects the recipients only. The
-        # question shows the value of the key 'budgetCostReportEmailRecipients' in the answer file. A
-        # blank answer accepts the default value. The answer 'none' turns the report off.
-        $defaultBudgetEmail = @($script:DefaultBudgetCostReportEmailRecipients)
-        $budgetAns = Get-Answer 'budgetCostReportEmailRecipients'
-        if ($null -ne $budgetAns) {
-            try {
-                $fromAnswer = @(Resolve-BudgetEmailRecipients $budgetAns)
-                if ($fromAnswer.Count -gt 0) { $defaultBudgetEmail = $fromAnswer }
-            }
-            catch { Write-Host "  [!] The answer file holds a value for budgetCostReportEmailRecipients that is not valid. The script ignores the value: $($_.Exception.Message)" -ForegroundColor Yellow }
-        }
-        $budgetDefaultText = $defaultBudgetEmail -join ', '
-        $budgetEmailsValid = $false
-        $budgetEmails = @()
-        while (-not $budgetEmailsValid) {
-            Write-Host ""
-            Write-Host "Budget Cost-Report Email Recipient(s):" -ForegroundColor Cyan
-            Write-Host "  Each address receives the daily Azure cost report." -ForegroundColor Gray
-            Write-Host "  Enter one or more email addresses separated by commas, or 'none' to turn the report off." -ForegroundColor Gray
-            Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-            Write-Host $budgetDefaultText -ForegroundColor Yellow
-            Write-Host "  Press Enter to accept the default value, type one or more addresses, or type 'none': " -NoNewline -ForegroundColor Gray
-            $budgetEmailInput = Read-Host
-
-            if ([string]::IsNullOrWhiteSpace($budgetEmailInput)) {
-                $budgetEmails = @($defaultBudgetEmail)
-            }
-            elseif ($budgetEmailInput.Trim().ToLower() -eq 'none') {
-                $budgetEmails = @()
-            }
-            else {
-                $budgetEmails = @($budgetEmailInput -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-            }
-
-            $invalidEmails = @($budgetEmails | Where-Object { $_ -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$' })
-            if ($invalidEmails.Count -gt 0) {
-                Write-Host "  [X] Email addresses that are not valid: $($invalidEmails -join ', '). Try again." -ForegroundColor Red
-                continue
-            }
-
-            $budgetEmailsValid = $true
-            if ($budgetEmails.Count -eq 0) {
-                Write-Host "  [OK] The cost report is turned off" -ForegroundColor Green
-            }
-            else {
-                Write-Host "  [OK] Using: $($budgetEmails -join ', ')" -ForegroundColor Green
-            }
-        }
-        $script:ConfigData['BudgetEmailAddresses'] = $budgetEmails
-        $script:ConfigData['BudgetEmailFrequency'] = 'Daily'
-
         # Ask whether to tag the Azure resources that the script creates. An Azure Policy in a tenant can
         # refuse a resource without tags. The script therefore applies the tags at the creation of each resource. The
         # question shows the values of the keys 'applyResourceTags' and
@@ -5711,7 +5620,7 @@ function Start-NeologikOnboarding {
             $customValid = $false
             while (-not $customValid) {
                 Write-Host ""
-                Write-Host "Custom resource tags, optional:" -ForegroundColor Cyan
+                Write-Host "Custom resource tags:" -ForegroundColor Cyan
                 Write-Host "  Enter key=value pairs separated by commas. A key can hold letters, digits, '.', '_'" -ForegroundColor Gray
                 Write-Host "  and '-'. A custom tag replaces a standard tag of the same name." -ForegroundColor Gray
                 Write-Host "  Example: " -NoNewline -ForegroundColor Gray
@@ -5939,8 +5848,6 @@ function Start-NeologikOnboarding {
         Write-SummaryRow 'SQL Managed Identity' $script:ConfigData['SqlIdentityName']
         Write-SummaryRow 'Solution Name' $script:ConfigData['SolutionName']
         Write-SummaryRow 'Solution Short Name' $script:ConfigData['SolutionShortName']
-        $budgetEmailSummary = if ($script:ConfigData['BudgetEmailAddresses'].Count -gt 0) { $script:ConfigData['BudgetEmailAddresses'] -join ', ' } else { '(disabled)' }
-        Write-SummaryRow 'Cost-Report Email' $budgetEmailSummary
         Write-SummaryRow 'Provider Registration' "$($script:ProviderList.Providers.Count) resource providers and $($script:ProviderList.Features.Count) preview features, from resource-providers.txt"
         $tagsSummary = if ($script:ConfigData['ResourceTagsEnabled']) {
             $customCount = @($script:ConfigData['ResourceTagsCustom'].Keys).Count
@@ -5998,13 +5905,6 @@ function Start-NeologikOnboarding {
             # A resumed run takes the short form of the region from the checkpoint.
             $regionAbbrev = $script:CheckpointRegionAbbrev
 
-            # When the checkpoint lacks a value, use the default value.
-            if (-not $script:ConfigData.ContainsKey('BudgetEmailAddresses')) {
-                $script:ConfigData['BudgetEmailAddresses'] = @($script:DefaultBudgetCostReportEmailRecipients)
-            }
-            if (-not $script:ConfigData.ContainsKey('BudgetEmailFrequency')) {
-                $script:ConfigData['BudgetEmailFrequency'] = 'Daily'
-            }
             # Tags: when the checkpoint holds no choice, the script applies no tags.
             if (-not $script:ConfigData.ContainsKey('ResourceTagsEnabled')) {
                 $script:ConfigData['ResourceTagsEnabled'] = $false
@@ -6118,9 +6018,6 @@ function Start-NeologikOnboarding {
         # The script has no step 13. Step 5c submits the resource provider registrations that the script needs.
         # Step 15b submits the other registrations and confirms every registration, before the script writes
         # the configuration file.
-
-        # The deployment by Neologik creates and maintains the daily cost report. Onboarding
-        # collects the recipients, and the configuration file records the recipients.
 
         # Step 14: Create the storage account and the containers. The administrator decided the name in
         # step 6. When a checkpoint holds no name, the script uses the standard name.

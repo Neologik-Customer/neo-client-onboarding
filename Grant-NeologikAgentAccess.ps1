@@ -4,7 +4,7 @@
 .SYNOPSIS
     Applies the grants that agents and Apps of a Neologik Platform environment
     need to work unattended in Microsoft 365. A Global Administrator runs the
-    script with the files that the Neologik Context Engine exports.
+    script with the agent grants file and the mailbox grants file.
 
 .DESCRIPTION
     docs\GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md describes the script in full.
@@ -25,8 +25,7 @@
     The command names one file or both. The script reads the current state before
     each change. On an environment that already holds every grant, the script
     changes nothing. A Global Administrator can run the script again at any time,
-    and runs the script again whenever the Neologik Context Engine exports a new
-    file.
+    and runs the script again whenever either file changes.
 
     With -Verify the script reports each change that a run would make. The script
     then writes nothing.
@@ -58,7 +57,7 @@
     The file records whether the environment uses SharePoint ingestion. When the
     environment uses SharePoint ingestion, the script checks the consent of the
     SharePoint application for the Microsoft Graph application permission
-    Sites.Selected. A consent belongs to one application. When an earlier
+    Sites.Selected. A consent belongs to one application. When another
     SharePoint application of Neologik in the tenant holds a SharePoint
     permission, the script grants Sites.Selected to the SharePoint application of
     the environment. Otherwise the script prints the consent address when the
@@ -75,8 +74,8 @@
     Each role is limited to the one mailbox of the email channel.
 
     With -RemoveLegacyGrantAppIds the script also removes the Exchange Online role
-    assignments of an identity that the environment has stopped using. An identity
-    that the file records as still in use keeps the role assignments.
+    assignments of each identity that the command names. An identity
+    that the file records as in use keeps the role assignments.
 
     Step 2 needs the sign-in of an Exchange Administrator or of a Global
     Administrator.
@@ -109,17 +108,18 @@
     NEOLOGIK.
 
 .PARAMETER AgentGrantsFile
-    The JSON file of grants to agent users. The Neologik Context Engine exports
-    the file. The file names the tenant and the environment.
+    The JSON file of grants to agent users. A platform operator downloads the file
+    from the Admin page of the Neologik Context Engine. The file names the tenant
+    and the environment.
 
 .PARAMETER MailboxGrantsFile
-    The JSON file of mailbox grants. The Neologik Context Engine exports the file.
+    The JSON file of mailbox grants. Neologik sends the file.
 
 .PARAMETER RemoveLegacyGrantAppIds
-    The application id of each identity that the environment has stopped using. The
+    The application id of each identity to remove. The
     script removes the Exchange Online role assignments of each identity. The
     parameter requires -MailboxGrantsFile. The script keeps the role assignments of
-    an identity that the mailbox grants file records as still in use.
+    an identity that the mailbox grants file records as in use.
 
 .PARAMETER TenantId
     The id of your Microsoft Entra tenant. The agent grants file names the tenant,
@@ -161,7 +161,7 @@
 .EXAMPLE
     ./Grant-NeologikAgentAccess.ps1 -MailboxGrantsFile ./mailbox-grants-abcprd01.json -RemoveLegacyGrantAppIds 11111111-2222-3333-4444-555555555555
 
-    The script applies the mailbox grants that the file lists. The script also removes the role assignments of one identity that the environment has stopped using.
+    The script applies the mailbox grants that the file lists. The script also removes the role assignments of the identity that the command names.
 
 .EXAMPLE
     ./Grant-NeologikAgentAccess.ps1 -AgentGrantsFile ./agent-grants-abcprd01.json -Verify
@@ -235,8 +235,8 @@ param(
 $script:GraphSpAppId = '00000003-0000-0000-c000-000000000000'
 # The start of the name of the SharePoint application. The SharePoint application
 # holds the permission Sites.Selected. The script checks the consent when the agent
-# grants file records SharePoint ingestion. The script grants Sites.Selected when an
-# earlier SharePoint application of Neologik holds a SharePoint permission.
+# grants file records SharePoint ingestion. The script grants Sites.Selected when
+# another SharePoint application of Neologik holds a SharePoint permission.
 $script:SharePointAppDisplayNamePrefix = 'Neologik SharePoint Access - '
 $script:GraphV1 = 'https://graph.microsoft.com/v1.0'
 $script:GraphBeta = 'https://graph.microsoft.com/beta'
@@ -284,7 +284,7 @@ $script:Summary = @()
 $script:State = @{}
 # The version of the onboarding kit that ships the script. The header, the log file
 # and the summary file name the version.
-$script:KitVersion = 'v5.1.0'
+$script:KitVersion = 'v5.1.1'
 # The log file of the run. The script writes every message to the log file from the
 # first line. The reason a run ended before its steps, for the summary file.
 $script:LogFile = $null
@@ -1178,7 +1178,7 @@ function Resolve-NeologikInput {
     $state.AdoptedIdentityAppIds = @()
 
     if (-not $state.AgentGrantsFile -and -not $state.MailboxGrantsFile) {
-        throw [System.ArgumentException]::new('The command names no grants file. Add -AgentGrantsFile, -MailboxGrantsFile or both. The Neologik Context Engine exports each file.')
+        throw [System.ArgumentException]::new('The command names no grants file. Add -AgentGrantsFile, -MailboxGrantsFile or both.')
     }
     if ($state.TenantId -and -not (Test-NeologikGuid $state.TenantId)) {
         throw [System.ArgumentException]::new("TenantId must be a GUID. The value is '$($state.TenantId)'.")
@@ -1192,7 +1192,7 @@ function Resolve-NeologikInput {
         }
     }
     if ($state.RemoveLegacyGrantAppIds.Count -gt 0 -and -not $state.MailboxGrantsFile) {
-        throw [System.ArgumentException]::new('RemoveLegacyGrantAppIds needs the mailbox grants file. Add -MailboxGrantsFile to the command. The mailbox grants file lists each identity that an email channel still uses. The script never removes the role assignments of those identities.')
+        throw [System.ArgumentException]::new('RemoveLegacyGrantAppIds needs the mailbox grants file. Add -MailboxGrantsFile to the command. The mailbox grants file lists each identity that an email channel uses. The script never removes the role assignments of those identities.')
     }
 
     if ($state.AgentGrantsFile) {
@@ -1244,7 +1244,7 @@ function Resolve-NeologikInput {
         # The file has one of two forms. The first form is a list of entries. The second
         # form is an object with 'grants' and 'adoptedIdentityAppIds'. 'grants' holds the
         # entries. 'adoptedIdentityAppIds' holds the client id of each identity that an email
-        # channel still uses. -RemoveLegacyGrantAppIds never removes those identities.
+        # channel uses. -RemoveLegacyGrantAppIds never removes those identities.
         $rawEntries = @()
         $adopted = @()
         if ($mailboxFile -is [System.Array]) {
@@ -1266,7 +1266,7 @@ function Resolve-NeologikInput {
             $adopted = @(@(Get-NeologikProperty $mailboxFile 'adoptedIdentityAppIds' @()) | ForEach-Object { [string]$_ } | Where-Object { $_.Trim() })
         }
         else {
-            throw [System.ArgumentException]::new("The mailbox grants file is not the file that the Neologik Context Engine exports: $($state.MailboxGrantsFile). The file must hold a list of entries, or 'grants' and 'adoptedIdentityAppIds'.")
+            throw [System.ArgumentException]::new("The mailbox grants file does not have the expected form: $($state.MailboxGrantsFile). The file must hold a list of entries, or 'grants' and 'adoptedIdentityAppIds'.")
         }
         foreach ($adoptedAppId in $adopted) {
             if (-not (Test-NeologikGuid $adoptedAppId)) {
@@ -1301,7 +1301,7 @@ function Resolve-NeologikInput {
         }
         $state.MailboxGrants = $mailboxEntries
         $state.AdoptedIdentityAppIds = @($adopted)
-        Write-Log "The script read the mailbox grants file. Email channels: $($mailboxEntries.Count). Identities that an email channel still uses: $($adopted.Count)" -Level Info
+        Write-Log "The script read the mailbox grants file. Email channels: $($mailboxEntries.Count). Identities that an email channel uses: $($adopted.Count)" -Level Info
     }
 
     if (-not $state.TenantId) {
@@ -1895,7 +1895,7 @@ function Get-NeologikExchangeAssignment {
 function Remove-NeologikMailboxAccess {
     <#
     Removes the Exchange role assignments and the Exchange service principal of an
-    identity that the environment has stopped using. The function keeps the
+    identity that the command names. The function keeps the
     management scope. The mailbox grant of the email channel uses the same
     management scope.
     #>
@@ -1962,11 +1962,11 @@ function Get-NeologikSharePointApplication {
 
 function Get-NeologikEarlierSharePointApplication {
     <#
-    Finds each earlier SharePoint application of Neologik that holds a SharePoint
-    permission of Microsoft Graph. An earlier SharePoint application is a service
+    Finds each other SharePoint application of Neologik that holds a SharePoint
+    permission of Microsoft Graph. Such an application is a service
     principal whose name begins 'Neologik' and holds the word 'SharePoint'. The
     function leaves out the SharePoint application of every environment. The result
-    lists each earlier application with the SharePoint permissions that the
+    lists each such application with the SharePoint permissions that the
     application holds.
     #>
     param([string]$ExcludeId)
@@ -1995,7 +1995,7 @@ function Get-NeologikEarlierSharePointApplication {
 function Test-NeologikSharePointConsent {
     <#
     Checks the consent for Sites.Selected of the SharePoint application of this
-    environment. A consent belongs to one application. An earlier SharePoint
+    environment. A consent belongs to one application. Another SharePoint
     application of Neologik that holds a SharePoint permission shows that the
     solution uses SharePoint ingestion. The function then grants Sites.Selected to
     the SharePoint application of this environment. -IngestionRecorded states that
@@ -2029,10 +2029,10 @@ function Test-NeologikSharePointConsent {
         $earlier = @(Get-NeologikEarlierSharePointApplication -ExcludeId $spId)
         if ($earlier.Count -gt 0) {
             $earlierNames = @($earlier | ForEach-Object { "'$($_.Name)'" }) -join ', '
-            Write-Log "  An earlier SharePoint application of Neologik holds a SharePoint permission: $earlierNames. The solution uses SharePoint ingestion" -Level Info
+            Write-Log "  Another SharePoint application of Neologik holds a SharePoint permission: $earlierNames. The solution uses SharePoint ingestion" -Level Info
             if (-not $spApp) {
                 Write-Log '  The SharePoint application of this environment does not exist. The deployment by Neologik creates the SharePoint application. Run the script again after the deployment' -Level Warning
-                Add-Summary $item "MISSING: the SharePoint application of this environment does not exist. The earlier application $earlierNames holds a SharePoint permission. Run the script again after the deployment by Neologik"
+                Add-Summary $item "MISSING: the SharePoint application of this environment does not exist. The application $earlierNames holds a SharePoint permission. Run the script again after the deployment by Neologik"
                 return
             }
             if (-not $sitesSelected) {
@@ -2040,7 +2040,7 @@ function Test-NeologikSharePointConsent {
                 Add-Summary $item 'NOT FOUND: report to Neologik'
                 return
             }
-            Write-Log "  '$spName' does not hold Sites.Selected. A consent belongs to one application. The consent of the earlier application does not reach '$spName'" -Level Info
+            Write-Log "  '$spName' does not hold Sites.Selected. A consent belongs to one application. The consent of the other application does not reach '$spName'" -Level Info
             if (Test-NeologikVerifyOnly) {
                 Add-NeologikPendingChange $item "GRANT Sites.Selected to '$spName'"
                 return
@@ -2130,8 +2130,8 @@ function Set-NeologikAgentUserGrant {
 function Set-NeologikMailboxGrant {
     <#
     Step 2: the Exchange Online mailbox grants of the email channels. The function
-    also removes the role assignments of each identity that the environment has
-    stopped using. An identity that the file lists under adoptedIdentityAppIds keeps
+    also removes the role assignments of each identity that the command names.
+    An identity that the file lists under adoptedIdentityAppIds keeps
     the role assignments.
     #>
     $state = $script:State
@@ -2139,8 +2139,8 @@ function Set-NeologikMailboxGrant {
     $legacyToRemove = @()
     foreach ($legacyAppId in $state.RemoveLegacyGrantAppIds) {
         if ($state.AdoptedIdentityAppIds -contains $legacyAppId) {
-            Write-Log "  Identity ${legacyAppId}: an email channel still uses the identity. The script keeps the role assignments" -Level Success
-            Add-Summary "Mailbox grant to remove: $legacyAppId" 'Kept. An email channel still uses the identity'
+            Write-Log "  Identity ${legacyAppId}: an email channel uses the identity. The script keeps the role assignments" -Level Success
+            Add-Summary "Mailbox grant to remove: $legacyAppId" 'Kept. An email channel uses the identity'
             continue
         }
         $legacyToRemove += $legacyAppId
