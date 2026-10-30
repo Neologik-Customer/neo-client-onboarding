@@ -46,7 +46,7 @@ The table shows the version that each script reports.
 | Script | Version of the script | Purpose |
 |---|---|---|
 | `Install-NeologikEnvironment.ps1` | v5.0.14 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.0 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.1 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
@@ -68,7 +68,11 @@ This version is on the line of Neologik Platform v5.1. This version changes docu
 | `docs/NETWORK-GUIDE.md` | The deployment storage account is a data service of a Private Endpoint environment from the first deployment. You allocate an address block only when a default range must change |
 | `README.md`, `docs/FINISHING-STEPS-GUIDE.md` | The documents give the on-screen name Neologik Admin Tool. The finishing steps name the **Outstanding tasks** section of the home page |
 | `README.md`, `docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md`, `docs/PRE-ONBOARDING-INFO-GATHERING.md`, `docs/TECHNICAL-REFERENCE.md`, `docs/secure-overview.md` | The documents say what happens when you leave a step or a value out |
+| `README.md`, `docs/PFX-CERT-GUIDE.md`, `docs/TECHNICAL-REFERENCE.md` | The documents state that Neologik copies the TLS certificate, with the private key, into Neologik's central Key Vault. The documents say who builds and imports a certificate from uploaded files |
+| `docs/ANALYTICS-REPORTING-GUIDE.md` | The guide lists the operator account of a configuration change and the outstanding tasks. The guide also lists the automatic updates and the names in a fault. The guide describes the log query relay |
+| `docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md`, `docs/AGENT-ACCOUNT-ACCESS-GUIDE.md`, `docs/NETWORK-GUIDE.md` | The documents state each fact at this version, with no comparison with an earlier version |
 | `Install-NeologikEnvironment.ps1` | No change to the script. The onboarding script records the version `v5.1.1` on the resource group |
+| `Grant-NeologikAgentAccess.ps1` | No change to the script. The grants script reports the onboarding kit version v5.1.1 |
 
 ## Version 5.1.0
 

@@ -264,13 +264,15 @@ The onboarding script reports each resource provider registration that is not ye
 
 The Key Vault uses the password for the import only and does not store the password. Do not send the `.pfx` file or the password to Neologik.
 
+Neologik then copies the certificate, private key included, from the Key Vault of the environment into Neologik's central Key Vault. Each deployment of the ingress reads the certificate from Neologik's central Key Vault. Azure role-based access control protects Neologik's central Key Vault.
+
 When you cannot produce a `.pfx` file, upload three files to the container `certificate` of the deployment storage account:
 
 - the private key
 - the server certificate
 - the certificate authority bundle
 
-The completion summary names the deployment storage account. Tell Neologik after the upload. The deployment then builds the TLS certificate from the three files.
+The completion summary names the deployment storage account. Tell Neologik after the upload. A Neologik engineer then builds a `.pfx` file from the three files. The engineer imports the `.pfx` file into Neologik's central Key Vault. The engineer records the password of the `.pfx` file in a Key Vault of Neologik.
 
 [The TLS certificate](docs/TECHNICAL-REFERENCE.md#the-tls-certificate) in the technical reference describes the upload.
 

@@ -82,7 +82,7 @@ A subnet cannot move after the environment is built, because the Kubernetes clus
 | Block | Example | What the deployment does with the block |
 |---|---|---|
 | Default layout: a `/10` | `10.192.0.0/10` | The default layout above, unchanged. The environment can grow without a further allocation |
-| Minimum: a `/19` | `10.250.32.0/19` | The reduced layout below. The deployment has built a Private Endpoint environment on a `/19` |
+| Minimum: a `/19` | `10.250.32.0/19` | The reduced layout below. A Private Endpoint environment fits on a `/19` |
 
 The reduced layout gives each subnet the smallest range that holds the subnet's peak use. The workload pod subnet is the largest. Moving the workload node pool to a new VM size runs both pools side by side.
 

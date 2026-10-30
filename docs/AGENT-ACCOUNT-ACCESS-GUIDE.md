@@ -110,7 +110,7 @@ Assign a licence that your organisation holds. Neologik holds no licence for an 
    az rest --method GET   --url "https://graph.microsoft.com/v1.0/users/$account/licenseDetails" --query 'value[].skuPartNumber' -o tsv
    ```
 
-   The last command prints the licence that the agent account now holds.
+   The last command prints the licence that the agent account holds.
 
 ## Task 2: Give access to a shared mailbox
 

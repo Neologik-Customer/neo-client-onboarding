@@ -455,7 +455,9 @@ Neologik recommends this method.
 5. Select the `.pfx` file and enter the password of the `.pfx` file.
 6. Select **Create**.
 
-The Key Vault uses the password for the import only. Do not send the password to Neologik.
+The Key Vault uses the password for the import only. Do not send the `.pfx` file or the password to Neologik.
+
+Neologik then copies the certificate, private key included, from the Key Vault of the environment into Neologik's central Key Vault. Each deployment of the ingress reads the certificate from Neologik's central Key Vault. Azure role-based access control protects Neologik's central Key Vault.
 
 ### Method 2: Upload the files to the deployment storage account
 
@@ -463,6 +465,8 @@ The Key Vault uses the password for the import only. Do not send the password to
 2. Upload the files to the container `certificate` of the deployment storage account. Upload either the `.pfx` file, or the private key, the server certificate and the certificate authority bundle.
 3. When you upload a `.pfx` file, store the password of the `.pfx` file in the Key Vault. Name the secret `neologik-deployment-certificate-pfx-secret`.
 4. Tell Neologik which files you uploaded.
+
+A Neologik engineer then imports the certificate into Neologik's central Key Vault. When you uploaded three files, the engineer first builds a PFX file from the three files. The engineer records the password of the PFX file in a Key Vault of Neologik.
 
 ## Troubleshooting
 
