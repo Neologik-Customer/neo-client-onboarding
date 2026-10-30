@@ -14,14 +14,16 @@ The name of an agent account has one of two forms.
 
 | Owner of the agent account | Name of the agent account |
 |---|---|
-| An agent | `agent-<key>-<environment>@<your domain>` |
-| An App | `app-<name>-<environment>@<your domain>`, or a name with the prefix that you chose |
+| An agent | `neologik-agent-<key>-<short name>@<your domain>`, or a name with the **Account prefix** that you chose instead of `neologik` |
+| An App | `neologik-app-<name>-<short name>@<your domain>`, or a name with the **Account prefix** that you chose instead of `neologik` |
+
+`<short name>` stands for the short name of the environment, for example `abcprd01`.
 
 The agent account has no password. The agent account cannot sign in. The agent uses the agent account only through the permissions that a Global Administrator granted.
 
 A Global Administrator grants the permissions with the grants script, `Grant-NeologikAgentAccess.ps1`, and the agent grants file that the Neologik Context Engine exports. [GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md](GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md) describes the grants script.
 
-An administrator completes up to four tasks in your tenant.
+An administrator completes up to five tasks in your tenant.
 
 | Task | Who acts | When the task applies |
 |---|---|---|
@@ -29,6 +31,7 @@ An administrator completes up to four tasks in your tenant.
 | [2. Give access to a shared mailbox](#task-2-give-access-to-a-shared-mailbox) | An Exchange Administrator | The agent reads the shared mailbox or sends email from the shared mailbox |
 | [3. Give access to a SharePoint site](#task-3-give-access-to-a-sharepoint-site) | An owner of the site or a SharePoint Administrator | The agent reads files from a library on the site, or delivers files to the site |
 | [4. Add the agent account to a Teams team](#task-4-add-the-agent-account-to-a-teams-team) | A Teams Administrator | The agent reads a channel of the team |
+| [5. Give the SharePoint application access to a SharePoint site](#task-5-give-the-sharepoint-application-access-to-a-sharepoint-site) | A Global Administrator | The Neologik Platform reads files from the site through a SharePoint connection |
 
 The Neologik Context Engine shows the exact name of the agent account of each agent. The Neologik Context Engine also shows when each task is complete.
 
@@ -39,9 +42,10 @@ The Neologik Context Engine shows the exact name of the agent account of each ag
 3. [Task 2: Give access to a shared mailbox](#task-2-give-access-to-a-shared-mailbox)
 4. [Task 3: Give access to a SharePoint site](#task-3-give-access-to-a-sharepoint-site)
 5. [Task 4: Add the agent account to a Teams team](#task-4-add-the-agent-account-to-a-teams-team)
-6. [Check the result](#check-the-result)
-7. [Questions](#questions)
-8. [Help](#help)
+6. [Task 5: Give the SharePoint application access to a SharePoint site](#task-5-give-the-sharepoint-application-access-to-a-sharepoint-site)
+7. [Check the result](#check-the-result)
+8. [Questions](#questions)
+9. [Help](#help)
 
 ## Before you start
 
@@ -97,7 +101,7 @@ Assign a licence that your organisation holds. Neologik holds no licence for an 
    ```powershell
    $skuPart       = '<sku from step 1>'
    $usageLocation = 'GB'
-   $account       = 'agent-<key>-<environment>@contoso.com'
+   $account       = 'neologik-agent-<key>-<short name>@contoso.com'
 
    $sku = (az rest --method GET --url 'https://graph.microsoft.com/v1.0/subscribedSkus' -o json | ConvertFrom-Json).value |
      Where-Object { $_.skuPartNumber -eq $skuPart -and $_.capabilityStatus -eq 'Enabled' }
@@ -108,7 +112,7 @@ Assign a licence that your organisation holds. Neologik holds no licence for an 
    az rest --method GET   --url "https://graph.microsoft.com/v1.0/users/$account/licenseDetails" --query 'value[].skuPartNumber' -o tsv
    ```
 
-   The last command prints the licence that the agent account now holds.
+   The last command prints the licence that the agent account holds.
 
 ## Task 2: Give access to a shared mailbox
 
@@ -130,7 +134,7 @@ Install-Module ExchangeOnlineManagement -Scope CurrentUser
 Connect-ExchangeOnline -UserPrincipalName <your administrator account>
 
 $mailbox = 'reports@contoso.com'
-$account = 'agent-<key>-<environment>@contoso.com'
+$account = 'neologik-agent-<key>-<short name>@contoso.com'
 
 Add-MailboxPermission   -Identity $mailbox -User $account -AccessRights FullAccess -InheritanceType All -AutoMapping $false
 Add-RecipientPermission -Identity $mailbox -Trustee $account -AccessRights SendAs -Confirm:$false
@@ -162,7 +166,7 @@ Add the agent account to the Microsoft 365 group.
 
    ```powershell
    $groupId = '<group object id>'
-   $account = 'agent-<key>-<environment>@contoso.com'
+   $account = 'neologik-agent-<key>-<short name>@contoso.com'
    az rest --method POST --url "https://graph.microsoft.com/v1.0/groups/$groupId/members/`$ref" --headers 'Content-Type=application/json' --body ('{"@odata.id":"https://graph.microsoft.com/v1.0/users/' + $account + '"}')
    ```
 
@@ -179,7 +183,7 @@ Install-Module Microsoft.Online.SharePoint.PowerShell -Scope CurrentUser
 Connect-SPOService -Url https://<your tenant>-admin.sharepoint.com
 
 $site    = 'https://<your tenant>.sharepoint.com/sites/<site>'
-$account = 'agent-<key>-<environment>@contoso.com'
+$account = 'neologik-agent-<key>-<short name>@contoso.com'
 
 # Lists the groups of the site. The members group is usually named '<site name> Members'.
 Get-SPOSiteGroup -Site $site | Select-Object Title
@@ -205,8 +209,37 @@ Alternatively, run these commands:
 Install-Module MicrosoftTeams -Scope CurrentUser
 
 Connect-MicrosoftTeams
-Add-TeamUser -GroupId <group object id of the team> -User agent-<key>-<environment>@contoso.com
+Add-TeamUser -GroupId <group object id of the team> -User neologik-agent-<key>-<short name>@contoso.com
 ```
+
+## Task 5: Give the SharePoint application access to a SharePoint site
+
+The SharePoint application of the environment is `Neologik SharePoint Access - <short name>`. The application holds the Microsoft Graph application permission `Sites.Selected`. `Sites.Selected` reaches no SharePoint site until an administrator grants the application access to that site.
+
+Run task 5 once for each site that the Neologik Platform reads. A Global Administrator runs the commands, because the sign-in needs the delegated permission `Sites.FullControl.All`. The commands grant one site. The application gains no access to any other site.
+
+1. In the Microsoft Entra admin centre, select **App registrations**, then **All applications**.
+2. Find `Neologik SharePoint Access - <short name>`, and copy the **Application (client) ID**.
+3. Run these commands with your values:
+
+   ```powershell
+   # Once for each workstation.
+   Install-Module Microsoft.Graph.Sites -Scope CurrentUser
+
+   Connect-MgGraph -Scopes 'Sites.FullControl.All'
+
+   $hostName = '<your tenant>.sharepoint.com'
+   $siteName = '<site>'
+   $appId    = '<application (client) id>'
+   $appName  = 'Neologik SharePoint Access - <short name>'
+
+   $site = Get-MgSite -SiteId "${hostName}:/sites/$siteName"
+   $body = @{ roles = @('read'); grantedToIdentities = @(@{ application = @{ id = $appId; displayName = $appName } }) }
+   $permission = New-MgSitePermission -SiteId $site.Id -BodyParameter $body
+   Get-MgSitePermission -SiteId $site.Id -PermissionId $permission.Id | Format-List Id, Roles
+   ```
+
+   The last command prints the role `read`.
 
 ## Check the result
 
@@ -217,11 +250,11 @@ The Neologik Context Engine shows the result in three places.
 
 | Place | What the place shows |
 |---|---|
-| The **Access** tab of the agent | The **Licensed** indicator. The **Access** tab also shows whether the permission grant from a Global Administrator is confirmed |
+| The **Access** tab of the agent | The label **Microsoft 365 licence assigned** or **Microsoft 365 licence required** on each permission pack that needs a licence. The **Access** tab also shows whether the permission grant from a Global Administrator is confirmed |
 | The page of a loop | A **Resource access** row for each mailbox and each library. The row reads **Access confirmed** when the agent account can reach the mailbox or the library |
 | The **Connections** tab of an App | **Test access** reads each resource as the agent account of the App. **Test access** gives the reason when Microsoft 365 refuses a read |
 
-A row on the **Access** tab that reads **grant outstanding** needs the permission grant from a Global Administrator first. The **Access** tab gives the command for the permission grant.
+A row on the **Access** tab that reads **Consent outstanding** needs the permission grant from a Global Administrator first. The **Access** tab gives the command for the permission grant.
 
 ## Questions
 

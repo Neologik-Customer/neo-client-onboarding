@@ -53,4 +53,14 @@ It 'records the kit version on the resource group, at the version the version hi
     $text | Should -Match ([regex]::Escape("`$script:KitVersion = 'v$top'"))
 }
 
+It 'asks no question about a cost report' {
+    $text = Get-Content -Raw $script:ScriptPath
+    $text | Should -Not -Match 'budgetCostReportEmailRecipients|BudgetEmailAddresses|Cost-Report'
+}
+
+It 'ships an example answer file that parses and names no cost report recipient' {
+    $json = Get-Content -Raw (Join-Path (Split-Path -Parent $PSScriptRoot) 'inputs-example.json') | ConvertFrom-Json
+    $json.PSObject.Properties.Name | Should -Not -Contain 'budgetCostReportEmailRecipients'
+}
+
 }
