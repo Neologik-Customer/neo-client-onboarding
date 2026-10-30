@@ -55,7 +55,7 @@ The table shows the version that each script reports.
 
 **Date**: 2026-10-30
 
-This version is on the line of Neologik Platform v5.1. This version changes the onboarding script, documents and the list of support accounts.
+This version is on the line of Neologik Platform v5.1. This version changes the onboarding script and documents.
 
 | Item | Change |
 |---|---|
@@ -73,7 +73,6 @@ This version is on the line of Neologik Platform v5.1. This version changes the 
 | `docs/ANALYTICS-REPORTING-GUIDE.md` | The guide lists the operator account of a configuration change and the outstanding tasks. The guide also lists the automatic updates and the names in a fault. The guide states what an agreed log query does. The guide states the retention period and what the masking of message patterns replaces |
 | `docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md`, `docs/AGENT-ACCOUNT-ACCESS-GUIDE.md`, `docs/NETWORK-GUIDE.md` | The documents state each fact at this version, with no comparison with an earlier version |
 | `README.md`, `docs/secure-overview.md`, `docs/QUICK-REFERENCE.md` | The documents for Approvers state that Neologik copies the TLS certificate into Neologik's central Key Vault |
-| `NeologikGuestUsers.txt` | One Neologik support account that no longer works for Neologik is removed from the list |
 | `Install-NeologikEnvironment.ps1` | Version v5.0.15. Comments and on-screen text state each fact at this version. The onboarding script no longer asks for cost report recipients, and the answer file no longer takes the key `budgetCostReportEmailRecipients`. The onboarding script ignores that key in an older answer file. Nothing in the platform read the addresses, and the deployment sends no cost report. The configuration file no longer holds the two fields for the recipients. The onboarding script records the version `v5.1.1` on the resource group |
 | `README.md`, `docs/PRE-ONBOARDING-INFO-GATHERING.md`, `docs/QUICK-REFERENCE.md`, `docs/TECHNICAL-REFERENCE.md`, `docs/secure-overview.md`, `inputs-example.json` | The documents no longer describe a cost report. The documents state what Cost Management Contributor does |
 | `Grant-NeologikAgentAccess.ps1` | Comments, help text and on-screen messages state each fact at this version. `Compare-Code.ps1` proves the code unchanged. The grants script reports the onboarding kit version v5.1.1 |
