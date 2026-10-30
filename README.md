@@ -102,7 +102,7 @@ This document is in the root of the onboarding kit. Every other document is in t
 | Stage | Who acts | What happens |
 |---|---|---|
 | 1. Onboarding | A Global Administrator who is also Owner of the subscription | The Global Administrator runs the onboarding script. The onboarding script creates the Azure resources, the security groups, the deployment identity, the Platform Sign-in application and the agent identity blueprint |
-| 2. Certificate | An administrator | The administrator imports the TLS certificate for the host name of the environment into the Key Vault |
+| 2. Certificate | An administrator | The administrator imports the TLS certificate for the host name of the environment into the Key Vault. Neologik then copies the certificate, private key included, into Neologik's central Key Vault. Each deployment of the ingress reads the certificate from Neologik's central Key Vault. |
 | 3. Deployment | Neologik | Neologik deploys each service of the Neologik Platform to your resource group |
 | 4. DNS | The person who manages your DNS | The person creates the DNS record for the host name of the environment |
 | 5. Consent | A Global Administrator | Neologik sends a consent link for each sign-in application. The Global Administrator opens each consent link and gives administrator consent |

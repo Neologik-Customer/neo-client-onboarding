@@ -27,7 +27,7 @@ The onboarding script grants access on the resource group. The onboarding script
 | Platform Sign-in application | `Neologik Platform Sign-in - <short name>` | Signs users in to the Neologik Context Engine and to Apps |
 | Agent identity blueprint | `Neologik Agent Blueprint - default - <short name>` | The parent of the agent identities and the agent user accounts that the Neologik Platform creates |
 | Key Vault | `kv<short name>`, or the name that you give | Holds the two client secrets |
-| Deployment storage account | `stneodeploy<org><env><region><index>`, cut to 24 characters | Holds the TLS certificate, the configuration file and the log. Three private containers: `certificate`, `json` and `logs` |
+| Deployment storage account | `stneodeploy<org><env><region><index>`, cut to 24 characters | Holds the configuration file and the log. The container `certificate` holds the TLS certificate files only when you upload them instead of importing a `.pfx` file. Three private containers: `certificate`, `json` and `logs` |
 | Managed identities | `neologik-script-runner-service-connection-<short name>` and `neologik-sql-managed-identity-<short name>` | The deployment uses the script runner managed identity. Azure SQL uses the SQL managed identity |
 | Resource provider registrations | The list in `resource-providers.txt` | The Azure services that the Neologik Platform uses |
 | Configuration file | `Neologik_<org><index>_Configuration_<timestamp>.json` | The name and the id of each object that the onboarding script created. The configuration file contains no secret |
@@ -78,3 +78,5 @@ The onboarding script creates two client secrets. Each client secret is valid fo
 | Client secret of the Platform Sign-in application | `sp-admin-<solution name>-auth-secret` |
 
 The onboarding script never prints a client secret. The onboarding script never writes a client secret to the log or to a file.
+
+The TLS certificate is separate from the client secrets. An administrator imports the certificate into your Key Vault. Neologik then copies the certificate, private key included, into Neologik's central Key Vault. Each deployment of the ingress reads the certificate from Neologik's central Key Vault.

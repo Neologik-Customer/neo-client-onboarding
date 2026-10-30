@@ -55,7 +55,7 @@ The table shows the version that each script reports.
 
 **Date**: 2026-10-30
 
-This version is on the line of Neologik Platform v5.1. This version changes documents only.
+This version is on the line of Neologik Platform v5.1. This version changes documents and the list of support accounts.
 
 | Item | Change |
 |---|---|
@@ -71,6 +71,8 @@ This version is on the line of Neologik Platform v5.1. This version changes docu
 | `README.md`, `docs/PFX-CERT-GUIDE.md`, `docs/TECHNICAL-REFERENCE.md` | The documents state that Neologik copies the TLS certificate, with the private key, into Neologik's central Key Vault. The documents say who builds and imports a certificate from uploaded files |
 | `docs/ANALYTICS-REPORTING-GUIDE.md` | The guide lists the operator account of a configuration change and the outstanding tasks. The guide also lists the automatic updates and the names in a fault. The guide describes the log query relay. The guide states the retention period and what the masking of message patterns replaces |
 | `docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md`, `docs/AGENT-ACCOUNT-ACCESS-GUIDE.md`, `docs/NETWORK-GUIDE.md` | The documents state each fact at this version, with no comparison with an earlier version |
+| `README.md`, `docs/secure-overview.md`, `docs/QUICK-REFERENCE.md` | The documents for Approvers state that Neologik copies the TLS certificate into Neologik's central Key Vault |
+| `NeologikGuestUsers.txt` | One Neologik support account that no longer works for Neologik is removed from the list |
 | `Install-NeologikEnvironment.ps1` | No change to the script. The onboarding script records the version `v5.1.1` on the resource group |
 | `Grant-NeologikAgentAccess.ps1` | No change to the script. The grants script reports the onboarding kit version v5.1.1 |
 
