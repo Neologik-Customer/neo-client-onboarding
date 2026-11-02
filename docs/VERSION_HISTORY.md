@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.1.2](#version-512)
 2. [Version 5.1.1](#version-511)
 2. [Version 5.1.0](#version-510)
 2. [Version 5.0.23](#version-5023)
@@ -46,10 +47,20 @@ The table shows the version that each script reports.
 | Script | Version of the script | Purpose |
 |---|---|---|
 | `Install-NeologikEnvironment.ps1` | v5.0.15 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.1 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.2 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.1.2
+
+**Date**: 2026-11-02
+
+This version is on the line of Neologik Platform v5.1. This version changes one document and the version number of the onboarding kit.
+
+| Item | Change |
+|---|---|
+| `docs/FINISHING-STEPS-GUIDE.md` | A new section gives the default update windows, and says that Neologik Support can change or disable a window |
 
 ## Version 5.1.1
 
