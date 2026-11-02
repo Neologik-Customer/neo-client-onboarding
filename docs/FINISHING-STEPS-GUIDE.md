@@ -236,7 +236,7 @@ The Neologik Platform takes updates inside weekly windows. The table shows the d
 
 During Azure Kubernetes Service maintenance, services restart one after another. Azure can apply an urgent security fix outside the window. A cluster that stops outside working hours starts for each window that is on, then stops afterwards.
 
-These are the default windows. Neologik Support can change a window or disable a window. Neologik does not recommend that you disable a window, because your environment then stops receiving security updates and fixes. Neologik Platform updates stay off until you ask Neologik Support to turn the updates on. To ask for a change, email support@neologik.ai.
+The times in the table are the default windows. Neologik Support can change a window or disable a window. Neologik does not recommend that you disable a window, because your environment then stops receiving security updates and fixes. Neologik Platform updates stay off until you ask Neologik Support to turn the updates on. To ask for a change, email support@neologik.ai.
 
 ## Troubleshooting
 
