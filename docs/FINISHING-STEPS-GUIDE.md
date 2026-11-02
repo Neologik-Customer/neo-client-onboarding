@@ -234,7 +234,7 @@ The Neologik Platform takes updates inside weekly windows. The table shows the d
 | Azure Kubernetes Service maintenance | The node image and the Kubernetes patch version of the cluster | Sunday, 02:00 to 06:00 UTC | On |
 | Neologik Platform updates | The newest release of each Neologik Platform component, on the version of your environment | Sunday, 06:00 to 10:00 UTC | Off |
 
-During Azure Kubernetes Service maintenance, services restart one after another. Azure can apply an urgent security fix outside the window. A cluster that stops outside working hours starts for each window that is on, then stops afterwards.
+The cluster continues to function through Azure Kubernetes Service maintenance, so the Neologik Platform continues to operate. Azure can apply an urgent security fix outside the window. A cluster that stops outside working hours starts for each window that is on, then stops afterwards.
 
 The times in the table are the default windows. Neologik Support can change a window or disable a window. Neologik does not recommend that you disable a window, because your environment then stops receiving security updates and fixes. Neologik Platform updates stay off until you ask Neologik Support to turn the updates on. To ask for a change, email support@neologik.ai.
 
