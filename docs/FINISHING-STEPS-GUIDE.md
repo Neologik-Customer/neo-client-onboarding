@@ -24,8 +24,9 @@ Complete the five steps in the order shown. Step 2 needs the DNS record from ste
 6. [Step 5: Give agent accounts access](#step-5-give-agent-accounts-access)
 7. [Checklist](#checklist)
 8. [Later changes](#later-changes)
-9. [Troubleshooting](#troubleshooting)
-10. [Help](#help)
+9. [Update windows](#update-windows)
+10. [Troubleshooting](#troubleshooting)
+11. [Help](#help)
 
 ## What you need
 
@@ -223,6 +224,19 @@ When an agent or an App is to work unattended in Microsoft 365, a Global Adminis
 - what you receive at the end of the run
 
 The home page of the Neologik Context Engine lists each outstanding deployment step under **Outstanding tasks**.
+
+## Update windows
+
+The Neologik Platform takes updates inside weekly windows. The table shows the default windows.
+
+| Update | What the update changes | Default window | Default state |
+|---|---|---|---|
+| Azure Kubernetes Service maintenance | The node image and the Kubernetes patch version of the cluster | Sunday, 02:00 to 06:00 UTC | On |
+| Neologik Platform updates | The newest release of each Neologik Platform component, on the version of your environment | Sunday, 06:00 to 10:00 UTC | Off |
+
+The cluster continues to function through Azure Kubernetes Service maintenance, so the Neologik Platform continues to operate. Azure can apply an urgent security fix outside the window. A cluster that stops outside working hours starts for each window that is on, then stops afterwards.
+
+The times in the table are the default windows. Neologik Support can change a window or disable a window. Neologik does not recommend that you disable a window, because your environment then stops receiving security updates and fixes. Neologik Platform updates stay off until you ask Neologik Support to turn the updates on. To ask for a change, email support@neologik.ai.
 
 ## Troubleshooting
 
