@@ -444,9 +444,14 @@ Neither file contains a secret. Both files contain sign-in names and email addre
 
 ## The TLS certificate
 
-Provide the TLS certificate for the host name of the environment by one of two methods. [PFX-CERT-GUIDE.md](PFX-CERT-GUIDE.md) explains how to prepare the PFX file.
+The environment's TLS certificate comes from one of two sources, chosen at onboarding.
 
-The TLS certificate must contain the server certificate, the intermediate certificates and the private key.
+| Source | What happens |
+|---|---|
+| A Neologik-managed certificate | Neologik obtains a certificate for the host name from the certificate authority ZeroSSL, proves control of the host name over HTTP at the path `/.well-known/acme-challenge/` of the environment, installs the certificate once the DNS record for the host name points at the environment, and renews the certificate every 60 days. Neologik's central Key Vault holds the certificate and the private key. Where your DNS zone publishes CAA records, a record that allows `sectigo.com` is needed; a zone without CAA records needs no change |
+| Your own certificate | You provide the certificate by one of the two methods below. [PFX-CERT-GUIDE.md](PFX-CERT-GUIDE.md) explains how to prepare the PFX file |
+
+Your own certificate must contain the server certificate, the intermediate certificates and the private key.
 
 ### Method 1: Import the PFX file into the Key Vault
 
