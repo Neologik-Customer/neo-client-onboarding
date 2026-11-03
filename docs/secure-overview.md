@@ -28,7 +28,7 @@ The onboarding script grants access on the resource group. The onboarding script
 | Agent identity blueprint | `Neologik Agent Blueprint - default - <short name>` | The parent of the agent identities and the agent user accounts that the Neologik Platform creates |
 | Key Vault | `kv<short name>`, or the name that you give | Holds the two client secrets |
 | Deployment storage account | `stneodeploy<org><env><region><index>`, cut to 24 characters | Holds the configuration file and the log. The container `certificate` holds the TLS certificate files only when you upload them instead of importing a `.pfx` file. Three private containers: `certificate`, `json` and `logs` |
-| Managed identities | `neologik-script-runner-service-connection-<short name>` and `neologik-sql-managed-identity-<short name>` | The deployment uses the script runner managed identity. Azure SQL uses the SQL managed identity |
+| Managed identities | `neologik-script-runner-service-connection-<short name>`, `neologik-sql-managed-identity-<short name>` and `neologik-directory-managed-identity-<short name>` | The deployment uses the script runner managed identity. Azure SQL uses the SQL managed identity. From version 5.2 of the Neologik Platform, the directory managed identity creates and changes the application registrations of Neologik agents |
 | Resource provider registrations | The list in `resource-providers.txt` | The Azure services that the Neologik Platform uses |
 | Configuration file | `Neologik_<org><index>_Configuration_<timestamp>.json` | The name and the id of each object that the onboarding script created. The configuration file contains no secret |
 
