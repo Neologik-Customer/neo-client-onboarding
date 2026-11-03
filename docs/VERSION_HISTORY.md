@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.1.3](#version-513)
 2. [Version 5.1.2](#version-512)
 2. [Version 5.1.1](#version-511)
 2. [Version 5.1.0](#version-510)
@@ -46,11 +47,25 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.0.15 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.2 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
+| `Install-NeologikEnvironment.ps1` | v5.1.3 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.3 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.1.3
+
+**Date**: 2026-11-02
+
+This version is on the line of Neologik Platform v5.1. This version prepares your environment for version 5.2 of the Neologik Platform, so the move to version 5.2 needs no further step from your administrator.
+
+| Item | Change |
+|---|---|
+| `Install-NeologikEnvironment.ps1` | Step 15 creates a third managed identity, the directory managed identity. The managed identity holds no Azure role and one Microsoft Graph application permission, `Application.ReadWrite.OwnedBy` |
+| `Install-NeologikEnvironment.ps1` | Step 12d adds one federated credential to the application registration of the deployment identity. The federated credential adds no permission |
+| `Install-NeologikEnvironment.ps1` | Step 15c records this version of the onboarding kit on the resource group. A resource group that an earlier version prepared keeps the earlier version until step 15c |
+| `inputs-example.json` | Two new answers: `directoryIdentityName` and `environmentName` |
+| `README.md`, `QUICK-REFERENCE.md`, `TECHNICAL-REFERENCE.md` and `secure-overview.md` | The documents describe the new items |
 
 ## Version 5.1.2
 
