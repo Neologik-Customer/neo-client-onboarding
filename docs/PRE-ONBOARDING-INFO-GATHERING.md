@@ -26,7 +26,8 @@ This document lists the values to collect and the decisions to make before you r
 | Item | Detail |
 |---|---|
 | Deployment type | Standard or Private Endpoint. A Standard environment has public endpoints, protected by Microsoft Entra ID authorisation. A Private Endpoint environment has private endpoints and a private network. The deployment by Neologik applies the network settings of the deployment type. [NETWORK-GUIDE.md](NETWORK-GUIDE.md) states the address ranges and the DNS names of each deployment type |
-| Host name | The fully qualified host name that your users enter to reach the environment, for example `neologik.contoso.com`. Confirm the host name with the person who manages your DNS. Your TLS certificate must be issued for the host name |
+| Host name | The fully qualified host name that your users enter to reach the environment, for example `neologik.contoso.com`. Confirm the host name with the person who manages your DNS. The TLS certificate is issued for the host name |
+| TLS certificate | Choose a Neologik-managed certificate, which Neologik obtains from the certificate authority ZeroSSL for the host name and renews every 60 days, or your own certificate, which an administrator imports into the Key Vault after the onboarding script runs. With a Neologik-managed certificate, a DNS zone that publishes CAA records needs a record that allows `sectigo.com` |
 | vCPU quota | The deployment needs enough vCPU quota in the subscription and the Azure region. The standard environment runs two-vCPU nodes in its system pool and four-vCPU nodes in its user pool, both in the Dsv7 family: with the standard pool maximums of 5 system nodes and 10 user nodes that is 50 vCPU of the family. When the Azure region or the quota does not allow Dsv7, Neologik chooses Dsv6, then Dasv7. Ask Neologik for the number for your environment |
 
 ### Check the vCPU quota

@@ -221,7 +221,7 @@ $WarningPreference = 'Continue'
 $script:Version = 'v5.0.15'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.1.4'
+$script:KitVersion = 'v5.1.5'
 
 # The third role of the deployment identity on the subscription: Role Based Access
 # Control Administrator, limited by a condition to three roles. The deployment runs the
@@ -4465,7 +4465,11 @@ function Export-ConfigurationData {
         }
         Write-Host "  2. Check that the Key Vault $($script:ConfigData['KeyVault'].Name) holds the client secret of the deployment identity"
         Write-Host "     Secret name: $($script:ConfigData['KeyVault'].SecretName)"
-        Write-Host "  3. Provide your TLS certificate by ONE of two methods."
+        Write-Host "  3. Provide your TLS certificate: a Neologik-managed certificate, or your own."
+        Write-Host "     Neologik-managed: tell Neologik. Neologik obtains a certificate for the host name"
+        Write-Host "       from the certificate authority ZeroSSL and renews it every 60 days. Nothing to import."
+        Write-Host "       When your DNS zone publishes CAA records, add one that allows sectigo.com."
+        Write-Host "     Your own certificate, by ONE of two methods:"
         Write-Host "     docs\PFX-CERT-GUIDE.md describes how to create the .pfx file."
         Write-Host "     Method 1: import the .pfx file into the Key Vault as a certificate."
         Write-Host "       In the Azure portal, portal.azure.com, open the Key Vault"

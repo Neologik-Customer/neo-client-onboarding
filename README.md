@@ -79,7 +79,7 @@ This document is in the root of the onboarding kit. Every other document is in t
 | [QUICK-REFERENCE.md](docs/QUICK-REFERENCE.md) | For Approvers. Each change that the onboarding script makes and each permission that the onboarding script grants |
 | [secure-overview.md](docs/secure-overview.md) | For Approvers. A summary on one page of the access that the onboarding script grants |
 | [CREATE-SP-GUIDE.md](docs/CREATE-SP-GUIDE.md) | How to create the deployment service principal yourself. The onboarding script otherwise creates the deployment service principal |
-| [PFX-CERT-GUIDE.md](docs/PFX-CERT-GUIDE.md) | How to prepare the TLS certificate |
+| [PFX-CERT-GUIDE.md](docs/PFX-CERT-GUIDE.md) | How to prepare your own TLS certificate, when you do not choose a Neologik-managed certificate |
 | [FINISHING-STEPS-GUIDE.md](docs/FINISHING-STEPS-GUIDE.md) | The steps that follow the deployment by Neologik |
 | [AGENT-ACCOUNT-ACCESS-GUIDE.md](docs/AGENT-ACCOUNT-ACCESS-GUIDE.md) | How to give an agent account access to a mailbox, a site or a team |
 | [GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md](docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md) | What the grants script, `Grant-NeologikAgentAccess.ps1`, applies |
@@ -103,7 +103,7 @@ This document is in the root of the onboarding kit. Every other document is in t
 | Stage | Who acts | What happens |
 |---|---|---|
 | 1. Onboarding | A Global Administrator who is also Owner of the subscription | The Global Administrator runs the onboarding script. The onboarding script creates the Azure resources, the security groups, the deployment identity, the Platform Sign-in application and the agent identity blueprint |
-| 2. Certificate | An administrator | The administrator imports the TLS certificate for the host name of the environment into the Key Vault. Neologik then copies the certificate, private key included, into Neologik's central Key Vault. Each deployment of the ingress reads the certificate from Neologik's central Key Vault. |
+| 2. Certificate | An administrator | The administrator chooses how the environment gets its TLS certificate. With a Neologik-managed certificate, Neologik obtains a certificate for the host name from the certificate authority ZeroSSL, installs the certificate once the DNS record points at the environment, and renews the certificate every 60 days; the administrator imports nothing. With your own certificate, the administrator imports the certificate into the Key Vault. Neologik then copies the certificate, private key included, into Neologik's central Key Vault. Each deployment of the ingress reads the certificate from Neologik's central Key Vault. |
 | 3. Deployment | Neologik | Neologik deploys each service of the Neologik Platform to your resource group |
 | 4. DNS | The person who manages your DNS | The person creates the DNS record for the host name of the environment |
 | 5. Consent | A Global Administrator | Neologik sends a consent link for each sign-in application. The Global Administrator opens each consent link and gives administrator consent |
@@ -252,7 +252,13 @@ The onboarding script reports each resource provider registration that is not ye
 .\Register-NeologikResourceProviders.ps1
 ```
 
-### 3. Import your TLS certificate
+### 3. Provide your TLS certificate
+
+The environment needs a TLS certificate for the host name. Choose one of two ways, and tell Neologik which one you chose.
+
+**A Neologik-managed certificate.** Neologik obtains a certificate for the host name from the certificate authority ZeroSSL, installs the certificate once the DNS record for the host name points at the environment, and renews the certificate every 60 days. You import nothing and renew nothing. One check applies: when your DNS zone publishes CAA records, which name the certificate authorities allowed to issue certificates for your domain, add a record that allows `sectigo.com`, the issuing authority behind ZeroSSL, for example `0 issue "sectigo.com"`. A zone without CAA records needs no change.
+
+**Your own certificate.** Import the certificate into the Key Vault of the environment:
 
 1. Prepare a `.pfx` file for the host name of the environment, as described in [PFX-CERT-GUIDE.md](docs/PFX-CERT-GUIDE.md).
 2. In the Azure portal, open the Key Vault that the completion summary names.

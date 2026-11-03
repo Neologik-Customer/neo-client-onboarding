@@ -258,7 +258,7 @@ After the deployment, the Neologik Platform grants the deployment identity one f
 | Client secret of a deployment service principal that you created | You | The same Key Vault secret | Never. The checkpoint does not hold the value |
 | Client secret of the Platform Sign-in application | The onboarding script. The client secret is valid for 365 days | The Key Vault secret `sp-admin-<solution name>-auth-secret` | Never |
 
-The TLS certificate is separate from these secrets. An administrator imports the certificate into your Key Vault. Neologik then copies the certificate, private key included, into Neologik's central Key Vault. Each deployment of the ingress reads the certificate from Neologik's central Key Vault.
+The TLS certificate is separate from these secrets. With a Neologik-managed certificate, Neologik obtains the certificate for the host name and renews the certificate; your Key Vault holds nothing for the certificate. With your own certificate, an administrator imports the certificate into your Key Vault. Neologik then copies the certificate, private key included, into Neologik's central Key Vault. Each deployment of the ingress reads the certificate from Neologik's central Key Vault.
 
 ### A client secret in the answer file
 
