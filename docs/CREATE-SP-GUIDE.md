@@ -13,6 +13,7 @@ This guide is for a customer who chooses to create the deployment service princi
 | What you create | The application registration, the service principal and a client secret |
 | Azure roles | The onboarding script assigns each Azure role that the deployment service principal needs. You assign no role |
 | Microsoft Graph | The onboarding script grants the two Microsoft Graph application permissions that the deployment service principal needs. You grant no permission |
+| Federated credential | The onboarding script adds one federated credential, `github-deployments-<environment name>`, to your application registration. The federated credential lets a Neologik deployment run that names this environment sign in with no stored secret, and adds no permission |
 
 [QUICK-REFERENCE.md](QUICK-REFERENCE.md#summary-of-permissions-by-scope) lists each role and each permission.
 
@@ -112,6 +113,7 @@ The onboarding script treats your deployment service principal exactly as a depl
 |---|---|
 | Azure role assignments | The onboarding script assigns Reader, Cost Management Contributor and the limited Role Based Access Control Administrator on the subscription. The onboarding script also assigns the roles on the resource group |
 | API permissions and administrator consent | The onboarding script grants the two Microsoft Graph application permissions: `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
+| Federated credential | The onboarding script adds the federated credential `github-deployments-<environment name>` to your application registration |
 | Group membership | The deployment service principal is a member of no group |
 
 When a role is already assigned, the onboarding script finds the role assignment and makes no change.
