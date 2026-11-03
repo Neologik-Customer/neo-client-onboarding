@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.1.4](#version-514)
 2. [Version 5.1.3](#version-513)
 2. [Version 5.1.2](#version-512)
 2. [Version 5.1.1](#version-511)
@@ -47,11 +48,23 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.1.3 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.3 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
+| `Install-NeologikEnvironment.ps1` | v5.1.4 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.4 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.1.4
+
+**Date**: 2026-11-03
+
+This version is on the line of Neologik Platform v5.1. This version changes three documents and the version number of the onboarding kit.
+
+| Item | Change |
+|---|---|
+| `README.md` | The section on the access of the deployment identity describes the federated credential that step 12d adds |
+| `secure-overview.md` | The overview lists the federated credential of the deployment identity, and states that the federated credential holds no secret |
+| `CREATE-SP-GUIDE.md` | The guide states that the onboarding script adds the federated credential to an application registration that you create |
 
 ## Version 5.1.3
 
