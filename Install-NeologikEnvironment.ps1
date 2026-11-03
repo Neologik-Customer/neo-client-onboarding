@@ -3994,7 +3994,7 @@ function New-NeologikManagedIdentities {
                 Name = $directoryIdentityName
                 DisplayName = "Neologik Directory Managed Identity$displaySuffix"
                 # From version 5.2 of the Neologik Platform, this managed identity creates and changes the application
-                # registrations of agents from inside the environment. The permission changes only the application
+                # registrations of Neologik agents from inside the environment. The permission changes only the application
                 # registrations that the managed identity owns. The managed identity holds no Azure role. Nothing can
                 # sign in as the managed identity until a deployment by Neologik adds the sign-in credential.
                 Roles = @()
