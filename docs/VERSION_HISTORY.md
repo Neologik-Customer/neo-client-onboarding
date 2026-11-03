@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.1.5](#version-515)
 2. [Version 5.1.4](#version-514)
 2. [Version 5.1.3](#version-513)
 2. [Version 5.1.2](#version-512)
@@ -48,11 +49,27 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.1.4 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.4 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
+| `Install-NeologikEnvironment.ps1` | v5.1.5 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.5 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.1.5
+
+**Date**: 2026-11-03
+
+This version is on the line of Neologik Platform v5.1. This version adds the choice of a Neologik-managed TLS certificate to the documents and to the next steps that the onboarding script prints. No step of the onboarding script changes.
+
+| Item | Change |
+|---|---|
+| `README.md` | Step 3 offers two ways to provide the TLS certificate: a Neologik-managed certificate, which Neologik obtains from the certificate authority ZeroSSL and renews every 60 days, or your own certificate, imported as before. The onboarding overview and the document list say the same |
+| `PFX-CERT-GUIDE.md` | The guide states that the guide applies to your own certificate only |
+| `TECHNICAL-REFERENCE.md` | The TLS certificate section describes both sources, the HTTP proof of the host name and the CAA record a Neologik-managed certificate needs where a zone publishes CAA records |
+| `PRE-ONBOARDING-INFO-GATHERING.md` | The information to gather includes the choice of certificate |
+| `QUICK-REFERENCE.md` | The note on secrets describes both sources |
+| `Install-NeologikEnvironment.ps1` | The next steps name the two ways to provide the TLS certificate. The version of the onboarding kit is v5.1.5 |
+| `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.5 |
 
 ## Version 5.1.4
 
