@@ -2,7 +2,7 @@
 
 ## Overview
 
-Your users reach the Neologik environment over HTTPS at the host name of the environment, for example `neologik.contoso.com`. The environment needs a TLS certificate for that host name.
+Your users reach the Neologik environment over HTTPS at the host name of the environment, for example `neologik.contoso.com`. The environment needs a TLS certificate for that host name. This guide applies when you provide your own certificate. When you choose a Neologik-managed certificate, Neologik obtains and renews the certificate, and nothing in this guide is needed; the README describes the choice.
 
 | Requirement | Detail |
 |---|---|
