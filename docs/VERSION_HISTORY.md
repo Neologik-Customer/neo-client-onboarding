@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.1.6](#version-516)
 2. [Version 5.1.5](#version-515)
 2. [Version 5.1.4](#version-514)
 2. [Version 5.1.3](#version-513)
@@ -49,11 +50,22 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.1.5 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.5 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
+| `Install-NeologikEnvironment.ps1` | v5.1.6 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.6 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.1.6
+
+**Date**: 2026-11-05
+
+This version is on the line of Neologik Platform v5.1. This version corrects one helper of the grants script and moves the version number. No step of the onboarding script changes.
+
+| Item | Change |
+|---|---|
+| `Grant-NeologikAgentAccess.ps1` | The helper that reads a property of a Microsoft Graph response also reads a Microsoft Graph PowerShell dictionary, such as the additional properties of a directory object. Before this version, such a read failed with the message "Cannot find an overload for Contains". The version of the onboarding kit is v5.1.6 |
+| `Install-NeologikEnvironment.ps1` | The version of the onboarding kit is v5.1.6 |
 
 ## Version 5.1.5
 

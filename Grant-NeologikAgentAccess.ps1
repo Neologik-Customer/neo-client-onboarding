@@ -284,7 +284,7 @@ $script:Summary = @()
 $script:State = @{}
 # The version of the onboarding kit that ships the script. The header, the log file
 # and the summary file name the version.
-$script:KitVersion = 'v5.1.5'
+$script:KitVersion = 'v5.1.6'
 # The log file of the run. The script writes every message to the log file from the
 # first line. The reason a run ended before its steps, for the summary file.
 $script:LogFile = $null
@@ -381,7 +381,10 @@ function Get-NeologikProperty {
     param($Object, [string]$Name, $Default = $null)
     if ($null -eq $Object) { return $Default }
     if ($Object -is [System.Collections.IDictionary]) {
-        if ($Object.Contains($Name)) { return $Object[$Name] }
+        # A generic dictionary, such as AdditionalProperties of a Microsoft Graph PowerShell
+        # object, implements IDictionary.Contains through the interface only. The cast binds
+        # that implementation for every dictionary type.
+        if (([System.Collections.IDictionary]$Object).Contains($Name)) { return $Object[$Name] }
         return $Default
     }
     $property = $Object.PSObject.Properties[$Name]
@@ -394,7 +397,7 @@ function Test-NeologikProperty {
     # value. Get-NeologikProperty cannot tell an empty array from an absent property.
     param($Object, [string]$Name)
     if ($null -eq $Object) { return $false }
-    if ($Object -is [System.Collections.IDictionary]) { return [bool]$Object.Contains($Name) }
+    if ($Object -is [System.Collections.IDictionary]) { return [bool](([System.Collections.IDictionary]$Object).Contains($Name)) }
     return ($null -ne $Object.PSObject.Properties[$Name])
 }
 
