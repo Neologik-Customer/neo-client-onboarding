@@ -503,6 +503,15 @@ BeforeEach {
 }
 
 Context 'Helpers' {
+    It 'reads a Microsoft Graph PowerShell dictionary, such as AdditionalProperties (project#3847)' {
+        $extra = [System.Collections.Generic.Dictionary[string, object]]::new()
+        $extra['@odata.type'] = '#microsoft.graph.directoryRole'
+        Get-NeologikProperty $extra '@odata.type' | Should -Be '#microsoft.graph.directoryRole'
+        Get-NeologikProperty $extra 'missing' 'dflt' | Should -Be 'dflt'
+        Test-NeologikProperty $extra '@odata.type' | Should -BeTrue
+        Test-NeologikProperty $extra 'missing' | Should -BeFalse
+    }
+
     It 'normalises scope sets (order, duplicates, whitespace)' {
         Get-NeologikScopeSet '  Mail.Read   User.Read Mail.Read ' | Should -Be 'Mail.Read User.Read'
         Get-NeologikScopeSet 'User.Read Mail.Read' | Should -Be (Get-NeologikScopeSet 'Mail.Read User.Read')
