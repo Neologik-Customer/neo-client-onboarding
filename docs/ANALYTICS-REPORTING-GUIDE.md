@@ -93,7 +93,7 @@ When your agreement ends, or when you withdraw from reporting, Neologik erases e
 
 ## Withdrawing from reporting or narrowing it
 
-You may withdraw from reporting at any time. Ask Neologik at support@neologik.ai. Neologik then removes the component from your environment, and nothing remains that reports.
+You may withdraw from reporting at any time. Ask Neologik at support@neologik.ai. Neologik then removes the component from your environment, and the component reports nothing further. While Neologik operates your environment, Neologik's central tooling continues the reads listed under [Information read from Azure outside your environment](#information-read-from-azure-outside-your-environment). Neologik keeps the figures from those later reads for the retention period in your agreement.
 
 You may instead ask Neologik to narrow reporting. Examples:
 
