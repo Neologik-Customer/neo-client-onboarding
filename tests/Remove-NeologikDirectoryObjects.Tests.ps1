@@ -1,0 +1,185 @@
+#Requires -Version 7.4
+#Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
+<#
+    Tests of Remove-NeologikDirectoryObjects.ps1.
+
+    Every external call is replaced: Microsoft Graph, module installation and the
+    console. An in-memory directory answers the script's searches and records every
+    deletion, so a run can be asserted to delete exactly the objects of one
+    environment, in the right order, and nothing without the confirmation.
+
+    Run: pwsh -NoProfile -Command "Invoke-Pester -Path tests -CI"
+#>
+
+Describe 'Remove-NeologikDirectoryObjects.ps1' {
+
+AfterAll {
+    Remove-Variable -Name RemovalTest -Scope Global -ErrorAction SilentlyContinue
+}
+
+BeforeAll {
+    # The script under test has its own script scope, so the stand-ins keep their state in one global table.
+    $global:RemovalTest = @{}
+    $script:ScriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'Remove-NeologikDirectoryObjects.ps1'
+
+    function Connect-MgGraph {
+        [CmdletBinding()]
+        param($TenantId, $Scopes, $ContextScope, [switch]$NoWelcome, [switch]$UseDeviceCode)
+        if ($global:RemovalTest.BrowserFails -and -not $UseDeviceCode) { throw 'InteractiveBrowserCredential authentication failed: A window handle must be configured.' }
+        $global:RemovalTest.ConnectScopes = $Scopes
+        $global:RemovalTest.ConnectTenant = $TenantId
+        $global:RemovalTest.UsedDeviceCode = [bool]$UseDeviceCode
+    }
+    function Install-Module { [CmdletBinding()] param($Name, $Scope, [switch]$Force) }
+    function Get-MgContext { [CmdletBinding()] param() [pscustomobject]@{ TenantId = 'tenant-1'; Account = 'admin@contoso.com' } }
+    function Read-Host { param($Prompt) $global:RemovalTest.Prompted = $true; $global:RemovalTest.Answer }
+    function Invoke-MgGraphRequest {
+        [CmdletBinding()]
+        param($Method, $Uri, $Headers)
+        if ($Method -eq 'GET') {
+            if ($Uri -match '/v1\.0/(users|servicePrincipals|applications|groups)\?') {
+                $kind = $Matches[1]
+                if ($global:RemovalTest.SecondPage -and $kind -eq 'groups' -and $Uri -notmatch 'skiptoken') {
+                    return @{ value = @(); '@odata.nextLink' = "https://graph.microsoft.com/v1.0/groups?skiptoken=2" }
+                }
+                return @{ value = @($global:RemovalTest.Directory[$kind]) }
+            }
+            if ($Uri -match 'skiptoken') { return @{ value = @($global:RemovalTest.Directory['groups']) } }
+            throw "Unexpected read: $Uri"
+        }
+        $global:RemovalTest.Deleted.Add($Uri)
+        if ($global:RemovalTest.DeleteError -and $Uri -match $global:RemovalTest.DeleteErrorFor) { throw $global:RemovalTest.DeleteError }
+    }
+    function New-TestObject { param($Id, $Name, $Type) $o = @{ id = $Id; displayName = $Name }; if ($Type) { $o['@odata.type'] = "#microsoft.graph.$Type" }; $o }
+}
+
+BeforeEach {
+    Mock Get-Module { @{ Name = 'Microsoft.Graph.Authentication' } }
+    Mock Install-Module { }
+    Mock Import-Module { }
+    $global:RemovalTest.Deleted = [System.Collections.Generic.List[string]]::new()
+    $global:RemovalTest.Answer = 'DELETE'
+    $global:RemovalTest.Prompted = $false
+    $global:RemovalTest.SecondPage = $false
+    $global:RemovalTest.BrowserFails = $false
+    $global:RemovalTest.UsedDeviceCode = $false
+    $global:RemovalTest.DeleteError = $null
+    $global:RemovalTest.DeleteErrorFor = $null
+    $global:RemovalTest.Directory = @{
+        users             = @(
+            New-TestObject 'u1' 'Neologik Agent (one) - abcprd01' 'agentUser'
+            New-TestObject 'u2' 'Jane Person - abcprd01' 'user'
+            New-TestObject 'u3' 'Neologik Agent (two) - abcdev01' 'agentUser'
+        )
+        servicePrincipals = @(
+            New-TestObject 's1' 'Neologik Agent Identity - agent-one - abcprd01' 'agentIdentity'
+            New-TestObject 's2' 'Neologik Platform Sign-in - abcprd01'
+            New-TestObject 's3' 'ais-neo-abcprd-uks-01-proj-AgentIdentity' 'agentIdentity'
+            New-TestObject 's4' 'ais-neo-abcprd-uks-01-proj-AgentIdentityBlueprint' 'agentIdentityBlueprintPrincipal'
+        )
+        applications      = @(
+            New-TestObject 'b1' 'Neologik Agent Blueprint - default - abcprd01' 'agentIdentityBlueprint'
+            New-TestObject 'a1' 'Neologik Platform Sign-in - abcprd01'
+            New-TestObject 'a2' 'Contoso Payroll'
+            New-TestObject 'a3' 'Contoso - abcprd011'
+        )
+        groups            = @(
+            New-TestObject 'g1' 'Neologik User Group - abcprd01'
+            New-TestObject 'g2' 'ais-AgentIdentity readers'
+        )
+    }
+}
+
+It 'parses without errors and holds only standard ASCII' {
+    $tokens = $null; $errors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$tokens, [ref]$errors)
+    @($errors).Count | Should -Be 0
+    $bytes = [System.IO.File]::ReadAllBytes($script:ScriptPath)
+    @($bytes | Where-Object { $_ -gt 127 }).Count | Should -Be 0
+}
+
+It 'requests only the five delegated permissions that the deletions need' {
+    & $script:ScriptPath -ShortName abcprd01 | Out-Null
+    $global:RemovalTest.ConnectScopes | Should -HaveCount 5
+    $global:RemovalTest.ConnectScopes | Should -Contain 'AgentIdentityBlueprint.DeleteRestore.All'
+    $global:RemovalTest.ConnectScopes | Should -Contain 'AgentIdentity.DeleteRestore.All'
+    $global:RemovalTest.ConnectScopes | Should -Contain 'AgentIdUser.ReadWrite.All'
+}
+
+It 'passes the tenant to the sign-in when an administrator names the tenant' {
+    & $script:ScriptPath -ShortName abcprd01 -TenantId 'tenant-9' | Out-Null
+    $global:RemovalTest.ConnectTenant | Should -Be 'tenant-9'
+}
+
+It 'signs in with a device code when the sign-in window cannot open' {
+    $global:RemovalTest.BrowserFails = $true
+    & $script:ScriptPath -ShortName abcprd01 | Out-Null
+    $global:RemovalTest.UsedDeviceCode | Should -BeTrue
+    $LASTEXITCODE | Should -Be 0
+}
+
+It 'deletes agent accounts, then agent identities, then applications with the blueprint last, then groups' {
+    & $script:ScriptPath -ShortName abcprd01 | Out-Null
+    $LASTEXITCODE | Should -Be 0
+    $global:RemovalTest.Deleted | Should -Be @(
+        'https://graph.microsoft.com/beta/users/u1'
+        'https://graph.microsoft.com/beta/servicePrincipals/s1/microsoft.graph.agentIdentity'
+        'https://graph.microsoft.com/beta/servicePrincipals/s3/microsoft.graph.agentIdentity'
+        'https://graph.microsoft.com/v1.0/applications/a1'
+        'https://graph.microsoft.com/v1.0/applications/b1'
+        'https://graph.microsoft.com/v1.0/groups/g1'
+    )
+}
+
+It 'leaves a person, another environment and an object whose name only resembles the short name' {
+    & $script:ScriptPath -ShortName abcprd01 | Out-Null
+    ($global:RemovalTest.Deleted -join ' ') | Should -Not -Match '/users/u2|/users/u3|/applications/a2|/applications/a3|/groups/g2|/s2|/s4'
+}
+
+It 'deletes nothing when the administrator types <Answer>' -ForEach @(
+    @{ Answer = 'delete' }, @{ Answer = 'yes' }, @{ Answer = '' }, @{ Answer = ' DELETE' }
+) {
+    $global:RemovalTest.Answer = $Answer
+    & $script:ScriptPath -ShortName abcprd01 | Out-Null
+    $global:RemovalTest.Prompted | Should -BeTrue
+    $global:RemovalTest.Deleted | Should -HaveCount 0
+    $LASTEXITCODE | Should -Be 0
+}
+
+It 'asks nothing and deletes nothing when nothing is left' {
+    $global:RemovalTest.Directory = @{ users = @(); servicePrincipals = @(); applications = @(); groups = @() }
+    & $script:ScriptPath -ShortName abcprd01 | Out-Null
+    $global:RemovalTest.Prompted | Should -BeFalse
+    $global:RemovalTest.Deleted | Should -HaveCount 0
+    $LASTEXITCODE | Should -Be 0
+}
+
+It 'reads every page of a search' {
+    $global:RemovalTest.SecondPage = $true
+    & $script:ScriptPath -ShortName abcprd01 | Out-Null
+    $global:RemovalTest.Deleted | Should -Contain 'https://graph.microsoft.com/v1.0/groups/g1'
+}
+
+It 'refuses a short name that holds a wildcard or a quotation mark' -ForEach @(
+    @{ Name = '*' }, @{ Name = 'abc*' }, @{ Name = 'abc"prd' }, @{ Name = 'ab' }
+) {
+    { & $script:ScriptPath -ShortName $Name } | Should -Throw
+    $global:RemovalTest.Deleted | Should -HaveCount 0
+}
+
+It 'continues after one failure and ends with exit code 1' {
+    $global:RemovalTest.DeleteError = 'Response status code does not indicate success: Forbidden (Forbidden).'
+    $global:RemovalTest.DeleteErrorFor = '/applications/a1'
+    & $script:ScriptPath -ShortName abcprd01 3>$null | Out-Null
+    $LASTEXITCODE | Should -Be 1
+    $global:RemovalTest.Deleted | Should -Contain 'https://graph.microsoft.com/v1.0/groups/g1'
+}
+
+It 'counts an object that has already gone as removed' {
+    $global:RemovalTest.DeleteError = 'Response status code does not indicate success: NotFound (Not Found).'
+    $global:RemovalTest.DeleteErrorFor = '/users/u1'
+    & $script:ScriptPath -ShortName abcprd01 | Out-Null
+    $LASTEXITCODE | Should -Be 0
+}
+
+}
