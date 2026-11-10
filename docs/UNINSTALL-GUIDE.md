@@ -6,8 +6,8 @@ This guide removes one Neologik Platform environment completely from your Azure 
 
 The work runs in four stages:
 
-1. In the Neologik Context Engine, you remove every agent and App. The platform removes what it created for each one.
-2. In Microsoft 365, you delete the Teams apps and the mailbox grants.
+1. In the Neologik Admin Tool, you remove every agent and App. The platform removes what it created for each one.
+2. In Microsoft 365, if your agents and apps used Teams and/or mailboxes, you delete the Teams apps and the mailbox grants.
 3. In Azure, you delete the resource group of the environment and the role assignments on your subscription.
 4. In Microsoft Entra, you delete the remaining Neologik objects.
 
@@ -50,7 +50,7 @@ Your own data stays where it is. The Neologik Platform reads your SharePoint sit
 
 | Requirement | Used in |
 |---|---|
-| Membership of the group `Neologik NCE Admins - <short name>` | Steps 2 and 3. Only an administrator of the Neologik Context Engine sees the buttons that remove an agent or an App |
+| Membership of the group `Neologik NCE Admins - <short name>` | Steps 2 and 3. Only an administrator of the Neologik Admin Tool sees the buttons that remove an agent or an App |
 | Teams Administrator | Step 4 |
 | Exchange Administrator or Global Administrator | Step 4, when an agent had an email channel |
 | Owner of the subscription | Steps 5 and 6. Purging a deleted AI account needs a role on the subscription, so a role on the resource group alone is not enough |
@@ -58,7 +58,7 @@ Your own data stays where it is. The Neologik Platform reads your SharePoint sit
 | PowerShell 7.4 or later, on a workstation with a browser | Steps 4 and 7 |
 | Azure Cloud Shell, at https://shell.azure.com, in PowerShell mode | Step 5 |
 
-The order of the steps matters. The Neologik Context Engine needs the Azure resources and our deployment identity to remove each agent and App, so steps 2 and 3 come before steps 5, 6 and 7.
+The order of the steps matters. The Neologik Admin Tool needs the Azure resources and our deployment identity to remove each agent and App, so steps 2 and 3 come before steps 5, 6 and 7.
 
 ## Step 1: Tell us and save what you need
 
@@ -66,18 +66,18 @@ Email support@neologik.ai with the name of your organisation, the host name of t
 
 We need to hear from you first for two reasons:
 
-- The Neologik Context Engine uses our deployment service to remove each agent and App, so that service must stay connected to your environment until step 3 is complete.
+- The Neologik Admin Tool uses our deployment service to remove each agent and App, so that service must stay connected to your environment until step 3 is complete.
 - A deployment that runs while you delete resources can fail part-way, or create resources again.
 
 Then copy anything you need from the databases, storage accounts and logs of the environment. Tell us if you would like help with the export.
 
-The Neologik Context Engine is available only while the cluster of the environment is running. When your cluster stops outside working hours, plan steps 2 and 3 for working hours.
+The Neologik Admin Tool is available only while the cluster of the environment is running. When your cluster stops outside working hours, plan steps 2 and 3 for working hours.
 
 ## Step 2: Remove the agents
 
 For each agent, the platform removes the workload, the managed identity, the role assignments, the database access, the agent identity and the agent account. When the agent account goes, its access to mailboxes, sites and teams ends, and any Microsoft 365 licence that it held returns to your pool.
 
-1. Open `https://<your host name>/nce` and sign in. The page shows the name **Neologik Admin Tool**.
+1. Open the Neologik Admin Tool at `https://<your host name>/nce` and sign in.
 2. Select **Agents** and open an agent. An agent that has subagents cannot be removed until its subagents have gone, so start with the subagents.
 3. Open the **Channels** tab. For each channel, select **Detach**, then **Detach channel**. Wait until the channel has left the tab.
 4. Select **Delete agent** at the top of the page, then **Delete agent** in the confirmation.
@@ -294,7 +294,7 @@ Work through each row that applies to your environment.
 | DNS | Delete the DNS record for the host name of the environment, so that the name no longer points at an address that Azure may give to someone else |
 | CAA record | Delete the record that allows `sectigo.com` when you added the record only for a Neologik-managed certificate |
 | Peered networks | Delete the peering on your side of any network you peered with the environment, and the DNS forwarding of the private DNS zones |
-| Credentials | Revoke each database login, API key and other credential that you issued for a connection in the Neologik Context Engine |
+| Credentials | Revoke each database login, API key and other credential that you issued for a connection in the Neologik Admin Tool |
 | Confluence | A Confluence administrator deletes the webhooks `Neologik Upsert Webhook - <space>` and `Neologik Delete Webhook - <space>` |
 | TLS certificate | Revoke your own certificate when nothing else uses it |
 | Azure reservations and savings plans | Any that you bought for the environment continue until the end of their term. Manage them under **Reservations** or **Savings plans** in the Azure portal |
@@ -344,7 +344,7 @@ Azure and Microsoft Entra keep some deleted items for a fixed period, which is a
 | The buttons **Delete agent** and **Uninstall app** do not appear | Your account is not a member of `Neologik NCE Admins - <short name>` | Add your account to the group, sign out and sign in again |
 | **Delete agent** shows a note about attached channels | The agent still has a channel | Detach each channel on the **Channels** tab |
 | The removal of an agent is refused and the message names subagents or a reply reviewer | A subagent remains, or an email channel names the agent as its reviewer | Remove the subagent first, or detach the email channel first |
-| The Neologik Context Engine does not open | The cluster is stopped, or your Neologik service has ended | Email us and we will help. When your Neologik service has ended, continue from step 4. Steps 5 and 7 remove what the Neologik Context Engine would have removed |
+| The Neologik Admin Tool does not open | The cluster is stopped, or your Neologik service has ended | Email us and we will help. When your Neologik service has ended, continue from step 4. Steps 5 and 7 remove what the Neologik Admin Tool would have removed |
 | The deletion of the resource group stops with `LockedSPLResourceFound` | A shared private link remains on the search service | Delete the links as step 5 describes, then delete the resource group again |
 | The deletion of the resource group is refused because of a lock | Your organisation has placed a resource lock on the resource group or on a resource | Remove the lock, then delete the resource group again |
 | Azure refuses to purge the Key Vault | The Key Vault has purge protection | No action. Azure removes the vault after 90 days |
