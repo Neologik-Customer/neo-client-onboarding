@@ -124,8 +124,8 @@ Context 'Set-AppRegistrationRoles' {
             (New-Assignment -Role 'Role Based Access Control Administrator' -Scope $script:SubScope -Condition $script:LimitedSubRoleCondition)
         )
         Set-AppRegistrationRoles -ServicePrincipalId $script:Sp -SubscriptionId '810ff294-0000-4000-8000-000000000002' -ResourceGroupName 'rg-neo-abcprd-uks-01' -SecurityGroups $script:Groups | Should -BeTrue
-        $script:Writes | Should -Contain "NEW Role Based Access Control Administrator $($script:RgScope)"
-        foreach ($role in $script:RgRoles) { $script:Writes | Should -Contain "NEW $role $($script:RgScope)" }
+        $script:Writes | Should -Contain "NEW Role Based Access Control Administrator $($script:RgScope) limited"
+        foreach ($role in ($script:RgRoles | Where-Object { $_ -ne 'Role Based Access Control Administrator' })) { $script:Writes | Should -Contain "NEW $role $($script:RgScope)" }
         @($script:Writes).Count | Should -Be $script:RgRoles.Count -Because 'the subscription roles were already held, so only the resource group roles are written'
     }
 
@@ -142,7 +142,7 @@ Context 'Set-AppRegistrationRoles' {
             (New-Assignment -Role 'Reader' -Scope $script:SubScope),
             (New-Assignment -Role 'Cost Management Contributor' -Scope $script:SubScope),
             (New-Assignment -Role 'Role Based Access Control Administrator' -Scope $script:SubScope -Condition $script:LimitedSubRoleCondition)
-        ) + @($script:RgRoles | ForEach-Object { New-Assignment -Role $_ -Scope $script:RgScope })
+        ) + @($script:RgRoles | ForEach-Object { if ($_ -eq 'Role Based Access Control Administrator') { New-Assignment -Role $_ -Scope $script:RgScope -Condition $script:ResourceGroupRoleCondition } else { New-Assignment -Role $_ -Scope $script:RgScope } })
         Set-AppRegistrationRoles -ServicePrincipalId $script:Sp -SubscriptionId '810ff294-0000-4000-8000-000000000002' -ResourceGroupName 'rg-neo-abcprd-uks-01' -SecurityGroups $script:Groups | Should -BeTrue
         $script:Writes | Should -BeNullOrEmpty
     }

@@ -22,6 +22,7 @@
   "scriptRunnerIdentityName": "",
   "sqlIdentityName": "",
   "directoryIdentityName": "",
+  "systemTaskIdentityName": "",
   "environmentName": "",
 
   "skipGuestInvitation": false,

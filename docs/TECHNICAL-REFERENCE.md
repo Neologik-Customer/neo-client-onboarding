@@ -116,7 +116,7 @@ When the answer file holds the organisation code, the organisation name and the 
 | `applyResourceTags` | `true` or `false` |
 | `resourceTagsCustom` | Further tags, written as an object or as a string of `key=value` pairs |
 | `solutionName`, `solutionShortName` | The solution name and the short name. See [Naming](#naming) |
-| `resourceGroupName`<br>`keyVaultName`<br>`storageAccountName`<br>`scriptRunnerIdentityName`<br>`sqlIdentityName`<br>`directoryIdentityName` | Names of your choice for the six resources |
+| `resourceGroupName`<br>`keyVaultName`<br>`storageAccountName`<br>`scriptRunnerIdentityName`<br>`sqlIdentityName`<br>`directoryIdentityName`<br>`systemTaskIdentityName` | Names of your choice for the seven resources |
 | `skipGuestInvitation` | `true` to invite no guest |
 | `addExistingAccountsToGroups` | `true` to add existing accounts to the security groups. The onboarding script reads this key only when `skipGuestInvitation` is `true` |
 | `existingAccountEmails` | The email addresses of the existing accounts. Without this key, the onboarding script uses the addresses in `NeologikGuestUsers.txt` |
@@ -199,6 +199,7 @@ The onboarding script builds every standard name from two values: the solution n
 | Script runner managed identity | `neologik-script-runner-service-connection-<short name>` | `neologik-script-runner-service-connection-abcprd01` |
 | SQL managed identity | `neologik-sql-managed-identity-<short name>` | `neologik-sql-managed-identity-abcprd01` |
 | Directory managed identity | `neologik-directory-managed-identity-<short name>` | `neologik-directory-managed-identity-abcprd01` |
+| System task managed identity | `neologik-system-task-managed-identity-<short name>` | `neologik-system-task-managed-identity-abcprd01` |
 | Federated credential of the deployment identity | `github-deployments-<environment name>` | `github-deployments-abcprd` |
 | Security groups | `Neologik User Group - <short name>`<br>`Neologik NCE Contributors - <short name>`<br>`Neologik NCE Admins - <short name>`<br>`Neologik Admin User Group - <short name>` | `Neologik User Group - abcprd01` |
 | Deployment identity | `Neologik GitHub Service Connection - <short name>` | `Neologik GitHub Service Connection - abcprd01` |
@@ -295,8 +296,8 @@ The onboarding script stores the client secret in the Key Vault, as the secret `
 
 | Scope | What the deployment identity holds |
 |---|---|
-| Subscription | Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning three roles: Reader, AppGw for Containers Configuration Manager and Cost Management Reader |
-| Resource group | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator |
+| Subscription | Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning two roles, Reader and Cost Management Reader, to service principals only |
+| Resource group | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator, which cannot assign Owner, User Access Administrator or Role Based Access Control Administrator, and assigns every other role to service principals only |
 | Microsoft Graph application permissions | `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Security groups | No membership |
 
