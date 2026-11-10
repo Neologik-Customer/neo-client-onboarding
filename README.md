@@ -66,6 +66,7 @@ The onboarding kit includes each script in full. Approvers can read each script 
 | `Export-NeologikCertificate.ps1` | When you prepare your TLS certificate | Builds a PFX file on the workstation. Contacts no service | [PFX-CERT-GUIDE.md](docs/PFX-CERT-GUIDE.md) |
 | `Register-NeologikResourceProviders.ps1` | When the onboarding script reports that an Azure resource provider is still registering | Confirms the Azure resource provider registrations on the subscription | [TECHNICAL-REFERENCE.md](docs/TECHNICAL-REFERENCE.md#resource-provider-registration) |
 | `Upgrade-TeamsAppInstallations.ps1` | After Neologik sends you a new version of the Teams app package | Upgrades the Neologik Teams app that each user has installed, to the latest version in your Teams app catalogue | [TEAMS-APP-UPGRADE-GUIDE.md](docs/TEAMS-APP-UPGRADE-GUIDE.md) |
+| `Remove-NeologikDirectoryObjects.ps1` | Only when you remove the Neologik Platform, at step 7 of the uninstall guide | Deletes the directory objects of one environment from your Microsoft Entra tenant, after you confirm the list | [UNINSTALL-GUIDE.md](docs/UNINSTALL-GUIDE.md) |
 
 ### Documents
 
@@ -84,6 +85,7 @@ This document is in the root of the onboarding kit. Every other document is in t
 | [AGENT-ACCOUNT-ACCESS-GUIDE.md](docs/AGENT-ACCOUNT-ACCESS-GUIDE.md) | How to give an agent account access to a mailbox, a site or a team |
 | [GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md](docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md) | What the grants script, `Grant-NeologikAgentAccess.ps1`, applies |
 | [TEAMS-APP-UPGRADE-GUIDE.md](docs/TEAMS-APP-UPGRADE-GUIDE.md) | How to upgrade the Teams app for your users |
+| [UNINSTALL-GUIDE.md](docs/UNINSTALL-GUIDE.md) | How to remove the Neologik Platform completely from your Azure subscription and your Microsoft Entra tenant |
 | [TECHNICAL-REFERENCE.md](docs/TECHNICAL-REFERENCE.md) | The onboarding script in detail: parameters, names, steps and output files |
 | [ANALYTICS-REPORTING-GUIDE.md](docs/ANALYTICS-REPORTING-GUIDE.md) | For Approvers. What the environment reports to Neologik, what the environment never reports, how long Neologik keeps the statistics and how to withdraw |
 
