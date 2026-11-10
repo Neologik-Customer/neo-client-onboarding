@@ -131,9 +131,9 @@ Azure otherwise keeps the workspace and its logs for 14 days, and a workspace in
 2. Select **Delete**.
 3. Select **Delete the workspace permanently**, enter the name of the workspace and confirm.
 
-### Release any telephone number
+### If using a voice channel
 
-When an agent used a voice channel, open the Communication Services resource in the resource group, select **Phone numbers** and release the number. Detaching the channel leaves the number in place.
+Open the Communication Services resource in the resource group, select **Phone numbers** and release the number. Detaching the channel leaves the number in place.
 
 ### Delete the resource group
 
