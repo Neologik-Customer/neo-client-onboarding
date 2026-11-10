@@ -76,8 +76,6 @@ For each agent, the platform removes the workload, the managed identity, the rol
 
 Repeat these steps until the list of agents is empty.
 
-When a removal fails, the page reads "The uninstall failed" and the button reads **Retry delete**. Select the button to run the removal again. A repeat run is safe.
-
 ## Step 3: Uninstall the Apps
 
 For each App, the platform removes the workloads, the managed identities, the role assignments, the database access, the agent identity and the agent account.
@@ -87,8 +85,6 @@ For each App, the platform removes the workloads, the managed identities, the ro
 3. The page reads "Uninstall is in progress" and returns to the list when the removal is complete.
 
 Repeat these steps for every App and every deployed MCP server on the page. An external MCP server is a record of an address only, and step 5 removes the record.
-
-When a removal fails, the page reads "The last uninstall run failed" and the button reads **Retry uninstall**. Select the button to run the removal again. A repeat run is safe.
 
 The uninstall deliberately leaves the database tables and storage containers of the App in place. Step 5 deletes them.
 
