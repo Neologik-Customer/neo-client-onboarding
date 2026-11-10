@@ -17,7 +17,7 @@ Your own data stays where it is. The Neologik Platform reads your SharePoint sit
 
 | Step | Who acts | What the step achieves |
 |---|---|---|
-| [1. Tell us and save what you need](#step-1-tell-us-and-save-what-you-need) | An Administrator | We hold back deployments while you work, and you keep the data you need |
+| [1. Back up your data](#step-1-back-up-your-data) | An Administrator | Keeps the data that you need |
 | [2. Remove the agents](#step-2-remove-the-agents) | A member of `Neologik NCE Admins - <short name>` | Removes each agent, its channels and its access |
 | [3. Uninstall the Apps](#step-3-uninstall-the-apps) | A member of `Neologik NCE Admins - <short name>` | Removes each App and its access |
 | [4. Clear Microsoft 365](#step-4-clear-microsoft-365) | A Teams Administrator, and an Exchange Administrator when an agent had an email channel | Removes the Teams apps and the mailbox grants |
@@ -32,7 +32,7 @@ Your own data stays where it is. The Neologik Platform reads your SharePoint sit
 ## Contents
 
 1. [What you need](#what-you-need)
-2. [Step 1: Tell us and save what you need](#step-1-tell-us-and-save-what-you-need)
+2. [Step 1: Back up your data](#step-1-back-up-your-data)
 3. [Step 2: Remove the agents](#step-2-remove-the-agents)
 4. [Step 3: Uninstall the Apps](#step-3-uninstall-the-apps)
 5. [Step 4: Clear Microsoft 365](#step-4-clear-microsoft-365)
@@ -60,18 +60,9 @@ Your own data stays where it is. The Neologik Platform reads your SharePoint sit
 
 The order of the steps matters. The Neologik Admin Tool needs the Azure resources and our deployment identity to remove each agent and App, so steps 2 and 3 come before steps 5, 6 and 7.
 
-## Step 1: Tell us and save what you need
+## Step 1: Back up your data
 
-Email support@neologik.ai with the name of your organisation, the host name of the environment and the date you plan to start. We confirm the date and hold back deployments to your environment from then on.
-
-We need to hear from you first for two reasons:
-
-- The Neologik Admin Tool uses our deployment service to remove each agent and App, so that service must stay connected to your environment until step 3 is complete.
-- A deployment that runs while you delete resources can fail part-way, or create resources again.
-
-Then copy anything you need from the databases, storage accounts and logs of the environment. Tell us if you would like help with the export.
-
-The Neologik Admin Tool is available only while the cluster of the environment is running. When your cluster stops outside working hours, plan steps 2 and 3 for working hours.
+Back up any data from custom storage accounts and custom databases in the resource group of the environment.
 
 ## Step 2: Remove the agents
 
@@ -324,7 +315,7 @@ Azure and Microsoft Entra keep some deleted items for a fixed period, which is a
 
 | Check | Done |
 |---|---|
-| We have confirmed your date | |
+| Your data is backed up | |
 | The list of agents is empty | |
 | Every App and deployed MCP server is uninstalled | |
 | The Teams apps are deleted | |
