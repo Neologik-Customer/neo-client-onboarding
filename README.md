@@ -84,6 +84,7 @@ This document is in the root of the onboarding kit. Every other document is in t
 | [AGENT-ACCOUNT-ACCESS-GUIDE.md](docs/AGENT-ACCOUNT-ACCESS-GUIDE.md) | How to give an agent account access to a mailbox, a site or a team |
 | [GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md](docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md) | What the grants script, `Grant-NeologikAgentAccess.ps1`, applies |
 | [TEAMS-APP-UPGRADE-GUIDE.md](docs/TEAMS-APP-UPGRADE-GUIDE.md) | How to upgrade the Teams app for your users |
+| [UNINSTALL-GUIDE.md](docs/UNINSTALL-GUIDE.md) | How to remove the Neologik Platform completely from your Azure subscription and your Microsoft Entra tenant |
 | [TECHNICAL-REFERENCE.md](docs/TECHNICAL-REFERENCE.md) | The onboarding script in detail: parameters, names, steps and output files |
 | [ANALYTICS-REPORTING-GUIDE.md](docs/ANALYTICS-REPORTING-GUIDE.md) | For Approvers. What the environment reports to Neologik, what the environment never reports, how long Neologik keeps the statistics and how to withdraw |
 
