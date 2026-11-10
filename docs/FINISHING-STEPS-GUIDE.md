@@ -81,7 +81,7 @@ Neologik sends you the target of the DNS record. The type of the DNS record depe
 
    The answer shows the target that you entered. A new DNS record usually resolves within minutes. Some resolvers take up to 48 hours.
 
-5. Open `https://<your host name>/nce` in a browser. The Neologik Context Engine opens and asks you to sign in. The Neologik Context Engine shows the name **Neologik Admin Tool** on screen. The sign-in page confirms that the host name and the TLS certificate work.
+5. Open `https://<your host name>/nce` in a browser. The Neologik Admin Tool opens and asks you to sign in. The sign-in page confirms that the host name and the TLS certificate work.
 
 ## Step 2: Give administrator consent
 
@@ -176,8 +176,8 @@ The onboarding script created three further security groups. Add a person to one
 
 | Group | Role of a member |
 |---|---|
-| `Neologik NCE Contributors - <short name>` | Configures agents and Apps in the Neologik Context Engine |
-| `Neologik NCE Admins - <short name>` | Administers the Neologik Context Engine |
+| `Neologik NCE Contributors - <short name>` | Configures agents and Apps in the Neologik Admin Tool |
+| `Neologik NCE Admins - <short name>` | Administers the Neologik Admin Tool |
 | `Neologik Admin User Group - <short name>` | Administers the Azure resources in the resource group |
 
 You manage the members of all four security groups.
@@ -215,7 +215,7 @@ When the checklist is complete, follow these steps.
 
 ## Later changes
 
-When an agent or an App is to work unattended in Microsoft 365, a Global Administrator runs the grants script, `Grant-NeologikAgentAccess.ps1`, with the agent grants file and the mailbox grants file. The agent grants file lists the grants to agent users. A platform operator downloads the agent grants file from the **Admin** page of the Neologik Context Engine. The mailbox grants file lists the mailbox grants of the email channels. Neologik sends the mailbox grants file. The Global Administrator runs the grants script again whenever either file changes.
+When an agent or an App is to work unattended in Microsoft 365, a Global Administrator runs the grants script, `Grant-NeologikAgentAccess.ps1`, with the agent grants file and the mailbox grants file. The agent grants file lists the grants to agent users. A platform operator downloads the agent grants file from the **Admin** page of the Neologik Admin Tool. The mailbox grants file lists the mailbox grants of the email channels. Neologik sends the mailbox grants file. The Global Administrator runs the grants script again whenever either file changes.
 
 [GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md](GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md) explains three subjects:
 
@@ -223,7 +223,7 @@ When an agent or an App is to work unattended in Microsoft 365, a Global Adminis
 - what the sign-in asks you to approve
 - what you receive at the end of the run
 
-The home page of the Neologik Context Engine lists each outstanding deployment step under **Outstanding tasks**.
+The home page of the Neologik Admin Tool lists each outstanding deployment step under **Outstanding tasks**.
 
 ## Update windows
 

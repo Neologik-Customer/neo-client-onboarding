@@ -301,7 +301,7 @@ BeforeAll {
 
     # ----- fixtures ---------------------------------------------------------------------
     function New-GrantsFile {
-        # The agent grants file as the Neologik Context Engine exports it: the tenant and
+        # The agent grants file as the Neologik Admin Tool exports it: the tenant and
         # the environment are in the file, so a command needs no other value.
         param([string]$Path = (Join-Path $TestDrive 'grants.json'), [object[]]$Grants = @(), [object[]]$ComponentRoles = @(),
             [bool]$SharePoint = $false, [string]$TenantId = $script:Ids.Tenant, [string]$Environment = $script:ShortName,
@@ -330,7 +330,7 @@ BeforeAll {
 
     function New-MailboxFile {
         # The object shape with 'tenantId', 'grants' and 'adoptedIdentityAppIds' by
-        # default, as the Neologik Context Engine exports it; -AsArray writes the bare
+        # default, as the Neologik Admin Tool exports it; -AsArray writes the bare
         # list of entries, which names no tenant.
         param([string]$Path = (Join-Path $TestDrive 'mailboxes.json'), [object[]]$Entries, [string[]]$AdoptedIdentityAppIds = @(),
             [switch]$AsArray, [string]$TenantId = $script:Ids.Tenant, [switch]$Raw, [string]$RawContent)
@@ -599,7 +599,7 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
         $grants = New-GrantsFile -Raw -RawContent '[{"IdentityAppId": "x"}]'
         $code = Invoke-Run @{ AgentGrantsFile = $grants }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'not the file that the Neologik Context Engine exports'
+        ($script:Console -join "`n") | Should -Match 'not the file that the Neologik Admin Tool exports'
     }
 
     It 'refuses an agent grants file exported from another tenant than -TenantId names' {

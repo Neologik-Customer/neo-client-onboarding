@@ -277,13 +277,13 @@ Each account that you invite or add joins all four security groups. One of the f
 | Group | Purpose |
 |---|---|
 | `Neologik User Group - <short name>` | The standard security group for access to agents. A member can use each agent that uses this security group |
-| `Neologik NCE Contributors - <short name>` | A member configures agents and Apps in the Neologik Context Engine |
-| `Neologik NCE Admins - <short name>` | A member administers the Neologik Context Engine and installs use cases |
+| `Neologik NCE Contributors - <short name>` | A member configures agents and Apps in the Neologik Admin Tool |
+| `Neologik NCE Admins - <short name>` | A member administers the Neologik Admin Tool and installs use cases |
 | `Neologik Admin User Group - <short name>` | A member administers the Azure resources in the resource group |
 
 The onboarding script makes the signed-in user a member of each security group. The onboarding script also makes each invited account and each added account a member of each security group.
 
-The onboarding script assigns two security groups to the Platform Sign-in application. The two security groups are `Neologik NCE Contributors - <short name>` and `Neologik NCE Admins - <short name>`. The sign-in token of a member then names the security groups of the member. The Neologik Context Engine reads the security groups from the sign-in token to decide what the member can do.
+The onboarding script assigns two security groups to the Platform Sign-in application. The two security groups are `Neologik NCE Contributors - <short name>` and `Neologik NCE Admins - <short name>`. The sign-in token of a member then names the security groups of the member. The Neologik Admin Tool reads the security groups from the sign-in token to decide what the member can do.
 
 The Neologik Platform creates no security group.
 
@@ -313,7 +313,7 @@ The onboarding script creates the Key Vault with Azure role-based access control
 
 ### Platform Sign-in application
 
-The onboarding script creates the application `Neologik Platform Sign-in - <short name>`. The Platform Sign-in application signs users in to the Neologik Context Engine and to Apps.
+The onboarding script creates the application `Neologik Platform Sign-in - <short name>`. The Platform Sign-in application signs users in to the Neologik Admin Tool and to Apps.
 
 | Subject | Detail |
 |---|---|
