@@ -66,6 +66,7 @@ The onboarding kit includes each script in full. Approvers can read each script 
 | `Export-NeologikCertificate.ps1` | When you prepare your TLS certificate | Builds a PFX file on the workstation. Contacts no service | [PFX-CERT-GUIDE.md](docs/PFX-CERT-GUIDE.md) |
 | `Register-NeologikResourceProviders.ps1` | When the onboarding script reports that an Azure resource provider is still registering | Confirms the Azure resource provider registrations on the subscription | [TECHNICAL-REFERENCE.md](docs/TECHNICAL-REFERENCE.md#resource-provider-registration) |
 | `Upgrade-TeamsAppInstallations.ps1` | After Neologik sends you a new version of the Teams app package | Upgrades the Neologik Teams app that each user has installed, to the latest version in your Teams app catalogue | [TEAMS-APP-UPGRADE-GUIDE.md](docs/TEAMS-APP-UPGRADE-GUIDE.md) |
+| `Remove-NeologikDirectoryObjects.ps1` | Only when you remove the Neologik Platform, at step 7 of the uninstall guide | Deletes the directory objects of one environment from your Microsoft Entra tenant, after you confirm the list | [UNINSTALL-GUIDE.md](docs/UNINSTALL-GUIDE.md) |
 
 ### Documents
 

@@ -7,7 +7,7 @@ This guide removes one Neologik Platform environment completely from your Azure 
 The work runs in four stages:
 
 1. In the Neologik Admin Tool, you remove every agent and App. The platform removes what it created for each one.
-2. In Microsoft 365, if your agents and apps used Teams and/or mailboxes, you delete the Teams apps and the mailbox grants.
+2. In Microsoft 365, if your agents and apps used Teams and/or mailboxes, you delete the Teams apps and any Send As permission.
 3. In Azure, you delete the resource group of the environment and the role assignments on your subscription.
 4. In Microsoft Entra, you delete the remaining Neologik objects.
 
@@ -20,14 +20,14 @@ Your own data stays where it is. The Neologik Platform reads your SharePoint sit
 | [1. Back up your data](#step-1-back-up-your-data) | An Administrator | Keeps the data that you need |
 | [2. Remove the agents](#step-2-remove-the-agents) | A member of `Neologik NCE Admins - <short name>` | Removes each agent, its channels and its access |
 | [3. Uninstall the Apps](#step-3-uninstall-the-apps) | A member of `Neologik NCE Admins - <short name>` | Removes each App and its access |
-| [4. Clear Microsoft 365](#step-4-clear-microsoft-365) | A Teams Administrator, and an Exchange Administrator when an agent had an email channel | Removes the Teams apps and the mailbox grants |
+| [4. Clear Microsoft 365](#step-4-clear-microsoft-365) | A Teams Administrator, and an Exchange Administrator when an email channel replied as another address | Removes the Teams apps and any Send As permission |
 | [5. Delete the Azure resources](#step-5-delete-the-azure-resources) | An Owner of the subscription | Deletes the environment and its data |
 | [6. Remove the roles on your subscription](#step-6-remove-the-roles-on-your-subscription) | An Owner of the subscription | Ends the access of our deployment identity |
 | [7. Delete the directory objects](#step-7-delete-the-directory-objects) | A Global Administrator | Deletes the applications, agent accounts, security groups and guest accounts |
 | [8. Disconnect your own systems](#step-8-disconnect-your-own-systems) | The person who manages your DNS, and the owner of each connected system | Removes the DNS record and the access you gave the platform |
 | [9. Tell us you have finished](#step-9-tell-us-you-have-finished) | An Administrator | We remove our records of the environment and confirm in writing |
 
-`<short name>` stands for the short name of the environment, for example `abcprd01`. The short name is the last part of the name of each Neologik security group, such as `Neologik User Group - abcprd01`. When your tenant holds more than one Neologik environment, work through this guide once for each environment. Every command in this guide acts only on the short name that you give it.
+`<short name>` stands for the short name of the environment, for example `abcprd01`. The short name is the last part of the name of each Neologik security group, such as `Neologik User Group - abcprd01`. When your tenant holds more than one Neologik environment, work through this guide once for each environment. The script in step 7 acts only on the short name that you give it.
 
 ## Contents
 
@@ -52,11 +52,10 @@ Your own data stays where it is. The Neologik Platform reads your SharePoint sit
 |---|---|
 | Membership of the group `Neologik NCE Admins - <short name>` | Steps 2 and 3. Only an administrator of the Neologik Admin Tool sees the buttons that remove an agent or an App |
 | Teams Administrator | Step 4 |
-| Exchange Administrator or Global Administrator | Step 4, when an agent had an email channel |
+| Exchange Administrator or Global Administrator | Step 4, when an email channel replied as another address |
 | Owner of the subscription | Steps 5 and 6. Purging a deleted AI account needs a role on the subscription, so a role on the resource group alone is not enough |
 | Global Administrator | Step 7 |
-| PowerShell 7.4 or later, on a workstation with a browser | Steps 4 and 7 |
-| Azure Cloud Shell, at https://shell.azure.com, in PowerShell mode | Step 5 |
+| PowerShell 7.4 or later, on a workstation with a browser | Step 7 |
 
 The order of the steps matters. The Neologik Admin Tool needs the Azure resources and our deployment identity to remove each agent and App, so steps 2 and 3 come before steps 5, 6 and 7.
 
@@ -98,32 +97,15 @@ The uninstall deliberately leaves the database tables and storage containers of 
 
 Repeat for each Neologik Teams app. Once you delete a Teams app, nobody in your organisation can use the Teams app. When you created a permission policy or a setup policy only for Neologik, delete that policy too.
 
-### Remove the mailbox grants
+### Remove any Send As permission
 
-Complete this part when an agent had an email channel. Detaching an email channel stops the mail notifications and leaves the Exchange Online permissions in place. These commands remove them.
+Exchange Online removes the mailbox grants of each email channel by itself when step 5 deletes the identity of the channel, so the mailbox grants need nothing from you.
 
-```powershell
-# Once for each workstation.
-Install-Module ExchangeOnlineManagement -Scope CurrentUser
+When an email channel replied as another address, the shared mailbox holds the Send As permission on that address. Remove the permission:
 
-Connect-ExchangeOnline -ShowBanner:$false
-$shortName = '<short name>'
-
-Get-ManagementRoleAssignment | Where-Object { $_.Name -like "Assignment-*$shortName-Mail*" } |
-    ForEach-Object { Remove-ManagementRoleAssignment -Identity $_.Name -Confirm:$false; "Removed $($_.Name)" }
-
-Get-ServicePrincipal | Where-Object { $_.DisplayName -like "*$shortName" } |
-    ForEach-Object { Remove-ServicePrincipal -Identity $_.Identity -Confirm:$false; "Removed $($_.DisplayName)" }
-
-Get-ManagementScope | Where-Object { $_.Name -like "Scope-*$shortName" } |
-    ForEach-Object { Remove-ManagementScope -Identity $_.Name -Confirm:$false; "Removed $($_.Name)" }
-```
-
-When an email channel replied as another address, remove the Send As permission too:
-
-```powershell
-Remove-RecipientPermission -Identity <reply-as address> -Trustee <shared mailbox> -AccessRights SendAs -Confirm:$false
-```
+1. Sign in to the Exchange admin centre, https://admin.exchange.microsoft.com, as an Exchange Administrator.
+2. Select **Recipients**, then **Mailboxes**, and open the mailbox of the reply-as address.
+3. Under **Delegation**, open **Send as** and remove the shared mailbox.
 
 The shared mailboxes are yours and stay in place.
 
@@ -163,22 +145,9 @@ When an agent used a voice channel, open the Communication Services resource in 
 
 Azure keeps a deleted AI account for 48 hours, and any provisioned model deployment on the account continues to cost money until the purge. A purge deletes the account, its data and its keys for good.
 
-Open Azure Cloud Shell, https://shell.azure.com, in PowerShell mode. This command lists the deleted AI accounts of the resource group:
-
-```powershell
-$subscription  = '<subscription id>'
-$resourceGroup = '<resource group name>'
-az cognitiveservices account list-deleted --subscription $subscription --query "[].[name, location, id]" -o tsv |
-    Select-String -SimpleMatch "/resourceGroups/$resourceGroup/"
-```
-
-Run this command once for each account in the list, with the name and the location that the list shows:
-
-```powershell
-az cognitiveservices account purge --subscription $subscription --resource-group $resourceGroup --name <account name> --location <location>
-```
-
-Run the first command again. It prints nothing when every AI account is purged.
+1. In the search bar of the Azure portal, search for `Foundry` and select the service.
+2. Select **Manage deleted resources** and choose your subscription.
+3. Select each account that came from the resource group of the environment, then select **Purge**.
 
 ## Step 6: Remove the roles on your subscription
 
@@ -196,7 +165,7 @@ The registrations of the Azure resource providers stay on the subscription. They
 
 ## Step 7: Delete the directory objects
 
-The Microsoft Entra admin centre cannot delete agent identities or agent identity blueprints, so this step uses a command. The command finds each object of the environment by name, shows you the list, and deletes only after you confirm.
+The script `Remove-NeologikDirectoryObjects.ps1` in the onboarding kit deletes every remaining directory object of the environment. The step uses a script because Microsoft offers no screen that can delete an agent identity or an agent identity blueprint. The script finds each object by name, shows you the list, and deletes only after you confirm.
 
 | Objects | Example |
 |---|---|
@@ -207,61 +176,16 @@ The Microsoft Entra admin centre cannot delete agent identities or agent identit
 
 The managed identities of the environment went with the resource group in step 5, and so did the Directory Readers role of the SQL managed identity.
 
-1. Open PowerShell 7 and, once for each workstation, run:
+1. Open PowerShell 7 and go to the folder of the onboarding kit. Allow the scripts to run, as [step 4 of the README](../README.md#4-allow-the-scripts-to-run-in-this-session) describes.
+2. Run this command with the short name of the environment:
 
    ```powershell
-   Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
+   .\Remove-NeologikDirectoryObjects.ps1 -ShortName <short name>
    ```
 
-2. Copy the block below, replace `<short name>` in the first line, and paste the block into PowerShell.
-3. Sign in as a Global Administrator. At the first use, Microsoft lists the permissions that the commands request. Each is a delegated permission, which works only as the signed-in administrator.
-4. Read the list that the commands print. Type `DELETE` to go ahead.
-5. Run the block again. When it prints `Nothing is left to remove`, the step is complete. Microsoft Entra can take a few minutes to catch up, so a second run soon after the first may list an object that has already gone.
-
-```powershell
-$shortName = '<short name>'
-
-Connect-MgGraph -NoWelcome -Scopes 'Application.ReadWrite.All', 'Group.ReadWrite.All',
-    'AgentIdentity.DeleteRestore.All', 'AgentIdentityBlueprint.DeleteRestore.All', 'AgentIdUser.ReadWrite.All'
-
-function Find-NeologikObject([string]$Kind) {
-    $uri = "https://graph.microsoft.com/v1.0/$Kind`?`$search=%22displayName:$shortName%22&`$select=id,displayName&`$top=200"
-    while ($uri) {
-        $page = Invoke-MgGraphRequest -Method GET -Uri $uri -Headers @{ ConsistencyLevel = 'eventual' }
-        $page.value | Where-Object { $_.displayName -like "* - $shortName" -or $_.displayName -like 'ais-*AgentIdentity*' }
-        $uri = $page['@odata.nextLink']
-    }
-}
-
-$agentAccounts   = @(Find-NeologikObject users | Where-Object { $_['@odata.type'] -eq '#microsoft.graph.agentUser' })
-$agentIdentities = @(Find-NeologikObject servicePrincipals | Where-Object { $_['@odata.type'] -eq '#microsoft.graph.agentIdentity' })
-$applications    = @(Find-NeologikObject applications | Sort-Object { $_['@odata.type'] -eq '#microsoft.graph.agentIdentityBlueprint' })
-$groups          = @(Find-NeologikObject groups | Where-Object { $_.displayName -like "* - $shortName" })
-
-$removals = @(
-    $agentAccounts   | ForEach-Object { [pscustomobject]@{ Kind = '1 Agent account';  Name = $_.displayName; Uri = "https://graph.microsoft.com/beta/users/$($_.id)" } }
-    $agentIdentities | ForEach-Object { [pscustomobject]@{ Kind = '2 Agent identity'; Name = $_.displayName; Uri = "https://graph.microsoft.com/beta/servicePrincipals/$($_.id)/microsoft.graph.agentIdentity" } }
-    $applications    | ForEach-Object { [pscustomobject]@{ Kind = '3 Application';    Name = $_.displayName; Uri = "https://graph.microsoft.com/v1.0/applications/$($_.id)" } }
-    $groups          | ForEach-Object { [pscustomobject]@{ Kind = '4 Security group'; Name = $_.displayName; Uri = "https://graph.microsoft.com/v1.0/groups/$($_.id)" } }
-)
-
-$removals | Format-Table Kind, Name -AutoSize
-
-if ($removals.Count -eq 0) {
-    Write-Host 'Nothing is left to remove.'
-}
-elseif ((Read-Host "Type DELETE to remove these $($removals.Count) objects") -ceq 'DELETE') {
-    foreach ($item in $removals) {
-        try {
-            Invoke-MgGraphRequest -Method DELETE -Uri $item.Uri -ErrorAction Stop | Out-Null
-            Write-Host "Removed: $($item.Name)"
-        }
-        catch {
-            Write-Warning "Not removed: $($item.Name). $($_.Exception.Message)"
-        }
-    }
-}
-```
+3. Sign in as a Global Administrator. At the first use, Microsoft lists the permissions that the script requests. Each is a delegated permission, which works only as the signed-in administrator.
+4. Read the list that the script prints. Type `DELETE` to go ahead.
+5. Run the command again. When the script prints `Nothing is left to remove`, the step is complete. Microsoft Entra can take a few minutes to catch up, so a second run soon after the first may list an object that has already gone.
 
 ### Delete the guest accounts
 
@@ -315,11 +239,11 @@ Azure and Microsoft Entra keep some deleted items for a fixed period, which is a
 | The list of agents is empty | |
 | Every App and deployed MCP server is uninstalled | |
 | The Teams apps are deleted | |
-| The mailbox grants are removed, when an agent had an email channel | |
+| Any Send As permission is removed | |
 | The resource group has gone, with the resource groups that start with `MC_` and `MA_` | |
 | The AI accounts are purged | |
 | The roles of the deployment identity on the subscription are removed | |
-| The directory commands print `Nothing is left to remove` | |
+| The script prints `Nothing is left to remove` | |
 | The guest accounts are deleted | |
 | The DNS record is deleted, and your own systems are disconnected | |
 | You have told us that you have finished | |
@@ -335,8 +259,7 @@ Azure and Microsoft Entra keep some deleted items for a fixed period, which is a
 | The deletion of the resource group stops with `LockedSPLResourceFound` | A shared private link remains on the search service | Delete the links as step 5 describes, then delete the resource group again |
 | The deletion of the resource group is refused because of a lock | Your organisation has placed a resource lock on the resource group or on a resource | Remove the lock, then delete the resource group again |
 | Azure refuses to purge the Key Vault | The Key Vault has purge protection | No action. Azure removes the vault after 90 days |
-| The mailbox commands print nothing, and an agent had an email channel | The identity of the channel has a name that differs from the standard name | Run `Get-ManagementRoleAssignment \| Where-Object Name -like 'Assignment-*-Mail*'`, and remove the entries of this environment by name |
-| The directory commands report `Authorization_RequestDenied` | The account is not a Global Administrator, or the consent was declined | Sign in as a Global Administrator and accept the permissions |
+| The script reports `Authorization_RequestDenied` | The account is not a Global Administrator, or the consent was declined | Sign in as a Global Administrator and accept the permissions |
 
 ## Help
 

@@ -56,17 +56,19 @@ The table shows the version that each script reports.
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+| `Remove-NeologikDirectoryObjects.ps1` | 1.0 | Deletes the directory objects of one environment, after the administrator confirms the list |
 
 ## Version 5.1.7
 
 **Date**: 2026-11-10
 
-This version is on the line of Neologik Platform v5.1. This version adds a guide to uninstalling the Neologik Platform and moves the version number. No step of the onboarding script changes.
+This version is on the line of Neologik Platform v5.1. This version adds a guide to uninstalling the Neologik Platform, adds the script that the guide uses, and moves the version number. No step of the onboarding script changes.
 
 | Item | Change |
 |---|---|
 | `docs/UNINSTALL-GUIDE.md` | New guide. An administrator removes the Neologik Platform completely from the Azure subscription and the Microsoft Entra tenant |
-| `README.md` | Lists the new guide |
+| `README.md` | Lists the new guide and the new script |
+| `Remove-NeologikDirectoryObjects.ps1` | New script, version 1.0. Deletes the directory objects of one environment, after the administrator confirms the list |
 | `Install-NeologikEnvironment.ps1` and `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.7 |
 
 ## Version 5.1.6
