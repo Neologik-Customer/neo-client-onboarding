@@ -1694,18 +1694,18 @@ function New-NeologikSecurityGroups {
                      else { "neo$($OrganizationCode.ToLower())$EnvironmentIndex" }
         $groupSuffix = if ([string]::IsNullOrWhiteSpace($shortName)) { "" } else { " - $shortName" }
 
-        # The standard security group for users. A channel of an agent in the Neologik Context Engine uses
+        # The standard security group for users. A channel of an agent in the Neologik Admin Tool uses
         # this security group, or an existing security group that an administrator names. The Neologik Platform creates no security group.
         $groups = @()
         $groups += @{
             Name = "Neologik User Group$groupSuffix"
             Description = 'Default Neologik users group - assign to agent channels created in the NCE'
         }
-        # The two security groups for roles in the Neologik Context Engine: contributors and administrators.
+        # The two security groups for roles in the Neologik Admin Tool: contributors and administrators.
         # When the contributors group exists under another recognised name, the script renames the group. The group keeps the id.
         $groups += @{
             Name = "Neologik NCE Contributors$groupSuffix"
-            Description = 'NCE contributor role - create and change platform configuration in the Neologik Context Engine'
+            Description = 'NCE contributor role - create and change platform configuration in the Neologik Admin Tool'
             PreviousNames = @("Neologik NCE User Group$groupSuffix", "Neologik Harness User Group$groupSuffix")
         }
         $groups += @{
@@ -2828,7 +2828,7 @@ function New-NeologikNceAuthApp {
         security groups to the application.
 
     .DESCRIPTION
-        The Neologik Context Engine reads the security groups of a user from the
+        The Neologik Admin Tool reads the security groups of a user from the
         groups claim of the sign-in token. Microsoft Entra ID issues the groups claim
         only for security groups that are assigned to the enterprise application.
 
@@ -2839,7 +2839,7 @@ function New-NeologikNceAuthApp {
 
         The script assigns two security groups: the NCE Contributors group and the
         NCE Admins group. The Admin User Group holds Azure roles only and gives no
-        access to the Neologik Context Engine.
+        access to the Neologik Admin Tool.
     #>
     [CmdletBinding()]
     param(
@@ -2853,7 +2853,7 @@ function New-NeologikNceAuthApp {
         [string]$KeyVaultName
     )
 
-    Write-Log "Creating the Platform Sign-in application, for the sign-in to the Neologik Context Engine and to Apps..." -Level Info
+    Write-Log "Creating the Platform Sign-in application, for the sign-in to the Neologik Admin Tool and to Apps..." -Level Info
 
     try {
         Import-Module Microsoft.Graph.Applications -ErrorAction Stop
@@ -2949,7 +2949,7 @@ function New-NeologikNceAuthApp {
         }
 
         # Assign the two security groups for roles. The sign-in token of a member then names the
-        # security groups in the groups claim. The Neologik Context Engine reads the groups claim. The script
+        # security groups in the groups claim. The Neologik Admin Tool reads the groups claim. The script
         # uses the default access role. Only a direct member counts. A group inside a group does not appear in the groups claim.
         $defaultAppRole = '00000000-0000-0000-0000-000000000000'
         $assignedGroups = @()
@@ -4934,7 +4934,7 @@ function Set-ConfigFromAnswerFile {
     $script:ConfigData['EnvironmentName'] = if (-not [string]::IsNullOrWhiteSpace($environmentNameAns)) { $environmentNameAns.Trim().ToLower() } else { "$($script:OrganizationCode)$($script:EnvironmentType)".ToLower() }
     if ($script:ConfigData['EnvironmentName'] -notmatch '^[a-z0-9]{2,32}$') { throw "environmentName '$($script:ConfigData['EnvironmentName'])': the name must be 2 to 32 lower-case letters and digits" }
 
-    # A platform operator creates agents and channels in the Neologik Context Engine after the deployment.
+    # A platform operator creates agents and channels in the Neologik Admin Tool after the deployment.
 
     # Tags. The answer file can hold a boolean, whose default value is to apply the tags. The answer file
     # can also hold custom tags, as an object or as a string of key=value pairs separated by commas. The
@@ -5758,7 +5758,7 @@ function Start-NeologikOnboarding {
         $script:ConfigData['EnvironmentName'] = if (-not [string]::IsNullOrWhiteSpace($environmentNameAns)) { $environmentNameAns.Trim().ToLower() } else { "$($script:OrganizationCode)$($script:EnvironmentType)".ToLower() }
         if ($script:ConfigData['EnvironmentName'] -notmatch '^[a-z0-9]{2,32}$') { throw "environmentName '$($script:ConfigData['EnvironmentName'])': the name must be 2 to 32 lower-case letters and digits" }
 
-        # A platform operator creates agents and channels in the Neologik Context Engine after the
+        # A platform operator creates agents and channels in the Neologik Admin Tool after the
         # deployment. A channel uses the standard security group for users that this script creates, or an existing
         # security group that an administrator names. The Neologik Platform creates no security group.
 

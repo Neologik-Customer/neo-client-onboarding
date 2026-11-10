@@ -21,7 +21,7 @@ The name of an agent account has one of two forms.
 
 The agent account has no password. The agent account cannot sign in. The agent uses the agent account only through the permissions that a Global Administrator granted.
 
-A Global Administrator grants the permissions with the grants script, `Grant-NeologikAgentAccess.ps1`, and the agent grants file that the Neologik Context Engine exports. [GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md](GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md) describes the grants script.
+A Global Administrator grants the permissions with the grants script, `Grant-NeologikAgentAccess.ps1`, and the agent grants file that the Neologik Admin Tool exports. [GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md](GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md) describes the grants script.
 
 An administrator completes up to five tasks in your tenant.
 
@@ -33,7 +33,7 @@ An administrator completes up to five tasks in your tenant.
 | [4. Add the agent account to a Teams team](#task-4-add-the-agent-account-to-a-teams-team) | A Teams Administrator | The agent reads a channel of the team |
 | [5. Give the SharePoint application access to a SharePoint site](#task-5-give-the-sharepoint-application-access-to-a-sharepoint-site) | A Global Administrator | The Neologik Platform reads files from the site through a SharePoint connection |
 
-The Neologik Context Engine shows the exact name of the agent account of each agent. The Neologik Context Engine also shows when each task is complete.
+The Neologik Admin Tool shows the exact name of the agent account of each agent. The Neologik Admin Tool also shows when each task is complete.
 
 ## Contents
 
@@ -69,7 +69,7 @@ You can run each command again without harm.
 
 In each command, replace each value in angle brackets with your value. Replace the example name of the agent account and the example name of the mailbox with the names in your tenant.
 
-A loop is a scheduled run of an agent. The **Loops** tab of the agent in the Neologik Context Engine lists each loop. The page of a loop shows each command with the name of the agent account filled in. The page of a loop also shows a **Copy** button.
+A loop is a scheduled run of an agent. The **Loops** tab of the agent in the Neologik Admin Tool lists each loop. The page of a loop shows each command with the name of the agent account filled in. The page of a loop also shows a **Copy** button.
 
 ## Task 1: Assign a Microsoft 365 licence
 
@@ -244,9 +244,9 @@ Run task 5 once for each site that the Neologik Platform reads. A Global Adminis
 ## Check the result
 
 1. Wait a few minutes while Microsoft 365 applies each change.
-2. In the Neologik Context Engine, select **Refresh**.
+2. In the Neologik Admin Tool, select **Refresh**.
 
-The Neologik Context Engine shows the result in three places.
+The Neologik Admin Tool shows the result in three places.
 
 | Place | What the place shows |
 |---|---|
@@ -272,7 +272,7 @@ The agent account needs Full Access and Send As on the one mailbox that the agen
 
 **How does an administrator take the access away?**
 
-Remove the licence, the mailbox permissions or the membership. At the next refresh, the Neologik Context Engine shows the access as absent. The runs of the agent then record the refusal.
+Remove the licence, the mailbox permissions or the membership. At the next refresh, the Neologik Admin Tool shows the access as absent. The runs of the agent then record the refusal.
 
 ## Help
 
