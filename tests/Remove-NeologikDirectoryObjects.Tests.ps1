@@ -22,7 +22,14 @@ BeforeAll {
     $global:RemovalTest = @{}
     $script:ScriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'Remove-NeologikDirectoryObjects.ps1'
 
-    function Connect-MgGraph { [CmdletBinding()] param($TenantId, $Scopes, $ContextScope, [switch]$NoWelcome) $global:RemovalTest.ConnectScopes = $Scopes; $global:RemovalTest.ConnectTenant = $TenantId }
+    function Connect-MgGraph {
+        [CmdletBinding()]
+        param($TenantId, $Scopes, $ContextScope, [switch]$NoWelcome, [switch]$UseDeviceCode)
+        if ($global:RemovalTest.BrowserFails -and -not $UseDeviceCode) { throw 'InteractiveBrowserCredential authentication failed: A window handle must be configured.' }
+        $global:RemovalTest.ConnectScopes = $Scopes
+        $global:RemovalTest.ConnectTenant = $TenantId
+        $global:RemovalTest.UsedDeviceCode = [bool]$UseDeviceCode
+    }
     function Install-Module { [CmdletBinding()] param($Name, $Scope, [switch]$Force) }
     function Get-MgContext { [CmdletBinding()] param() [pscustomobject]@{ TenantId = 'tenant-1'; Account = 'admin@contoso.com' } }
     function Read-Host { param($Prompt) $global:RemovalTest.Prompted = $true; $global:RemovalTest.Answer }
@@ -54,6 +61,8 @@ BeforeEach {
     $global:RemovalTest.Answer = 'DELETE'
     $global:RemovalTest.Prompted = $false
     $global:RemovalTest.SecondPage = $false
+    $global:RemovalTest.BrowserFails = $false
+    $global:RemovalTest.UsedDeviceCode = $false
     $global:RemovalTest.DeleteError = $null
     $global:RemovalTest.DeleteErrorFor = $null
     $global:RemovalTest.Directory = @{
@@ -100,6 +109,13 @@ It 'requests only the five delegated permissions that the deletions need' {
 It 'passes the tenant to the sign-in when an administrator names the tenant' {
     & $script:ScriptPath -ShortName abcprd01 -TenantId 'tenant-9' | Out-Null
     $global:RemovalTest.ConnectTenant | Should -Be 'tenant-9'
+}
+
+It 'signs in with a device code when the sign-in window cannot open' {
+    $global:RemovalTest.BrowserFails = $true
+    & $script:ScriptPath -ShortName abcprd01 | Out-Null
+    $global:RemovalTest.UsedDeviceCode | Should -BeTrue
+    $LASTEXITCODE | Should -Be 0
 }
 
 It 'deletes agent accounts, then agent identities, then applications with the blueprint last, then groups' {

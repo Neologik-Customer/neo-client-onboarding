@@ -78,7 +78,16 @@ Import-Module Microsoft.Graph.Authentication
 
 $connectParams = @{ Scopes = $script:GraphScopes; ContextScope = 'Process'; NoWelcome = $true }
 if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-Connect-MgGraph @connectParams | Out-Null
+try {
+    Connect-MgGraph @connectParams | Out-Null
+}
+catch {
+    # Some terminals give the Windows sign-in window nothing to attach to. A device code works in every terminal.
+    Write-Host "The sign-in window could not open in this terminal. Open the web address below in a browser, enter the code and sign in." -ForegroundColor Yellow
+    # Microsoft Graph PowerShell writes the web address and the code to the information stream.
+    $InformationPreference = 'Continue'
+    Connect-MgGraph @connectParams -UseDeviceCode | Out-Null
+}
 
 $context = Get-MgContext
 Write-Host "  Tenant:         $($context.TenantId)" -ForegroundColor Gray
