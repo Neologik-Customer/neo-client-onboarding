@@ -9,7 +9,7 @@
 .DESCRIPTION
     docs\GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md describes the script in full.
 
-    The script applies two files. Each file comes from the Neologik Context Engine
+    The script applies two files. Each file comes from the Neologik Admin Tool
     of the environment. Neologik sends the files, or a platform operator downloads
     the files from the Admin page.
 
@@ -109,7 +109,7 @@
 
 .PARAMETER AgentGrantsFile
     The JSON file of grants to agent users. A platform operator downloads the file
-    from the Admin page of the Neologik Context Engine. The file names the tenant
+    from the Admin page of the Neologik Admin Tool. The file names the tenant
     and the environment.
 
 .PARAMETER MailboxGrantsFile
@@ -284,7 +284,7 @@ $script:Summary = @()
 $script:State = @{}
 # The version of the onboarding kit that ships the script. The header, the log file
 # and the summary file name the version.
-$script:KitVersion = 'v5.1.7'
+$script:KitVersion = 'v5.1.8'
 # The log file of the run. The script writes every message to the log file from the
 # first line. The reason a run ended before its steps, for the summary file.
 $script:LogFile = $null
@@ -1201,7 +1201,7 @@ function Resolve-NeologikInput {
     if ($state.AgentGrantsFile) {
         $grantsFile = Read-NeologikJsonFile -Path $state.AgentGrantsFile -Label 'agent grants file'
         if ($grantsFile -is [System.Array] -or $null -eq $grantsFile -or -not (Test-NeologikProperty $grantsFile 'grants')) {
-            throw [System.ArgumentException]::new("The agent grants file is not the file that the Neologik Context Engine exports: $($state.AgentGrantsFile). The file must hold 'grants', 'componentGraphRoles' and 'sharePointIngestion'.")
+            throw [System.ArgumentException]::new("The agent grants file is not the file that the Neologik Admin Tool exports: $($state.AgentGrantsFile). The file must hold 'grants', 'componentGraphRoles' and 'sharePointIngestion'.")
         }
         $fileTenant = ([string](Get-NeologikProperty $grantsFile 'tenantId' '')).Trim()
         if ($fileTenant -and -not (Test-NeologikGuid $fileTenant)) {

@@ -9,7 +9,7 @@
 | The agent grants file, `agent-grants-<environment>.json` | Each agent and each App that works unattended, with the permissions that the agent or the App needs | One grant to the agent user account of each agent and each App, the Microsoft Graph application permissions of workload identities, and the check of the SharePoint consent |
 | The mailbox grants file, `mailbox-grants-<environment>.json` | Each email channel, with the mailbox that the email channel reads | The three Exchange Online roles that let the identity of the email channel read and send from that one mailbox |
 
-Neologik sends the two files. A platform operator can also download the agent grants file. In the Neologik Context Engine, open **Admin**, then select **Download** under **Grants file**. An email channel that shows **Awaiting mailbox grant** also shows **Download grant script** on the **Channels** tab. An Exchange Administrator can run that script instead of the mailbox grants file. The command of the grants script names one file or both.
+Neologik sends the two files. A platform operator can also download the agent grants file. In the Neologik Admin Tool, open **Admin**, then select **Download** under **Grants file**. An email channel that shows **Awaiting mailbox grant** also shows **Download grant script** on the **Channels** tab. An Exchange Administrator can run that script instead of the mailbox grants file. The command of the grants script names one file or both.
 
 The grants script reads the current state before each change. The grants script changes only what differs from the file. A Global Administrator can run the grants script again at any time, and runs the grants script again whenever either file changes. With `-Verify` the grants script reports each change that a run would make, and writes nothing.
 
@@ -86,7 +86,7 @@ The file can also list Microsoft Graph application permissions for named workloa
 
 The file records whether the environment uses SharePoint ingestion. When the environment uses SharePoint ingestion, the grants script checks the SharePoint application of the environment. That application must hold the Microsoft Graph application permission `Sites.Selected`. A consent belongs to one application. Another SharePoint application of Neologik in your tenant may hold a SharePoint permission. In that case, the grants script grants `Sites.Selected` to the SharePoint application of the environment. Otherwise the grants script prints the consent address when the consent is absent. A Global Administrator opens the consent address and gives the consent. A site administrator then grants access to each SharePoint site separately.
 
-When the file marks an entry as not ready, the summary reads `SKIPPED` for the entry. The Neologik Context Engine exports a new file when the entry is ready.
+When the file marks an entry as not ready, the summary reads `SKIPPED` for the entry. The Neologik Admin Tool exports a new file when the entry is ready.
 
 ## Step 2: Mailbox grants
 

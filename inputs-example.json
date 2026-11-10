@@ -33,5 +33,5 @@
   "_existingServicePrincipalSecret_note": "The -ExistingServicePrincipalSecret parameter is preferable to this field, because it keeps the client secret out of this file. Leave the field empty to be asked for the secret, or to add it to the Key Vault yourself.",
   "existingServicePrincipalSecret": "",
 
-  "_agents_note": "Agents are created in the Neologik Context Engine after the environment is deployed. The onboarding script asks nothing about them."
+  "_agents_note": "Agents are created in the Neologik Admin Tool after the environment is deployed. The onboarding script asks nothing about them."
 }

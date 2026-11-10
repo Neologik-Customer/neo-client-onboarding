@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.1.8](#version-518)
 2. [Version 5.1.7](#version-517)
 2. [Version 5.1.6](#version-516)
 2. [Version 5.1.5](#version-515)
@@ -51,12 +52,23 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.1.7 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.7 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
+| `Install-NeologikEnvironment.ps1` | v5.1.8 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.8 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
 | `Remove-NeologikDirectoryObjects.ps1` | 1.0 | Deletes the directory objects of one environment, after the administrator confirms the list |
+
+## Version 5.1.8
+
+**Date**: 2026-11-10
+
+This version is on the line of Neologik Platform v5.1. This version names the administration web application the Neologik Admin Tool, the name the application shows on screen. No step of any script changes.
+
+| Item | Change |
+|---|---|
+| The documents | Each document names the Neologik Admin Tool |
+| `Install-NeologikEnvironment.ps1` and `Grant-NeologikAgentAccess.ps1` | The messages name the Neologik Admin Tool. The version of the onboarding kit is v5.1.8 |
 
 ## Version 5.1.7
 

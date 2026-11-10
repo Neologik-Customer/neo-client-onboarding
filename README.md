@@ -44,15 +44,15 @@ The onboarding kit includes each script in full. Approvers can read each script 
 
 | Term | Meaning |
 |---|---|
-| Neologik Context Engine | The administration web application of the Neologik Platform. The web application shows the name **Neologik Admin Tool** on screen. Platform operators configure agents and Apps there. The address is `https://<your host name>/nce` |
-| Agent | An assistant that a platform operator configures in the Neologik Context Engine. An agent can answer users in a channel such as Microsoft Teams. An agent can also work unattended |
+| Neologik Admin Tool | The administration web application of the Neologik Platform. Platform operators configure agents and Apps there. The address is `https://<your host name>/nce` |
+| Agent | An assistant that a platform operator configures in the Neologik Admin Tool. An agent can answer users in a channel such as Microsoft Teams. An agent can also work unattended |
 | App | A business application that runs on the Neologik Platform beside the agents |
 | Deployment identity | The service principal that Neologik signs in with to deploy Azure resources into your resource group |
-| Platform operator | A person who works in the Neologik Context Engine. A platform operator is a member of the group `Neologik NCE Contributors - <short name>` or the group `Neologik NCE Admins - <short name>` |
+| Platform operator | A person who works in the Neologik Admin Tool. A platform operator is a member of the group `Neologik NCE Contributors - <short name>` or the group `Neologik NCE Admins - <short name>` |
 | Short name | The organisation code, the environment type and the environment index, joined together. An example is `abcprd01`. The short name is part of the name of each object that the onboarding script creates |
 | Onboarding script | `Install-NeologikEnvironment.ps1` |
 | Grants script | `Grant-NeologikAgentAccess.ps1` |
-| Platform Sign-in application | The application registration that signs your users in to the Neologik Context Engine and to Apps |
+| Platform Sign-in application | The application registration that signs your users in to the Neologik Admin Tool and to Apps |
 | Agent identity blueprint | The Microsoft Entra Agent ID object that is the parent of each agent identity and each agent user account. The onboarding script creates the agent identity blueprint |
 
 ## What the onboarding kit contains
@@ -214,7 +214,7 @@ Each question shows a default value or an example. Press Enter to accept a defau
 | Add existing accounts to the security groups? | The onboarding script asks this question only after the answer `N` to the invitation question. `Y` to add accounts that you have already created. The onboarding script takes the accounts from `NeologikGuestUsers.txt` or from the prompt, and sends no invitation. The onboarding script reports an address that matches no account and continues | `N` |
 | Use a service principal you have already created for deployment? | `Y` when you created the deployment service principal yourself, as described in [CREATE-SP-GUIDE.md](docs/CREATE-SP-GUIDE.md). Have the object ID of the enterprise application ready | `N` |
 
-The onboarding script asks no question about agents. A platform operator creates agents and channels in the Neologik Context Engine after Neologik deploys the environment.
+The onboarding script asks no question about agents. A platform operator creates agents and channels in the Neologik Admin Tool after Neologik deploys the environment.
 
 ### Accounts added to the security groups
 
