@@ -14,6 +14,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 
 1. [Scripts in this version](#scripts-in-this-version)
 2. [Version 5.2.0](#version-520)
+2. [Version 5.1.8](#version-518)
 2. [Version 5.1.7](#version-517)
 2. [Version 5.1.6](#version-516)
 2. [Version 5.1.5](#version-515)
@@ -71,6 +72,17 @@ This version is on the line of Neologik Platform v5.2. This version limits the r
 | `Install-NeologikEnvironment.ps1` | Role Based Access Control Administrator on the subscription is limited to Reader and Cost Management Reader, for service principals only |
 | `Install-NeologikEnvironment.ps1` | Step 15 creates the system task managed identity, and gives the managed identity Role Based Access Control Administrator on the resource group with the same condition |
 | `inputs-example.json` | One new answer: `systemTaskIdentityName` |
+
+## Version 5.1.8
+
+**Date**: 2026-11-10
+
+This version is on the line of Neologik Platform v5.1. This version names the administration web application the Neologik Admin Tool, the name the application shows on screen. No step of any script changes.
+
+| Item | Change |
+|---|---|
+| The documents | Each document names the Neologik Admin Tool |
+| `Install-NeologikEnvironment.ps1` and `Grant-NeologikAgentAccess.ps1` | The messages name the Neologik Admin Tool. The version of the onboarding kit is v5.1.8 |
 
 ## Version 5.1.7
 

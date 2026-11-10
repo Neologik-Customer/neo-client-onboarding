@@ -72,7 +72,7 @@ To raise the limit, select the quota line and select **New Quota Request**.
 | Neologik guest users | Decide whether the onboarding script invites the Neologik support accounts in `NeologikGuestUsers.txt` as guests. The alternative is to create accounts for Neologik support staff in your own tenant. For the alternative, have the exact address of each account ready. Each address must match the mail address or the user principal name of the account | The onboarding script invites the accounts |
 | Deployment service principal | Decide whether the onboarding script creates the deployment service principal, or you create the deployment service principal. To create the deployment service principal yourself, follow [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md). Have the object ID of the enterprise application ready. Give the client secret to the onboarding script. Alternatively, add the client secret to the Key Vault before the first deployment | The onboarding script creates the deployment service principal |
 
-The onboarding script asks no question about agents. A platform operator creates agents and channels in the Neologik Context Engine after Neologik deploys the environment.
+The onboarding script asks no question about agents. A platform operator creates agents and channels in the Neologik Admin Tool after Neologik deploys the environment.
 
 ## Answer file
 

@@ -21,11 +21,11 @@ The onboarding script grants access on the resource group. The onboarding script
 | Object | Name | Purpose |
 |---|---|---|
 | Resource group | `rg-<solution name>` | Holds every Azure resource of the environment |
-| Security groups | `Neologik User Group - <short name>`<br>`Neologik NCE Contributors - <short name>`<br>`Neologik NCE Admins - <short name>`<br>`Neologik Admin User Group - <short name>` | Give access to the agents, to the Neologik Context Engine and to the Azure resources |
+| Security groups | `Neologik User Group - <short name>`<br>`Neologik NCE Contributors - <short name>`<br>`Neologik NCE Admins - <short name>`<br>`Neologik Admin User Group - <short name>` | Give access to the agents, to the Neologik Admin Tool and to the Azure resources |
 | Guest invitations | The accounts in `NeologikGuestUsers.txt` | The Neologik support accounts. You choose invitation at a question on screen. You can create the accounts in your tenant instead |
 | Deployment identity | `Neologik GitHub Service Connection - <short name>` | Neologik deploys the Neologik Platform as this service principal. You can create the service principal yourself instead |
 | Federated credential of the deployment identity | `github-deployments-<environment name>` | Lets a Neologik deployment run that names this environment sign in as the deployment identity with no stored secret. The federated credential adds no permission |
-| Platform Sign-in application | `Neologik Platform Sign-in - <short name>` | Signs users in to the Neologik Context Engine and to Apps |
+| Platform Sign-in application | `Neologik Platform Sign-in - <short name>` | Signs users in to the Neologik Admin Tool and to Apps |
 | Agent identity blueprint | `Neologik Agent Blueprint - default - <short name>` | The parent of the agent identities and the agent user accounts that the Neologik Platform creates |
 | Key Vault | `kv<short name>`, or the name that you give | Holds the two client secrets |
 | Deployment storage account | `stneodeploy<org><env><region><index>`, cut to 24 characters | Holds the configuration file and the log. The container `certificate` holds the TLS certificate files only when you upload them instead of importing a `.pfx` file. Three private containers: `certificate`, `json` and `logs` |
