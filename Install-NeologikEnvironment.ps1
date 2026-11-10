@@ -221,30 +221,40 @@ $WarningPreference = 'Continue'
 $script:Version = 'v5.0.15'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.1.6'
+$script:KitVersion = 'v5.2.0'
 
 # The third role of the deployment identity on the subscription: Role Based Access
-# Control Administrator, limited by a condition to three roles. The deployment runs the
-# ingress controller of a Private Endpoint environment with Application Gateway for Containers.
-# Microsoft requires the identity of that controller to hold Reader on the resource
-# group that Azure Kubernetes Service creates for the nodes of the cluster, which is
-# outside the resource group of the environment, and AppGw for Containers Configuration
-# Manager on the resource group of the environment. The condition lets the deployment
-# identity assign those three roles and no other role, and remove only those three.
+# Control Administrator, limited by a condition to two roles, for service principals
+# only. The deployment runs the ingress controller of a Private Endpoint environment
+# with Application Gateway for Containers. Microsoft requires the identity of that
+# controller to hold Reader on the resource group that Azure Kubernetes Service creates
+# for the nodes of the cluster, which is outside the resource group of the environment.
 # The platform's configuration API reads the daily cost of the resource group
 # of the nodes for the return on investment report, so the deployment assigns
 # Cost Management Reader on that resource group to the identity of the
-# configuration API.
+# configuration API. The condition lets the deployment identity assign those two
+# roles and no other role, and remove only those two.
 $script:LimitedSubRole = 'Role Based Access Control Administrator'
 $script:LimitedSubRoleId = 'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
-# Reader, AppGw for Containers Configuration Manager, then Cost Management Reader.
+# Reader, then Cost Management Reader.
 $script:LimitedSubRoleAssignableIds = @(
     'acdd72a7-3385-48ef-bd42-f606fba81ae7',
-    'fbc52c3f-28ad-4303-a892-8a056630b8f1',
     '72fafb9e-0641-4937-9268-a91bfd8191a3'
 )
 $script:LimitedSubRoleConditionVersion = '2.0'
-$script:LimitedSubRoleCondition = ("((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/write'}})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}})) AND ((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/delete'}})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}}))" -f ($script:LimitedSubRoleAssignableIds -join ', '))
+$script:LimitedSubRoleCondition = ("((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/write'}})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {{'ServicePrincipal'}})) AND ((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/delete'}})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {{'ServicePrincipal'}}))" -f ($script:LimitedSubRoleAssignableIds -join ', '))
+
+# Role Based Access Control Administrator on the resource group of the environment, held by
+# the deployment identity and the system task managed identity. The condition stops each
+# identity assigning or removing Owner, User Access Administrator or Role Based Access Control Administrator.
+# Each identity can assign or remove every other role for service principals only.
+# Owner, User Access Administrator, then Role Based Access Control Administrator.
+$script:ResourceGroupRoleExcludedIds = @(
+    '8e3af657-a8ff-443c-a75c-2fe8c4bcb635',
+    '18d7d88d-d35e-4fb5-a5c3-7773c20a72d9',
+    'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
+)
+$script:ResourceGroupRoleCondition = ("((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/write'}})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAllValues:GuidNotEquals {{{0}}} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {{'ServicePrincipal'}})) AND ((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/delete'}})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAllValues:GuidNotEquals {{{0}}} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {{'ServicePrincipal'}}))" -f ($script:ResourceGroupRoleExcludedIds -join ', '))
 
 # The time stamp of the run. The names of the log and of the configuration file hold the time stamp.
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -2342,13 +2352,6 @@ function Set-NeologikLimitedSubscriptionRole {
     .SYNOPSIS
         Assigns the limited Role Based Access Control Administrator role to the
         deployment identity on the subscription.
-    .DESCRIPTION
-        The role carries a condition that limits the roles the deployment identity may
-        assign to Reader, AppGw for Containers Configuration Manager and Cost Management Reader. An assignment
-        that already carries the condition is reported. An assignment without the
-        condition, or with another condition, is removed and created again with
-        the condition, because Azure keeps the condition of an existing assignment
-        on an update. An absent assignment is created.
     #>
     [CmdletBinding()]
     param(
@@ -2359,13 +2362,43 @@ function Set-NeologikLimitedSubscriptionRole {
         [string]$SubscriptionId
     )
 
-    $scope = "/subscriptions/$SubscriptionId"
+    Set-NeologikConditionedRole -ObjectId $ServicePrincipalId `
+        -Scope "/subscriptions/$SubscriptionId" `
+        -Condition $script:LimitedSubRoleCondition `
+        -Description 'limited to two roles'
+}
+
+function Set-NeologikConditionedRole {
+    <#
+    .SYNOPSIS
+        Assigns Role Based Access Control Administrator at one scope, with a condition.
+    .DESCRIPTION
+        An assignment that already carries the condition is reported. An assignment without the
+        condition, or with another condition, is removed and created again with
+        the condition, because Azure keeps the condition of an existing assignment
+        on an update. An absent assignment is created.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ObjectId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Scope,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Condition,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Description
+    )
+
     $roleName = $script:LimitedSubRole
-    $wanted = ($script:LimitedSubRoleCondition -replace '\s', '').ToLowerInvariant()
-    Write-Log "Assigning the role $roleName, limited to three roles..." -Level Info
+    $wanted = ($Condition -replace '\s', '').ToLowerInvariant()
+    Write-Log "Assigning the role $roleName, $Description..." -Level Info
 
     try {
-        $assignments = @(Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
+        $assignments = @(Get-AzRoleAssignment -ObjectId $ObjectId `
             -RoleDefinitionName $roleName `
             -Scope $scope `
             -ErrorAction Stop | Where-Object { $_.Scope -eq $scope })
@@ -2388,14 +2421,14 @@ function Set-NeologikLimitedSubscriptionRole {
         # assignment and creates it again below with the limit. Azure answers a read
         # with the removed assignment for a while, so the script waits until the read
         # no longer returns it before creating the new one.
-        Remove-AzRoleAssignment -ObjectId $ServicePrincipalId `
+        Remove-AzRoleAssignment -ObjectId $ObjectId `
             -RoleDefinitionName $roleName `
             -Scope $scope `
             -ErrorAction Stop | Out-Null
         Write-Log "$roleName role: the existing assignment is removed, so the limit can be applied" -Level Info
         $removeChecks = 0
         while ($removeChecks -lt 12) {
-            $remaining = @(Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
+            $remaining = @(Get-AzRoleAssignment -ObjectId $ObjectId `
                 -RoleDefinitionName $roleName `
                 -Scope $scope `
                 -ErrorAction SilentlyContinue | Where-Object { $_.Scope -eq $scope })
@@ -2412,10 +2445,10 @@ function Set-NeologikLimitedSubscriptionRole {
     $roleAssigned = $false
     while (-not $roleAssigned -and $retryCount -lt $maxRetries) {
         try {
-            New-AzRoleAssignment -ObjectId $ServicePrincipalId `
+            New-AzRoleAssignment -ObjectId $ObjectId `
                 -RoleDefinitionId $script:LimitedSubRoleId `
                 -Scope $scope `
-                -Condition $script:LimitedSubRoleCondition `
+                -Condition $Condition `
                 -ConditionVersion $script:LimitedSubRoleConditionVersion `
                 -ErrorAction Stop | Out-Null
 
@@ -2426,7 +2459,7 @@ function Set-NeologikLimitedSubscriptionRole {
             if ($_.Exception.Message -match "RoleAssignmentExists|already exists") {
                 # The assignment exists: with the limit, the script is done; without it,
                 # Azure answered for a removed assignment, and the script tries again.
-                $held = @(Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
+                $held = @(Get-AzRoleAssignment -ObjectId $ObjectId `
                     -RoleDefinitionName $roleName `
                     -Scope $scope `
                     -ErrorAction SilentlyContinue | Where-Object {
@@ -2515,7 +2548,7 @@ function Confirm-NeologikDeploymentIdentityRoles {
         of the deployment identity at the subscription and at the resource group
         and compares them with the roles the deployment needs. A role counts
         only at its own scope and only with the condition the onboarding script
-        gives it: the limited role on the subscription with its condition,
+        gives it: each Role Based Access Control Administrator role with its condition,
         every other role without one. A new assignment can take a moment to
         appear in a read, so the script reads again, up to six times. A role
         still missing stops the run and names the role and the scope. The
@@ -2546,6 +2579,7 @@ function Confirm-NeologikDeploymentIdentityRoles {
     foreach ($roleName in $SubscriptionRoles) { $wanted += @{ Role = $roleName; Scope = $subScope; Condition = '' } }
     $wanted += @{ Role = $script:LimitedSubRole; Scope = $subScope; Condition = $script:LimitedSubRoleCondition }
     foreach ($roleName in $ResourceGroupRoles) { $wanted += @{ Role = $roleName; Scope = $rgScope; Condition = '' } }
+    $wanted += @{ Role = $script:LimitedSubRole; Scope = $rgScope; Condition = $script:ResourceGroupRoleCondition }
 
     Write-Log "Reading back the roles of the deployment identity..." -Level Info
     $missing = @()
@@ -2693,9 +2727,9 @@ function Set-AppRegistrationRoles {
 
         # The roles of the deployment identity on the resource group. The deployment creates role
         # assignments for the identities of the cluster. The deployment identity therefore needs the role
-        # Role Based Access Control Administrator. The role on the resource group has no limit.
+        # Role Based Access Control Administrator, with the condition at the top of this script.
         $rgScope = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName"
-        $rgRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
+        $rgRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor')
 
         foreach ($roleName in $rgRoles) {
             Write-Log "Assigning the role $roleName on the resource group..." -Level Info
@@ -2738,6 +2772,12 @@ function Set-AppRegistrationRoles {
                 }
             }
         }
+
+        # Role Based Access Control Administrator on the resource group, with the condition at the top of this script.
+        Set-NeologikConditionedRole -ObjectId $ServicePrincipalId `
+            -Scope $rgScope `
+            -Condition $script:ResourceGroupRoleCondition `
+            -Description 'limited so that the identity cannot assign Owner, User Access Administrator or this role'
 
         # Read the roles back. The configuration file records what the deployment identity holds,
         # and a missing role stops the run here, in front of the administrator.
@@ -3949,7 +3989,10 @@ function New-NeologikManagedIdentities {
         [string]$SqlIdentityName = "",
 
         [Parameter(Mandatory = $false)]
-        [string]$DirectoryIdentityName = ""
+        [string]$DirectoryIdentityName = "",
+
+        [Parameter(Mandatory = $false)]
+        [string]$SystemTaskIdentityName = ""
     )
 
     Write-Log "Creating the managed identities..." -Level Info
@@ -3972,6 +4015,7 @@ function New-NeologikManagedIdentities {
         $scriptRunnerName = if (-not [string]::IsNullOrWhiteSpace($ScriptRunnerIdentityName)) { $ScriptRunnerIdentityName.Trim() } else { "neologik-script-runner-service-connection$nameSuffix" }
         $sqlIdentityName = if (-not [string]::IsNullOrWhiteSpace($SqlIdentityName)) { $SqlIdentityName.Trim() } else { "neologik-sql-managed-identity$nameSuffix" }
         $directoryIdentityName = if (-not [string]::IsNullOrWhiteSpace($DirectoryIdentityName)) { $DirectoryIdentityName.Trim() } else { "neologik-directory-managed-identity$nameSuffix" }
+        $systemTaskIdentityName = if (-not [string]::IsNullOrWhiteSpace($SystemTaskIdentityName)) { $SystemTaskIdentityName.Trim() } else { "neologik-system-task-managed-identity$nameSuffix" }
 
         $managedIdentities = @(
             @{
@@ -3999,6 +4043,16 @@ function New-NeologikManagedIdentities {
                 # sign in as the managed identity until a deployment by Neologik adds the sign-in credential.
                 Roles = @()
                 GraphAppRoles = @('Application.ReadWrite.OwnedBy')
+            },
+            @{
+                Name = $systemTaskIdentityName
+                DisplayName = "Neologik System Task Managed Identity$displaySuffix"
+                # From version 5.2 of the Neologik Platform, this managed identity creates the identities and role
+                # assignments of Neologik agents from inside the environment. The condition at the top of this script
+                # limits the role. Nothing can sign in as the managed identity until a deployment by Neologik adds the
+                # sign-in credential.
+                Roles = @()
+                ResourceGroupRoleStandard = $true
             }
         )
 
@@ -4188,6 +4242,14 @@ function New-NeologikManagedIdentities {
                         }
                     }
                 }
+            }
+
+            # The role that lets the managed identity assign roles inside the resource group
+            if ($miDef.ResourceGroupRoleStandard) {
+                Set-NeologikConditionedRole -ObjectId $mi.PrincipalId `
+                    -Scope "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName" `
+                    -Condition $script:ResourceGroupRoleCondition `
+                    -Description 'limited so that the identity cannot assign Owner, User Access Administrator or this role'
             }
 
             # Grant the Microsoft Graph application permissions defined for the identity, if any
@@ -4858,6 +4920,13 @@ function Set-ConfigFromAnswerFile {
     $script:ConfigData['DirectoryIdentityName'] = if (-not [string]::IsNullOrWhiteSpace($dirAns)) { $dirAns.Trim() } else { $dirComputed }
     $dirErr = Test-ManagedIdentityNameError $script:ConfigData['DirectoryIdentityName']
     if ($dirErr) { throw "directoryIdentityName '$($script:ConfigData['DirectoryIdentityName'])': $dirErr" }
+
+    # The name of the system task managed identity, from the answer file or the standard name.
+    $taskComputed = "neologik-system-task-managed-identity-$($script:ConfigData['SolutionShortName'])"
+    $taskAns = [string](Get-Answer 'systemTaskIdentityName')
+    $script:ConfigData['SystemTaskIdentityName'] = if (-not [string]::IsNullOrWhiteSpace($taskAns)) { $taskAns.Trim() } else { $taskComputed }
+    $taskErr = Test-ManagedIdentityNameError $script:ConfigData['SystemTaskIdentityName']
+    if ($taskErr) { throw "systemTaskIdentityName '$($script:ConfigData['SystemTaskIdentityName'])': $taskErr" }
 
     # The name of the environment in the Neologik deployment, from the answer file or from the
     # organisation code and the environment type. The federated credential of the deployment identity names the environment.
@@ -5675,6 +5744,14 @@ function Start-NeologikOnboarding {
             -DefaultValue $dirDefault -Validator ${function:Test-ManagedIdentityNameError} `
             -LabelPrefix (Get-PromptLabel $dirDefault $dirComputed)
 
+        # The name of the system task managed identity.
+        $taskComputed = "neologik-system-task-managed-identity-$($script:ConfigData['SolutionShortName'])"
+        $taskAns = [string](Get-Answer 'systemTaskIdentityName')
+        $taskDefault = if (-not [string]::IsNullOrWhiteSpace($taskAns)) { $taskAns.Trim() } else { $taskComputed }
+        $script:ConfigData['SystemTaskIdentityName'] = Read-NameWithDefault -Title 'System Task Managed Identity Name' `
+            -DefaultValue $taskDefault -Validator ${function:Test-ManagedIdentityNameError} `
+            -LabelPrefix (Get-PromptLabel $taskDefault $taskComputed)
+
         # The name of the environment in the Neologik deployment, from the answer file or from the
         # organisation code and the environment type. The federated credential of the deployment identity names the environment.
         $environmentNameAns = [string](Get-Answer 'environmentName')
@@ -5973,6 +6050,7 @@ function Start-NeologikOnboarding {
         Write-SummaryRow 'Script Runner Identity' $script:ConfigData['ScriptRunnerIdentityName']
         Write-SummaryRow 'SQL Managed Identity' $script:ConfigData['SqlIdentityName']
         Write-SummaryRow 'Directory Managed Identity' $script:ConfigData['DirectoryIdentityName']
+    Write-SummaryRow 'System Task Managed Identity' $script:ConfigData['SystemTaskIdentityName']
         Write-SummaryRow 'Solution Name' $script:ConfigData['SolutionName']
         Write-SummaryRow 'Solution Short Name' $script:ConfigData['SolutionShortName']
         Write-SummaryRow 'Provider Registration' "$($script:ProviderList.Providers.Count) resource providers and $($script:ProviderList.Features.Count) preview features, from resource-providers.txt"
@@ -6180,7 +6258,8 @@ function Start-NeologikOnboarding {
             -EnvironmentIndex $script:EnvironmentIndex `
             -ScriptRunnerIdentityName ([string]$script:ConfigData['ScriptRunnerIdentityName']) `
             -SqlIdentityName ([string]$script:ConfigData['SqlIdentityName']) `
-            -DirectoryIdentityName ([string]$script:ConfigData['DirectoryIdentityName'])
+            -DirectoryIdentityName ([string]$script:ConfigData['DirectoryIdentityName']) `
+            -SystemTaskIdentityName ([string]$script:ConfigData['SystemTaskIdentityName'])
 
         # Step 15b: Submit the registration of every other resource provider and every preview feature in the list.
         # The deployment of the Neologik Platform needs them. This run does not. Then confirm every resource provider

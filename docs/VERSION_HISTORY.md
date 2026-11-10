@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.2.0](#version-520)
 2. [Version 5.1.6](#version-516)
 2. [Version 5.1.5](#version-515)
 2. [Version 5.1.4](#version-514)
@@ -50,11 +51,24 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.1.6 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.6 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
+| `Install-NeologikEnvironment.ps1` | v5.2.0 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.2.0 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+
+## Version 5.2.0
+
+**Date**: 2026-11-10
+
+This version is on the line of Neologik Platform v5.2. This version limits the roles that the identities of the Neologik Platform can assign.
+
+| Item | Change |
+|---|---|
+| `Install-NeologikEnvironment.ps1` | The deployment identity holds Role Based Access Control Administrator on the resource group with a condition. The deployment identity cannot assign or remove Owner, User Access Administrator or Role Based Access Control Administrator, and can assign or remove every other role for service principals only |
+| `Install-NeologikEnvironment.ps1` | Role Based Access Control Administrator on the subscription is limited to Reader and Cost Management Reader, for service principals only |
+| `Install-NeologikEnvironment.ps1` | Step 15 creates the system task managed identity, and gives the managed identity Role Based Access Control Administrator on the resource group with the same condition |
+| `inputs-example.json` | One new answer: `systemTaskIdentityName` |
 
 ## Version 5.1.6
 
