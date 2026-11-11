@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.1.9](#version-519)
 2. [Version 5.1.8](#version-518)
 2. [Version 5.1.7](#version-517)
 2. [Version 5.1.6](#version-516)
@@ -52,12 +53,24 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.1.8 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.8 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
+| `Install-NeologikEnvironment.ps1` | v5.1.9 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.9 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
 | `Remove-NeologikDirectoryObjects.ps1` | 1.0 | Deletes the directory objects of one environment, after the administrator confirms the list |
+
+## Version 5.1.9
+
+**Date**: 2026-11-11
+
+This version is on the line of Neologik Platform v5.1. The limited role of the deployment identity on the subscription now assigns two roles, and only to service principals.
+
+| Item | Change |
+|---|---|
+| `Install-NeologikEnvironment.ps1` | The condition on Role Based Access Control Administrator on the subscription lets the deployment identity assign or remove two roles, Reader and Cost Management Reader, for service principals only. AppGw for Containers Configuration Manager leaves the list, because the deployment assigns that role inside the resource group of the environment. The version of the onboarding kit is v5.1.9 |
+| `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.9 |
+| The documents | `README.md`, `docs/QUICK-REFERENCE.md`, `docs/TECHNICAL-REFERENCE.md` and `docs/secure-overview.md` describe the two roles |
 
 ## Version 5.1.8
 
