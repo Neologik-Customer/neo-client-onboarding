@@ -14,6 +14,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 
 1. [Scripts in this version](#scripts-in-this-version)
 2. [Version 5.2.0](#version-520)
+2. [Version 5.1.10](#version-5110)
 2. [Version 5.1.9](#version-519)
 2. [Version 5.1.8](#version-518)
 2. [Version 5.1.7](#version-517)
@@ -73,6 +74,18 @@ This version is on the line of Neologik Platform v5.2. This version limits the r
 | `Install-NeologikEnvironment.ps1` | Role Based Access Control Administrator on the subscription is limited to Reader and Cost Management Reader, for service principals only |
 | `Install-NeologikEnvironment.ps1` | Step 15 creates the system task managed identity, and gives the managed identity Role Based Access Control Administrator on the resource group with the same condition |
 | `inputs-example.json` | One new answer: `systemTaskIdentityName` |
+
+## Version 5.1.10
+
+**Date**: 2026-11-11
+
+This version is on the line of Neologik Platform v5.1. The documents and messages call the managed identity that manages the sign-in registrations of Neologik agents the agent registration identity. No step of any script changes, and the managed identity keeps the name `neologik-directory-managed-identity-<short name>`.
+
+| Item | Change |
+|---|---|
+| The documents | `README.md`, `docs/QUICK-REFERENCE.md`, `docs/TECHNICAL-REFERENCE.md` and `docs/secure-overview.md` name the agent registration identity |
+| `Install-NeologikEnvironment.ps1` | The question and the summary name the agent registration identity. The version of the onboarding kit is v5.1.10 |
+| `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.10 |
 
 ## Version 5.1.9
 

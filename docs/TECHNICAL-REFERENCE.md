@@ -198,7 +198,7 @@ The onboarding script builds every standard name from two values: the solution n
 | Deployment storage account | `stneodeploy<org><env><region><index>`, cut to 24 characters | `stneodeployabcprduks01` |
 | Script runner managed identity | `neologik-script-runner-service-connection-<short name>` | `neologik-script-runner-service-connection-abcprd01` |
 | SQL managed identity | `neologik-sql-managed-identity-<short name>` | `neologik-sql-managed-identity-abcprd01` |
-| Directory managed identity | `neologik-directory-managed-identity-<short name>` | `neologik-directory-managed-identity-abcprd01` |
+| Agent registration identity | `neologik-directory-managed-identity-<short name>` | `neologik-directory-managed-identity-abcprd01` |
 | System task managed identity | `neologik-system-task-managed-identity-<short name>` | `neologik-system-task-managed-identity-abcprd01` |
 | Federated credential of the deployment identity | `github-deployments-<environment name>` | `github-deployments-abcprd` |
 | Security groups | `Neologik User Group - <short name>`<br>`Neologik NCE Contributors - <short name>`<br>`Neologik NCE Admins - <short name>`<br>`Neologik Admin User Group - <short name>` | `Neologik User Group - abcprd01` |
