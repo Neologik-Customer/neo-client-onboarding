@@ -94,6 +94,14 @@ It 'stops both identities assigning the three administrator roles, and limits ot
     $text | Should -Not -Match 'fbc52c3f-28ad-4303-a892-8a056630b8f1'
 }
 
+It 'limits the role on the subscription to Reader and Cost Management Reader, for service principals only' {
+    $text = Get-Content -Raw $script:ScriptPath
+    $text | Should -Match "'acdd72a7-3385-48ef-bd42-f606fba81ae7',\s+'72fafb9e-0641-4937-9268-a91bfd8191a3'\s+\)"
+    $text | Should -Match "@Request\[Microsoft\.Authorization/roleAssignments:PrincipalType\] ForAnyOfAnyValues:StringEqualsIgnoreCase \{\{'ServicePrincipal'\}\}"
+    $text | Should -Match "@Resource\[Microsoft\.Authorization/roleAssignments:PrincipalType\] ForAnyOfAnyValues:StringEqualsIgnoreCase \{\{'ServicePrincipal'\}\}"
+    $text | Should -Not -Match 'fbc52c3f-28ad-4303-a892-8a056630b8f1'
+}
+
 It 'asks no question about a cost report' {
     $text = Get-Content -Raw $script:ScriptPath
     $text | Should -Not -Match 'budgetCostReportEmailRecipients|BudgetEmailAddresses|Cost-Report'

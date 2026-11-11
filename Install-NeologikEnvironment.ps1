@@ -2722,7 +2722,7 @@ function Set-AppRegistrationRoles {
         }
 
         # The third role on the subscription: Role Based Access Control Administrator, limited
-        # to three roles. The variables at the top of the script hold the condition.
+        # to two roles. The variables at the top of the script hold the condition.
         Set-NeologikLimitedSubscriptionRole -ServicePrincipalId $ServicePrincipalId -SubscriptionId $SubscriptionId
 
         # The roles of the deployment identity on the resource group. The deployment creates role
