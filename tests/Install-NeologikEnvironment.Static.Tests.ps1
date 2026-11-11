@@ -73,7 +73,7 @@ It 'ships an example answer file that names the environment name' {
     $json.PSObject.Properties.Name | Should -Contain 'environmentName'
 }
 
-It 'creates the directory managed identity with one Microsoft Graph permission and no Azure role' {
+It 'creates the agent registration identity with one Microsoft Graph permission and no Azure role' {
     $text = Get-Content -Raw $script:ScriptPath
     $text | Should -Match 'Name = \$directoryIdentityName'
     $text | Should -Match "GraphAppRoles = @\('Application\.ReadWrite\.OwnedBy'\)\s+\}"
