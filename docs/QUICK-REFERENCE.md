@@ -382,6 +382,7 @@ The onboarding script writes a checkpoint at these points:
 | Resource group | The signed-in administrator | Key Vault Secrets Officer and Storage Blob Data Contributor |
 | Microsoft Graph application permissions | Deployment identity | `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Microsoft Graph application permissions | Service principal of the agent identity blueprint | `AgentIdUser.ReadWrite.IdentityParentedBy` |
+| Microsoft Graph application permissions | Agent registration identity | `Application.ReadWrite.OwnedBy` |
 | Microsoft Entra directory roles | SQL managed identity | Directory Readers |
 | Microsoft Entra directory roles | Deployment identity | None |
 | Membership of security groups | Deployment identity and managed identities | None |
