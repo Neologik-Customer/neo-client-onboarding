@@ -221,7 +221,7 @@ $WarningPreference = 'Continue'
 $script:Version = 'v5.0.15'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.1.9'
+$script:KitVersion = 'v5.1.10'
 
 # The third role of the deployment identity on the subscription: Role Based Access
 # Control Administrator, limited by a condition to two roles, for service principals
@@ -3990,7 +3990,7 @@ function New-NeologikManagedIdentities {
             },
             @{
                 Name = $directoryIdentityName
-                DisplayName = "Neologik Directory Managed Identity$displaySuffix"
+                DisplayName = "Neologik Agent Registration Identity$displaySuffix"
                 # From version 5.2 of the Neologik Platform, this managed identity creates and changes the application
                 # registrations of Neologik agents from inside the environment. The permission changes only the application
                 # registrations that the managed identity owns. The managed identity holds no Azure role. Nothing can
@@ -4850,7 +4850,7 @@ function Set-ConfigFromAnswerFile {
     $sqlErr = Test-ManagedIdentityNameError $script:ConfigData['SqlIdentityName']
     if ($sqlErr) { throw "sqlIdentityName '$($script:ConfigData['SqlIdentityName'])': $sqlErr" }
 
-    # The name of the directory managed identity, from the answer file or the standard name.
+    # The name of the agent registration identity, from the answer file or the standard name.
     $dirComputed = "neologik-directory-managed-identity-$($script:ConfigData['SolutionShortName'])"
     $dirAns = [string](Get-Answer 'directoryIdentityName')
     $script:ConfigData['DirectoryIdentityName'] = if (-not [string]::IsNullOrWhiteSpace($dirAns)) { $dirAns.Trim() } else { $dirComputed }
@@ -5665,11 +5665,11 @@ function Start-NeologikOnboarding {
             -DefaultValue $sqlDefault -Validator ${function:Test-ManagedIdentityNameError} `
             -LabelPrefix (Get-PromptLabel $sqlDefault $sqlComputed)
 
-        # The name of the directory managed identity.
+        # The name of the agent registration identity.
         $dirComputed = "neologik-directory-managed-identity-$($script:ConfigData['SolutionShortName'])"
         $dirAns = [string](Get-Answer 'directoryIdentityName')
         $dirDefault = if (-not [string]::IsNullOrWhiteSpace($dirAns)) { $dirAns.Trim() } else { $dirComputed }
-        $script:ConfigData['DirectoryIdentityName'] = Read-NameWithDefault -Title 'Directory Managed Identity Name' `
+        $script:ConfigData['DirectoryIdentityName'] = Read-NameWithDefault -Title 'Agent Registration Identity Name' `
             -DefaultValue $dirDefault -Validator ${function:Test-ManagedIdentityNameError} `
             -LabelPrefix (Get-PromptLabel $dirDefault $dirComputed)
 
@@ -5970,7 +5970,7 @@ function Start-NeologikOnboarding {
         Write-SummaryRow 'Storage Account Name' $script:ConfigData['DeployStorageAccountName']
         Write-SummaryRow 'Script Runner Identity' $script:ConfigData['ScriptRunnerIdentityName']
         Write-SummaryRow 'SQL Managed Identity' $script:ConfigData['SqlIdentityName']
-        Write-SummaryRow 'Directory Managed Identity' $script:ConfigData['DirectoryIdentityName']
+        Write-SummaryRow 'Agent Registration Identity' $script:ConfigData['DirectoryIdentityName']
         Write-SummaryRow 'Solution Name' $script:ConfigData['SolutionName']
         Write-SummaryRow 'Solution Short Name' $script:ConfigData['SolutionShortName']
         Write-SummaryRow 'Provider Registration' "$($script:ProviderList.Providers.Count) resource providers and $($script:ProviderList.Features.Count) preview features, from resource-providers.txt"
