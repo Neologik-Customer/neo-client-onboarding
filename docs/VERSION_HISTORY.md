@@ -13,7 +13,10 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.1.12](#version-5112)
+2. [Version 5.1.11](#version-5111)
 2. [Version 5.1.10](#version-5110)
+2. [Version 5.1.9](#version-519)
 2. [Version 5.1.8](#version-518)
 2. [Version 5.1.7](#version-517)
 2. [Version 5.1.6](#version-516)
@@ -53,14 +56,14 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.1.10 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.10 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
+| `Install-NeologikEnvironment.ps1` | v5.1.12 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.12 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
 | `Remove-NeologikDirectoryObjects.ps1` | 1.0 | Deletes the directory objects of one environment, after the administrator confirms the list |
 
-## Version 5.1.10
+## Version 5.1.12
 
 **Date**: 2026-11-11
 
@@ -69,7 +72,43 @@ This version is on the line of Neologik Platform v5.1. This version corrects the
 | Item | Change |
 |---|---|
 | `docs/NETWORK-GUIDE.md` | The Standard row names the application routing gateway of the cluster as the entry point, behind a load balancer with a static public IP address. Before this version, the row named the NGINX ingress controller |
-| `Install-NeologikEnvironment.ps1` and `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.10 |
+| `Install-NeologikEnvironment.ps1` and `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.12 |
+
+## Version 5.1.11
+
+**Date**: 2026-11-11
+
+This version is on the line of Neologik Platform v5.1. The security overview and the summary of permissions list the Microsoft Graph application permission of the agent registration identity. No step of any script changes.
+
+| Item | Change |
+|---|---|
+| The documents | `docs/secure-overview.md` lists the permission `Application.ReadWrite.OwnedBy` of the agent registration identity, with the reason. The summary of permissions in `docs/QUICK-REFERENCE.md` lists the same permission |
+| `Install-NeologikEnvironment.ps1` | The version of the onboarding kit is v5.1.11 |
+| `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.11 |
+
+## Version 5.1.10
+
+**Date**: 2026-11-11
+
+This version is on the line of Neologik Platform v5.1. The documents and messages call the managed identity that manages the sign-in registrations of Neologik agents the agent registration identity. No step of any script changes, and the managed identity keeps the name `neologik-directory-managed-identity-<short name>`.
+
+| Item | Change |
+|---|---|
+| The documents | `README.md`, `docs/QUICK-REFERENCE.md`, `docs/TECHNICAL-REFERENCE.md` and `docs/secure-overview.md` name the agent registration identity |
+| `Install-NeologikEnvironment.ps1` | The question and the summary name the agent registration identity. The version of the onboarding kit is v5.1.10 |
+| `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.10 |
+
+## Version 5.1.9
+
+**Date**: 2026-11-11
+
+This version is on the line of Neologik Platform v5.1. The limited role of the deployment identity on the subscription now assigns two roles, and only to service principals.
+
+| Item | Change |
+|---|---|
+| `Install-NeologikEnvironment.ps1` | The condition on Role Based Access Control Administrator on the subscription lets the deployment identity assign or remove two roles, Reader and Cost Management Reader, for service principals only. AppGw for Containers Configuration Manager leaves the list, because the deployment assigns that role inside the resource group of the environment. The version of the onboarding kit is v5.1.9 |
+| `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.9 |
+| The documents | `README.md`, `docs/QUICK-REFERENCE.md`, `docs/TECHNICAL-REFERENCE.md` and `docs/secure-overview.md` describe the two roles |
 
 ## Version 5.1.8
 

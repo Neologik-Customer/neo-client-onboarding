@@ -30,7 +30,7 @@ The onboarding script also registers the Azure resource providers that the Neolo
 | Subject | Position |
 |---|---|
 | Resource group | The deployment identity can deploy Azure resources into one resource group |
-| Subscription | The deployment identity holds three roles: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning three roles. These roles change no Azure resource other than cost configuration, support requests and assignments of the three assignable roles. The limited role lets the deployment identity assign exactly three roles: Reader, AppGw for Containers Configuration Manager and Cost Management Reader. The deployment assigns the first two to the identity of the ingress controller of a Private Endpoint environment, and the third to the identity of the configuration API of the Neologik Platform on the resource group that Azure Kubernetes Service creates for the nodes of the cluster |
+| Subscription | The deployment identity holds three roles: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning two roles. These roles change no Azure resource other than cost configuration, support requests and assignments of the two assignable roles. The limited role lets the deployment identity assign exactly two roles, to service principals only: Reader and Cost Management Reader. The deployment assigns Reader to the identity of the ingress controller of a Private Endpoint environment, and Cost Management Reader to the identity of the configuration API of the Neologik Platform on the resource group that Azure Kubernetes Service creates for the nodes of the cluster |
 | Microsoft Graph | The deployment identity holds two Microsoft Graph application permissions: `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Microsoft Entra ID | The deployment identity receives no directory role |
 
@@ -142,7 +142,7 @@ The step numbers match the comments in the onboarding script. The first five row
 | 12c. Agent identity blueprint | Creates the agent identity blueprint and the service principal of the agent identity blueprint. Creates the owners, the Microsoft Graph application permission of the principal and three federated credentials |
 | 12d. Federated credential of the deployment identity | Adds one federated credential to the application registration of the deployment identity. The Neologik deployment can then sign in with no stored secret. The federated credential accepts only a Neologik deployment run that names this environment, and adds no permission |
 | 14. Storage account | Creates the storage account and three containers. Turns off public blob access and shared key access. Assigns one storage role to the Admin User Group |
-| 15. Managed identities | Creates the script runner managed identity, the SQL managed identity and the directory managed identity, and assigns the roles of each |
+| 15. Managed identities | Creates the script runner managed identity, the SQL managed identity and the agent registration identity, and assigns the roles of each |
 | 15b. Resource providers, second part | Submits the registrations of the other resource providers and the preview features that the Neologik Platform requires. Confirms each registration |
 | 15c. Version of the onboarding kit | Records this version of the onboarding kit in the tag `NeologikOnboardingKit`. A resource group that an earlier version prepared keeps the earlier version until this step |
 | 16. Export | Writes the configuration file. Uploads the configuration file and the log to the storage account. Deletes the checkpoint |
@@ -173,7 +173,7 @@ The onboarding script reads each directory object before a write. The onboarding
 | Microsoft Graph application permission of the service principal of the agent identity blueprint | `POST /servicePrincipals/{id}/appRoleAssignments` | `AgentIdUser.ReadWrite.IdentityParentedBy`. The permission applies only to the agent users of this agent identity blueprint | The principal does not already hold the permission |
 | Federated credentials on the agent identity blueprint | `POST /beta/applications/{id}/federatedIdentityCredentials` | Three federated credentials. See the next section | No federated credential has the name |
 | Federated credential of the deployment application | `POST /beta/applications/{id}/federatedIdentityCredentials` | Name `github-deployments-<environment name>`. The federated credential accepts only a Neologik deployment run that names this environment, and adds no permission | No federated credential has the name |
-| Microsoft Graph application permission of the directory managed identity | `POST /servicePrincipals/{id}/appRoleAssignments` | `Application.ReadWrite.OwnedBy`. The permission changes only the application registrations that the directory managed identity owns | The directory managed identity does not hold the permission |
+| Microsoft Graph application permission of the agent registration identity | `POST /servicePrincipals/{id}/appRoleAssignments` | `Application.ReadWrite.OwnedBy`. The permission changes only the application registrations that the agent registration identity owns | The agent registration identity does not hold the permission |
 | Directory Readers role | `New-MgDirectoryRole` from the role template, then `New-MgDirectoryRoleMemberByRef` | The SQL managed identity becomes a member. Azure SQL requires the membership to look up Microsoft Entra accounts at sign-in | The onboarding script activates the role only when the role was never activated. The onboarding script adds the membership only when the membership is absent |
 
 The onboarding script gives no administrator consent and creates no permission grant. A Global Administrator gives the consent after the deployment, as described in [FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md).
@@ -196,7 +196,7 @@ The deployment by Neologik creates agent identities and agent users as the agent
 | Resource providers and preview features | `Register-AzResourceProvider`, `Register-AzProviderFeature` | Subscription | The list in `resource-providers.txt`: 34 resource providers and 2 preview features |
 | Resource group | `New-AzResourceGroup`, `Update-AzTag` | Subscription | The name `rg-<solution name>`, in the Azure region that you chose, with tags. The tag `NeologikOnboardingKit` records the version of the onboarding kit. The onboarding script adds the tag and keeps your existing tags |
 | Roles of the Admin User Group | `New-AzRoleAssignment` | Resource group | The thirteen roles in the table below. No role on the subscription |
-| Roles of the deployment identity | `New-AzRoleAssignment` | Subscription | `Reader`, `Cost Management Contributor`, and `Role Based Access Control Administrator` with a condition that limits the roles the deployment identity may assign to `Reader`, `AppGw for Containers Configuration Manager` and `Cost Management Reader` |
+| Roles of the deployment identity | `New-AzRoleAssignment` | Subscription | `Reader`, `Cost Management Contributor`, and `Role Based Access Control Administrator` with a condition that limits the roles the deployment identity may assign to `Reader` and `Cost Management Reader`, for service principals only |
 | Roles of the deployment identity | `New-AzRoleAssignment` | Resource group | `Contributor`<br>`Key Vault Certificates Officer`<br>`Key Vault Secrets Officer`<br>`Storage Blob Data Contributor`<br>`Azure Kubernetes Service RBAC Cluster Admin`<br>`Monitoring Contributor`<br>`Role Based Access Control Administrator` |
 | Key Vault | `New-AzKeyVault`, `Update-AzKeyVault` | Resource group | The name `kv<short name>`, or the name that you give. Azure role-based access control, set at creation. Tags. The onboarding script does not change the settings of an existing Key Vault |
 | Role of the administrator for the secrets | `New-AzRoleAssignment` | Resource group | `Key Vault Secrets Officer` for the signed-in administrator. The onboarding script needs the role to store the client secrets |
@@ -205,7 +205,7 @@ The deployment by Neologik creates agent identities and agent users as the agent
 | Role of the administrator for the upload | `New-AzRoleAssignment` | Resource group | `Storage Blob Data Contributor` for the signed-in administrator |
 | Script runner managed identity | `New-AzUserAssignedIdentity`, `New-AzRoleAssignment` | Resource group | The name `neologik-script-runner-service-connection-<short name>`. The roles `Reader`, `Key Vault Secrets Officer` and `Azure Bot Service Contributor Role` on the resource group. No role on the subscription |
 | SQL managed identity | `New-AzUserAssignedIdentity` | Resource group | The name `neologik-sql-managed-identity-<short name>`. No Azure role |
-| Directory managed identity | `New-AzUserAssignedIdentity` | Resource group | The name `neologik-directory-managed-identity-<short name>`. No Azure role. The Microsoft Graph application permission `Application.ReadWrite.OwnedBy` |
+| Agent registration identity | `New-AzUserAssignedIdentity` | Resource group | The name `neologik-directory-managed-identity-<short name>`. No Azure role. The Microsoft Graph application permission `Application.ReadWrite.OwnedBy` |
 | Uploads | `Set-AzStorageBlobContent` | The containers `json` and `logs` | The configuration file and the log. The upload uses Microsoft Entra authentication |
 
 | The thirteen roles of the Admin User Group on the resource group |
@@ -375,13 +375,14 @@ The onboarding script writes a checkpoint at these points:
 
 | Scope | Who holds the roles or the permissions | Roles or permissions |
 |---|---|---|
-| Subscription | Deployment identity | Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning three roles: Reader, AppGw for Containers Configuration Manager and Cost Management Reader |
+| Subscription | Deployment identity | Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning two roles, Reader and Cost Management Reader, to service principals only |
 | Resource group | Deployment identity | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator |
 | Resource group | Script runner managed identity. The deployment runs scripts inside Azure as this managed identity | Reader<br>Key Vault Secrets Officer<br>Azure Bot Service Contributor Role |
 | Resource group | The group `Neologik Admin User Group - <short name>` | The thirteen roles listed under [Azure writes](#azure-writes) |
 | Resource group | The signed-in administrator | Key Vault Secrets Officer and Storage Blob Data Contributor |
 | Microsoft Graph application permissions | Deployment identity | `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Microsoft Graph application permissions | Service principal of the agent identity blueprint | `AgentIdUser.ReadWrite.IdentityParentedBy` |
+| Microsoft Graph application permissions | Agent registration identity | `Application.ReadWrite.OwnedBy` |
 | Microsoft Entra directory roles | SQL managed identity | Directory Readers |
 | Microsoft Entra directory roles | Deployment identity | None |
 | Membership of security groups | Deployment identity and managed identities | None |

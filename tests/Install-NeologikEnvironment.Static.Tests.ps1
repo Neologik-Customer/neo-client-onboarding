@@ -73,11 +73,19 @@ It 'ships an example answer file that names the environment name' {
     $json.PSObject.Properties.Name | Should -Contain 'environmentName'
 }
 
-It 'creates the directory managed identity with one Microsoft Graph permission and no Azure role' {
+It 'creates the agent registration identity with one Microsoft Graph permission and no Azure role' {
     $text = Get-Content -Raw $script:ScriptPath
     $text | Should -Match 'Name = \$directoryIdentityName'
     $text | Should -Match "GraphAppRoles = @\('Application\.ReadWrite\.OwnedBy'\)\s+\}\s+\)"
     $text | Should -Match 'neologik-directory-managed-identity\$nameSuffix'
+}
+
+It 'limits the role on the subscription to Reader and Cost Management Reader, for service principals only' {
+    $text = Get-Content -Raw $script:ScriptPath
+    $text | Should -Match "'acdd72a7-3385-48ef-bd42-f606fba81ae7',\s+'72fafb9e-0641-4937-9268-a91bfd8191a3'\s+\)"
+    $text | Should -Match "@Request\[Microsoft\.Authorization/roleAssignments:PrincipalType\] ForAnyOfAnyValues:StringEqualsIgnoreCase \{\{'ServicePrincipal'\}\}"
+    $text | Should -Match "@Resource\[Microsoft\.Authorization/roleAssignments:PrincipalType\] ForAnyOfAnyValues:StringEqualsIgnoreCase \{\{'ServicePrincipal'\}\}"
+    $text | Should -Not -Match 'fbc52c3f-28ad-4303-a892-8a056630b8f1'
 }
 
 It 'asks no question about a cost report' {

@@ -198,7 +198,7 @@ The onboarding script builds every standard name from two values: the solution n
 | Deployment storage account | `stneodeploy<org><env><region><index>`, cut to 24 characters | `stneodeployabcprduks01` |
 | Script runner managed identity | `neologik-script-runner-service-connection-<short name>` | `neologik-script-runner-service-connection-abcprd01` |
 | SQL managed identity | `neologik-sql-managed-identity-<short name>` | `neologik-sql-managed-identity-abcprd01` |
-| Directory managed identity | `neologik-directory-managed-identity-<short name>` | `neologik-directory-managed-identity-abcprd01` |
+| Agent registration identity | `neologik-directory-managed-identity-<short name>` | `neologik-directory-managed-identity-abcprd01` |
 | Federated credential of the deployment identity | `github-deployments-<environment name>` | `github-deployments-abcprd` |
 | Security groups | `Neologik User Group - <short name>`<br>`Neologik NCE Contributors - <short name>`<br>`Neologik NCE Admins - <short name>`<br>`Neologik Admin User Group - <short name>` | `Neologik User Group - abcprd01` |
 | Deployment identity | `Neologik GitHub Service Connection - <short name>` | `Neologik GitHub Service Connection - abcprd01` |
@@ -295,7 +295,7 @@ The onboarding script stores the client secret in the Key Vault, as the secret `
 
 | Scope | What the deployment identity holds |
 |---|---|
-| Subscription | Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning three roles: Reader, AppGw for Containers Configuration Manager and Cost Management Reader |
+| Subscription | Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning two roles, Reader and Cost Management Reader, to service principals only |
 | Resource group | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator |
 | Microsoft Graph application permissions | `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Security groups | No membership |
