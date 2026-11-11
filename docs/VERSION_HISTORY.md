@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.1.12](#version-5112)
 2. [Version 5.1.11](#version-5111)
 2. [Version 5.1.10](#version-5110)
 2. [Version 5.1.9](#version-519)
@@ -55,12 +56,23 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.1.11 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.11 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
+| `Install-NeologikEnvironment.ps1` | v5.1.12 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.12 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
 | `Remove-NeologikDirectoryObjects.ps1` | 1.0 | Deletes the directory objects of one environment, after the administrator confirms the list |
+
+## Version 5.1.12
+
+**Date**: 2026-11-11
+
+This version is on the line of Neologik Platform v5.1. This version corrects the entry point of a Standard environment in the network guide and moves the version number. No step of any script changes.
+
+| Item | Change |
+|---|---|
+| `docs/NETWORK-GUIDE.md` | The Standard row names the application routing gateway of the cluster as the entry point, behind a load balancer with a static public IP address. Before this version, the row named the NGINX ingress controller |
+| `Install-NeologikEnvironment.ps1` and `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.12 |
 
 ## Version 5.1.11
 
