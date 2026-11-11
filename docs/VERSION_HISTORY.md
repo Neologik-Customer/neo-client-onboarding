@@ -14,6 +14,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 
 1. [Scripts in this version](#scripts-in-this-version)
 2. [Version 5.2.0](#version-520)
+2. [Version 5.1.12](#version-5112)
 2. [Version 5.1.11](#version-5111)
 2. [Version 5.1.10](#version-5110)
 2. [Version 5.1.9](#version-519)
@@ -75,6 +76,17 @@ This version is on the line of Neologik Platform v5.2. This version limits the r
 | `Install-NeologikEnvironment.ps1` | Role Based Access Control Administrator on the subscription is limited to Reader and Cost Management Reader, for service principals only |
 | `Install-NeologikEnvironment.ps1` | Step 15 creates the system task managed identity, and gives the managed identity Role Based Access Control Administrator on the resource group with the same condition |
 | `inputs-example.json` | One new answer: `systemTaskIdentityName` |
+
+## Version 5.1.12
+
+**Date**: 2026-11-11
+
+This version is on the line of Neologik Platform v5.1. This version corrects the entry point of a Standard environment in the network guide and moves the version number. No step of any script changes.
+
+| Item | Change |
+|---|---|
+| `docs/NETWORK-GUIDE.md` | The Standard row names the application routing gateway of the cluster as the entry point, behind a load balancer with a static public IP address. Before this version, the row named the NGINX ingress controller |
+| `Install-NeologikEnvironment.ps1` and `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.12 |
 
 ## Version 5.1.11
 
