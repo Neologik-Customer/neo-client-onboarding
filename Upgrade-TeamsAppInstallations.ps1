@@ -50,7 +50,7 @@
     # Shows what a run would upgrade and upgrades nothing.
 
 .NOTES
-    Version: v0.2.1
+    Version: v0.2.2
     Requires: PowerShell 7.4 or later
     Requires: the Microsoft Graph PowerShell modules. The script installs the modules
     for the current user when the modules are missing
@@ -80,7 +80,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $InformationPreference = 'Continue'
 
-$script:Version = 'v0.2.1'
+$script:Version = 'v0.2.2'
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $script:LogFile = Join-Path $PSScriptRoot "TeamsAppUpgrade_$($script:FileTimestamp).log"
 $script:ReportFile = Join-Path $PSScriptRoot "TeamsAppUpgrade_$($script:FileTimestamp).csv"

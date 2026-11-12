@@ -62,7 +62,7 @@ The table shows the version that each script reports.
 | `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.2.0 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
-| `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+| `Upgrade-TeamsAppInstallations.ps1` | v0.2.2 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
 | `Remove-NeologikDirectoryObjects.ps1` | 1.0 | Deletes the directory objects of one environment, after the administrator confirms the list |
 
 ## Version 5.2.0
@@ -78,7 +78,7 @@ This version is on the line of Neologik Platform v5.2. This version limits the r
 | `Install-NeologikEnvironment.ps1` | Step 15 creates the system task managed identity, and gives the managed identity Role Based Access Control Administrator on the resource group with the same condition |
 | `Install-NeologikEnvironment.ps1` | The functions `New-NeologikSubscription` and `Get-UserInput` leave the onboarding script. No part of the onboarding script called either function. No step of the onboarding script changes |
 | `inputs-example.json` | One new answer: `systemTaskIdentityName` |
-| `Upgrade-TeamsAppInstallations.ps1` | The function `Grant-AdminConsent` leaves the script, together with the application ids of Microsoft Graph PowerShell and Microsoft Graph that only the function read. No part of the script called the function. No step of the script changes |
+| `Upgrade-TeamsAppInstallations.ps1` | Version v0.2.2. The function `Grant-AdminConsent` leaves the script, together with the application ids of Microsoft Graph PowerShell and Microsoft Graph that only the function read. No part of the script called the function. No step of the script changes |
 
 ## Version 5.1.13
 
