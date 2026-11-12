@@ -13,7 +13,7 @@
   "applyResourceTags": true,
   "resourceTagsCustom": {},
 
-  "_naming_note": "Optional names of your own. Leave a field empty, or remove it, to accept the standard name. solutionName: neo-<org><env>-<region>-<index>, for example neo-abcprd-uks-01. solutionShortName: <org><env><index>, for example abcprd01; it also forms the suffix of the security group, application and managed identity names. keyVaultName: 3 to 24 characters, letters, digits and hyphens, beginning with a letter. storageAccountName: 3 to 24 characters, lower-case letters and digits. scriptRunnerIdentityName and sqlIdentityName: 3 to 128 characters, letters, digits, hyphens and underscores, beginning with a letter or digit.",
+  "_naming_note": "Optional names of your own. Leave a field empty, or remove it, to accept the standard name. solutionName: neo-<org><env>-<region>-<index>, for example neo-abcprd-uks-01. solutionShortName: <org><env><index>, for example abcprd01; it also forms the suffix of the security group, application and managed identity names. keyVaultName: 3 to 24 characters, letters, digits and hyphens, beginning with a letter. storageAccountName: 3 to 24 characters, lower-case letters and digits. scriptRunnerIdentityName, sqlIdentityName and directoryIdentityName: 3 to 128 characters, letters, digits, hyphens and underscores, beginning with a letter or digit. directoryIdentityName names the agent registration identity.",
   "solutionName": "",
   "solutionShortName": "",
   "resourceGroupName": "",
@@ -21,6 +21,7 @@
   "storageAccountName": "",
   "scriptRunnerIdentityName": "",
   "sqlIdentityName": "",
+  "directoryIdentityName": "",
 
   "skipGuestInvitation": false,
   "_existingAccounts_note": "Read only when skipGuestInvitation is true. addExistingAccountsToGroups true adds accounts you have already created, as guests or as members, to the security groups, and sends no invitation. existingAccountEmails lists their addresses; when it is omitted, the addresses in NeologikGuestUsers.txt are used. Each address must match the account's mail address or user principal name exactly. An address with no matching account is reported and passed over. Accounts added in this way join all four Neologik security groups, including the Admin User Group, which carries Azure administration rights on the resource group.",

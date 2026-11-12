@@ -17,8 +17,8 @@
        administrator chooses invitation.
     6. The script creates the resource group, the security groups, the deployment
        identity, the Key Vault, the Platform Sign-in application, the agent identity
-       blueprint, the deployment storage account and two managed identities. The
-       script assigns the roles of each.
+       blueprint, the deployment storage account and three managed identities. The
+       script assigns the roles and permissions of each.
     7. The script registers the other Azure resource providers and the preview
        features that the Neologik Platform requires, and confirms every registration.
     8. The script writes a configuration file and a log.
@@ -220,7 +220,7 @@ $WarningPreference = 'Continue'
 $script:Version = 'v5.0.15'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.1.14'
+$script:KitVersion = 'v5.1.15'
 
 # The third role of the deployment identity on the subscription: Role Based Access
 # Control Administrator, limited by a condition to two roles, for service principals
@@ -3845,8 +3845,8 @@ function New-NeologikStorageAccount {
 function New-NeologikManagedIdentities {
     <#
     .SYNOPSIS
-        Creates the two user-assigned managed identities and assigns the roles of
-        each.
+        Creates the three user-assigned managed identities and assigns the roles and
+        permissions of each.
     #>
     [CmdletBinding()]
     param(
@@ -3872,7 +3872,10 @@ function New-NeologikManagedIdentities {
         [string]$ScriptRunnerIdentityName = "",
 
         [Parameter(Mandatory = $false)]
-        [string]$SqlIdentityName = ""
+        [string]$SqlIdentityName = "",
+
+        [Parameter(Mandatory = $false)]
+        [string]$DirectoryIdentityName = ""
     )
 
     Write-Log "Creating the managed identities..." -Level Info
@@ -3894,6 +3897,7 @@ function New-NeologikManagedIdentities {
         # When a checkpoint holds no name, the script uses the standard name.
         $scriptRunnerName = if (-not [string]::IsNullOrWhiteSpace($ScriptRunnerIdentityName)) { $ScriptRunnerIdentityName.Trim() } else { "neologik-script-runner-service-connection$nameSuffix" }
         $sqlIdentityName = if (-not [string]::IsNullOrWhiteSpace($SqlIdentityName)) { $SqlIdentityName.Trim() } else { "neologik-sql-managed-identity$nameSuffix" }
+        $directoryIdentityName = if (-not [string]::IsNullOrWhiteSpace($DirectoryIdentityName)) { $DirectoryIdentityName.Trim() } else { "neologik-directory-managed-identity$nameSuffix" }
 
         $managedIdentities = @(
             @{
@@ -3911,6 +3915,16 @@ function New-NeologikManagedIdentities {
                 DisplayName = "Neologik SQL Managed Identity$displaySuffix"
                 Roles = @()
                 EntraRole = 'Directory Readers'
+            },
+            @{
+                Name = $directoryIdentityName
+                DisplayName = "Neologik Agent Registration Identity$displaySuffix"
+                # From version 5.2 of the Neologik Platform, this managed identity creates and changes the application
+                # registrations of Neologik agents from inside the environment. The permission changes only the application
+                # registrations that the managed identity owns. The managed identity holds no Azure role. Nothing can
+                # sign in as the managed identity until a deployment by Neologik adds the sign-in credential.
+                Roles = @()
+                GraphAppRoles = @('Application.ReadWrite.OwnedBy')
             }
         )
 
@@ -4763,6 +4777,13 @@ function Set-ConfigFromAnswerFile {
     $sqlErr = Test-ManagedIdentityNameError $script:ConfigData['SqlIdentityName']
     if ($sqlErr) { throw "sqlIdentityName '$($script:ConfigData['SqlIdentityName'])': $sqlErr" }
 
+    # The name of the agent registration identity, from the answer file or the standard name.
+    $dirComputed = "neologik-directory-managed-identity-$($script:ConfigData['SolutionShortName'])"
+    $dirAns = [string](Get-Answer 'directoryIdentityName')
+    $script:ConfigData['DirectoryIdentityName'] = if (-not [string]::IsNullOrWhiteSpace($dirAns)) { $dirAns.Trim() } else { $dirComputed }
+    $dirErr = Test-ManagedIdentityNameError $script:ConfigData['DirectoryIdentityName']
+    if ($dirErr) { throw "directoryIdentityName '$($script:ConfigData['DirectoryIdentityName'])': $dirErr" }
+
     # A platform operator creates agents and channels in the Neologik Admin Tool after the deployment.
 
     # Tags. The answer file can hold a boolean, whose default value is to apply the tags. The answer file
@@ -5565,6 +5586,14 @@ function Start-NeologikOnboarding {
             -DefaultValue $sqlDefault -Validator ${function:Test-ManagedIdentityNameError} `
             -LabelPrefix (Get-PromptLabel $sqlDefault $sqlComputed)
 
+        # The name of the agent registration identity.
+        $dirComputed = "neologik-directory-managed-identity-$($script:ConfigData['SolutionShortName'])"
+        $dirAns = [string](Get-Answer 'directoryIdentityName')
+        $dirDefault = if (-not [string]::IsNullOrWhiteSpace($dirAns)) { $dirAns.Trim() } else { $dirComputed }
+        $script:ConfigData['DirectoryIdentityName'] = Read-NameWithDefault -Title 'Agent Registration Identity Name' `
+            -DefaultValue $dirDefault -Validator ${function:Test-ManagedIdentityNameError} `
+            -LabelPrefix (Get-PromptLabel $dirDefault $dirComputed)
+
         # A platform operator creates agents and channels in the Neologik Admin Tool after the
         # deployment. A channel uses the standard security group for users that this script creates, or an existing
         # security group that an administrator names. The Neologik Platform creates no security group.
@@ -5856,6 +5885,7 @@ function Start-NeologikOnboarding {
         Write-SummaryRow 'Storage Account Name' $script:ConfigData['DeployStorageAccountName']
         Write-SummaryRow 'Script Runner Identity' $script:ConfigData['ScriptRunnerIdentityName']
         Write-SummaryRow 'SQL Managed Identity' $script:ConfigData['SqlIdentityName']
+        Write-SummaryRow 'Agent Registration Identity' $script:ConfigData['DirectoryIdentityName']
         Write-SummaryRow 'Solution Name' $script:ConfigData['SolutionName']
         Write-SummaryRow 'Solution Short Name' $script:ConfigData['SolutionShortName']
         Write-SummaryRow 'Provider Registration' "$($script:ProviderList.Providers.Count) resource providers and $($script:ProviderList.Features.Count) preview features, from resource-providers.txt"
@@ -6055,7 +6085,8 @@ function Start-NeologikOnboarding {
             -EnvironmentType $script:EnvironmentType `
             -EnvironmentIndex $script:EnvironmentIndex `
             -ScriptRunnerIdentityName ([string]$script:ConfigData['ScriptRunnerIdentityName']) `
-            -SqlIdentityName ([string]$script:ConfigData['SqlIdentityName'])
+            -SqlIdentityName ([string]$script:ConfigData['SqlIdentityName']) `
+            -DirectoryIdentityName ([string]$script:ConfigData['DirectoryIdentityName'])
 
         # Step 15b: Submit the registration of every other resource provider and every preview feature in the list.
         # The deployment of the Neologik Platform needs them. This run does not. Then confirm every resource provider

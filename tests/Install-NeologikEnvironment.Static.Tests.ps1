@@ -67,17 +67,26 @@ It 'records this version of the onboarding kit only after the steps of this vers
     $finalWrite | Should -BeGreaterThan $text.IndexOf('$null = New-NeologikManagedIdentities')
 }
 
-It 'ships an example answer file that names neither the environment name nor the agent registration identity' {
+It 'ships an example answer file that names the agent registration identity and no environment name' {
     $json = Get-Content -Raw (Join-Path (Split-Path -Parent $PSScriptRoot) 'inputs-example.json') | ConvertFrom-Json
+    $json.PSObject.Properties.Name | Should -Contain 'directoryIdentityName'
     $json.PSObject.Properties.Name | Should -Not -Contain 'environmentName'
-    $json.PSObject.Properties.Name | Should -Not -Contain 'directoryIdentityName'
 }
 
-It 'creates no agent registration identity and grants no AgentRegistration.ReadWrite.All' {
+It 'creates the agent registration identity with one Microsoft Graph permission and no Azure role' {
     $text = Get-Content -Raw $script:ScriptPath
-    $text | Should -Not -Match 'neologik-directory-managed-identity'
+    $text | Should -Match 'Name = \$directoryIdentityName'
+    $text | Should -Match "GraphAppRoles = @\('Application\.ReadWrite\.OwnedBy'\)\s+\}\s+\)"
+    $text | Should -Match 'neologik-directory-managed-identity\$nameSuffix'
     $text | Should -Not -Match 'AgentRegistration\.ReadWrite\.All'
-    $text | Should -Not -Match 'DirectoryIdentityName'
+}
+
+It 'asks for the name of the agent registration identity and passes the name to step 15' {
+    $text = Get-Content -Raw $script:ScriptPath
+    ([regex]::Matches($text, [regex]::Escape("Get-Answer 'directoryIdentityName'"))).Count | Should -Be 2 -Because 'the answer file run and the run with questions both read the answer'
+    $text | Should -Match ([regex]::Escape("Read-NameWithDefault -Title 'Agent Registration Identity Name'"))
+    $text | Should -Match ([regex]::Escape("-DirectoryIdentityName ([string]`$script:ConfigData['DirectoryIdentityName'])"))
+    $text | Should -Not -Match ([regex]::Escape("Get-Answer 'environmentName'"))
 }
 
 It 'limits the role on the subscription to Reader and Cost Management Reader, for service principals only' {
