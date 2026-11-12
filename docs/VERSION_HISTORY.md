@@ -76,6 +76,7 @@ This version is on the line of Neologik Platform v5.1. Step 15 creates the agent
 |---|---|
 | `Install-NeologikEnvironment.ps1` | Step 15 creates three managed identities: the script runner managed identity, the SQL managed identity and the agent registration identity. The agent registration identity holds no Azure role and one Microsoft Graph application permission, `Application.ReadWrite.OwnedBy`, which changes only the application registrations that the agent registration identity owns. The script grants no `AgentRegistration.ReadWrite.All`. The script asks for the name of the agent registration identity again. The script has no step 12d and asks for no environment name. The version of the onboarding kit is v5.1.15 |
 | `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.15 |
+| The Neologik guest users | The onboarding script also finds a Neologik guest whose account holds the listed address among the account's other mail addresses, as an account first invited under another address does. The script no longer invites that guest a second time, with an email |
 | `inputs-example.json` | The answer `directoryIdentityName` is back. The answer `environmentName` stays gone, and the script ignores the answer in an older answer file |
 | The documents | `README.md`, `docs/PRE-ONBOARDING-INFO-GATHERING.md`, `docs/QUICK-REFERENCE.md`, `docs/secure-overview.md` and `docs/TECHNICAL-REFERENCE.md` describe the agent registration identity and the one permission |
 

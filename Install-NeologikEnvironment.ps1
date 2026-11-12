@@ -1225,11 +1225,14 @@ function Test-RequiredPermissions {
 function Find-NeologikUserByEmail {
     <#
     .SYNOPSIS
-        Finds a user account by mail address or by user principal name.
+        Finds a user account by mail address, by user principal name or by another
+        mail address of the account.
     .DESCRIPTION
         The function sends a Microsoft Graph request on the open session. The function
         returns the id and the displayName of the account. The function returns $null
-        when no account matches or when the request fails.
+        when no account matches or when the request fails. A guest first invited under
+        another address keeps this address in otherMails, so the function also matches
+        otherMails, and the script does not invite that guest again.
     #>
     [CmdletBinding()]
     param(
@@ -1238,7 +1241,7 @@ function Find-NeologikUserByEmail {
     )
 
     $safeEmail = $Email -replace "'", "''"
-    $filter = [uri]::EscapeDataString("mail eq '$safeEmail' or userPrincipalName eq '$safeEmail'")
+    $filter = [uri]::EscapeDataString("mail eq '$safeEmail' or userPrincipalName eq '$safeEmail' or otherMails/any(m:m eq '$safeEmail')")
     try {
         $result = Invoke-MgGraphRequest -Method GET -Uri "v1.0/users?`$filter=$filter&`$select=id,displayName" -ErrorAction Stop
         if ($result.value -and $result.value.Count -gt 0) {
