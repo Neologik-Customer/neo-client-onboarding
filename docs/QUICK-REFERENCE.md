@@ -173,7 +173,7 @@ The onboarding script reads each directory object before a write. The onboarding
 | Microsoft Graph application permission of the service principal of the agent identity blueprint | `POST /servicePrincipals/{id}/appRoleAssignments` | `AgentIdUser.ReadWrite.IdentityParentedBy`. The permission applies only to the agent users of this agent identity blueprint | The principal does not already hold the permission |
 | Federated credentials on the agent identity blueprint | `POST /beta/applications/{id}/federatedIdentityCredentials` | Three federated credentials. See the next section | No federated credential has the name |
 | Federated credential of the deployment application | `POST /beta/applications/{id}/federatedIdentityCredentials` | Name `github-deployments-<environment name>`. The federated credential accepts only a Neologik deployment run that names this environment, and adds no permission | No federated credential has the name |
-| Microsoft Graph application permission of the agent registration identity | `POST /servicePrincipals/{id}/appRoleAssignments` | `Application.ReadWrite.OwnedBy`. The permission changes only the application registrations that the agent registration identity owns | The agent registration identity does not hold the permission |
+| Microsoft Graph application permissions of the agent registration identity | `POST /servicePrincipals/{id}/appRoleAssignments` | `Application.ReadWrite.OwnedBy` and `AgentRegistration.ReadWrite.All`. The first permission changes only the application registrations that the agent registration identity owns. The second permission writes the agent registry entries of the Neologik agents | The agent registration identity does not hold a permission |
 | Directory Readers role | `New-MgDirectoryRole` from the role template, then `New-MgDirectoryRoleMemberByRef` | The SQL managed identity becomes a member. Azure SQL requires the membership to look up Microsoft Entra accounts at sign-in | The onboarding script activates the role only when the role was never activated. The onboarding script adds the membership only when the membership is absent |
 
 The onboarding script gives no administrator consent and creates no permission grant. A Global Administrator gives the consent after the deployment, as described in [FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md).
@@ -205,7 +205,7 @@ The deployment by Neologik creates agent identities and agent users as the agent
 | Role of the administrator for the upload | `New-AzRoleAssignment` | Resource group | `Storage Blob Data Contributor` for the signed-in administrator |
 | Script runner managed identity | `New-AzUserAssignedIdentity`, `New-AzRoleAssignment` | Resource group | The name `neologik-script-runner-service-connection-<short name>`. The roles `Reader`, `Key Vault Secrets Officer` and `Azure Bot Service Contributor Role` on the resource group. No role on the subscription |
 | SQL managed identity | `New-AzUserAssignedIdentity` | Resource group | The name `neologik-sql-managed-identity-<short name>`. No Azure role |
-| Agent registration identity | `New-AzUserAssignedIdentity` | Resource group | The name `neologik-directory-managed-identity-<short name>`. No Azure role. The Microsoft Graph application permission `Application.ReadWrite.OwnedBy` |
+| Agent registration identity | `New-AzUserAssignedIdentity` | Resource group | The name `neologik-directory-managed-identity-<short name>`. No Azure role. The Microsoft Graph application permissions `Application.ReadWrite.OwnedBy` and `AgentRegistration.ReadWrite.All` |
 | System task managed identity | `New-AzUserAssignedIdentity`, `New-AzRoleAssignment` | Resource group | The name `neologik-system-task-managed-identity-<short name>`. `Role Based Access Control Administrator` on the resource group with a condition that stops the managed identity assigning `Owner`, `User Access Administrator` or `Role Based Access Control Administrator`, and limits every other assignment to service principals |
 | Uploads | `Set-AzStorageBlobContent` | The containers `json` and `logs` | The configuration file and the log. The upload uses Microsoft Entra authentication |
 
@@ -383,7 +383,7 @@ The onboarding script writes a checkpoint at these points:
 | Resource group | The signed-in administrator | Key Vault Secrets Officer and Storage Blob Data Contributor |
 | Microsoft Graph application permissions | Deployment identity | `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Microsoft Graph application permissions | Service principal of the agent identity blueprint | `AgentIdUser.ReadWrite.IdentityParentedBy` |
-| Microsoft Graph application permissions | Agent registration identity | `Application.ReadWrite.OwnedBy` |
+| Microsoft Graph application permissions | Agent registration identity | `Application.ReadWrite.OwnedBy` and `AgentRegistration.ReadWrite.All` |
 | Microsoft Entra directory roles | SQL managed identity | Directory Readers |
 | Microsoft Entra directory roles | Deployment identity | None |
 | Membership of security groups | Deployment identity and managed identities | None |
