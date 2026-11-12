@@ -156,6 +156,7 @@ The onboarding script reads each directory object before a write. The onboarding
 | Guest invitation | `New-MgInvitation` | The address. A redirect to the Azure portal. An invitation email | You chose invitation, and no account has that mail address or that user principal name |
 | Security group | `New-MgGroup` | Display name and description. Security enabled. Not mail enabled | The security group is absent |
 | Name of a security group | `Update-MgGroup` | Display name and description | The tenant holds the group `Neologik NCE Contributors - <short name>` under one of two other names that the onboarding script recognises. The security group keeps the id and the members. A new environment holds no security group with either name |
+| Description of a security group | `Update-MgGroup` | Description. See [The descriptions that the onboarding script writes](#the-descriptions-that-the-onboarding-script-writes) | The security group exists with another description. When the update fails, the onboarding script reports a warning and continues |
 | Member of a security group | `New-MgGroupMember` | The invited accounts, the existing accounts and the signed-in administrator. Each account joins all four security groups | The account is not already a member |
 | Deployment application | `New-MgApplication` | Display name `Neologik GitHub Service Connection - <short name>`. Single-tenant sign-in audience | The onboarding script creates the deployment identity, and the application is absent |
 | Deployment service principal | `New-MgServicePrincipal` | Created from the deployment application | The service principal is absent |
@@ -188,6 +189,19 @@ The deployment by Neologik creates agent identities and agent users as the agent
 | Issuer | `https://token.actions.githubusercontent.com` |
 | Audience | `api://AzureADTokenExchange` |
 | Trust | Each federated credential trusts one repository of the Neologik deployment. Each federated credential names the repository by the repository id, which never changes. A repository that is renamed or copied gains no access through the federated credential |
+
+### The descriptions that the onboarding script writes
+
+The onboarding script writes a description on each security group and on each federated credential that the onboarding script creates. The Microsoft Entra admin center shows each description.
+
+| Directory object | Description |
+|---|---|
+| `Neologik User Group - <short name>` | This security group holds the people who use the Neologik agents of this environment. In the Neologik Admin Tool, each channel of a Neologik agent names the security group whose members can use the Neologik agent. |
+| `Neologik NCE Contributors - <short name>` | Members of this security group hold the contributor role in the Neologik Admin Tool. A member can create and change the configuration of the Neologik Platform. |
+| `Neologik NCE Admins - <short name>` | Members of this security group hold the administrator role in the Neologik Admin Tool. A member has full access to the Neologik Admin Tool, including the Blueprints, Audit and Admin pages. |
+| `Neologik Admin User Group - <short name>` | Members of this security group administer and support the Azure resources of this Neologik Platform environment. This security group holds Azure roles on the resource group of the environment. |
+| Each federated credential on the agent identity blueprint, `github-oidc-<repository>` | This federated credential lets a Neologik deployment run in the Neologik GitHub repository `<repository>` sign in as this agent identity blueprint with no stored secret. The Neologik deployment then creates the agent identities and the agent users of this environment. |
+| The federated credential of the deployment identity, `github-deployments-<environment name>` | This federated credential lets a Neologik deployment run for the environment `<environment name>` sign in as the deployment identity with no stored secret. The federated credential adds no permission. |
 
 ## Azure writes
 

@@ -1632,22 +1632,22 @@ function New-NeologikSecurityGroups {
         $groups = @()
         $groups += @{
             Name = "Neologik User Group$groupSuffix"
-            Description = 'Default Neologik users group - assign to agent channels created in the NCE'
+            Description = 'This security group holds the people who use the Neologik agents of this environment. In the Neologik Admin Tool, each channel of a Neologik agent names the security group whose members can use the Neologik agent.'
         }
         # The two security groups for roles in the Neologik Admin Tool: contributors and administrators.
         # When the contributors group exists under another recognised name, the script renames the group. The group keeps the id.
         $groups += @{
             Name = "Neologik NCE Contributors$groupSuffix"
-            Description = 'NCE contributor role - create and change platform configuration in the Neologik Admin Tool'
+            Description = 'Members of this security group hold the contributor role in the Neologik Admin Tool. A member can create and change the configuration of the Neologik Platform.'
             PreviousNames = @("Neologik NCE User Group$groupSuffix", "Neologik Harness User Group$groupSuffix")
         }
         $groups += @{
             Name = "Neologik NCE Admins$groupSuffix"
-            Description = 'NCE admin role - full access including Blueprints, Audit and the Admin page'
+            Description = 'Members of this security group hold the administrator role in the Neologik Admin Tool. A member has full access to the Neologik Admin Tool, including the Blueprints, Audit and Admin pages.'
         }
         $groups += @{
             Name = "Neologik Admin User Group$groupSuffix"
-            Description = 'Users who will administer and support the resources'
+            Description = 'Members of this security group administer and support the Azure resources of this Neologik Platform environment. This security group holds Azure roles on the resource group of the environment.'
         }
 
         $createdGroups = @()
@@ -1673,6 +1673,19 @@ function New-NeologikSecurityGroups {
             if ($existingGroup) {
                 Write-Log "Security group '$($groupDef.Name)' already exists, id $($existingGroup.Id)" -Level Info
                 $group = $existingGroup
+
+                # A security group from an earlier run can hold the description of an earlier version of the
+                # script. The script then writes the description of this version. A failed update leaves the
+                # earlier description, and the run continues.
+                if ([string]$existingGroup.Description -cne $groupDef.Description) {
+                    try {
+                        Update-MgGroup -GroupId $existingGroup.Id -Description $groupDef.Description -ErrorAction Stop
+                        Write-Log "Description of the security group '$($groupDef.Name)' updated" -Level Success
+                    }
+                    catch {
+                        Write-Log "Warning: the script could not update the description of the security group '$($groupDef.Name)': $_" -Level Warning
+                    }
+                }
             }
             else {
                 Write-Log "Creating the security group $($groupDef.Name)..." -Level Info
@@ -3110,7 +3123,7 @@ function New-NeologikAgentBlueprint {
                 name                     = $credName
                 issuer                   = 'https://token.actions.githubusercontent.com'
                 audiences                = @('api://AzureADTokenExchange')
-                description              = "Neologik deployment pipeline ($($repo.Name)) acts as this blueprint to mint agent identities and users"
+                description              = "This federated credential lets a Neologik deployment run in the Neologik GitHub repository $($repo.Name) sign in as this agent identity blueprint with no stored secret. The Neologik deployment then creates the agent identities and the agent users of this environment."
                 claimsMatchingExpression = @{ value = $expression; languageVersion = 1 }
             } | ConvertTo-Json -Depth 5 -Compress
             Invoke-MgGraphRequest -Method POST -Uri "$graphBeta/applications/$blueprintObjectId/federatedIdentityCredentials" `
@@ -3190,7 +3203,7 @@ function Set-NeologikDeploymentCredential {
                 name                     = $credentialName
                 issuer                   = 'https://token.actions.githubusercontent.com'
                 audiences                = @('api://AzureADTokenExchange')
-                description              = "Neologik deployment runs of the environment $EnvironmentName sign in as the deployment identity with no stored secret"
+                description              = "This federated credential lets a Neologik deployment run for the environment $EnvironmentName sign in as the deployment identity with no stored secret. The federated credential adds no permission."
                 claimsMatchingExpression = @{ value = $expression; languageVersion = 1 }
             } | ConvertTo-Json -Depth 5 -Compress
             Invoke-MgGraphRequest -Method POST -Uri $uri -Body $body -ContentType 'application/json' -ErrorAction Stop | Out-Null
