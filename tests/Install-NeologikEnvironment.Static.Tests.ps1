@@ -73,10 +73,11 @@ It 'ships an example answer file that names the environment name' {
     $json.PSObject.Properties.Name | Should -Contain 'environmentName'
 }
 
-It 'creates the agent registration identity with one Microsoft Graph permission and no Azure role' {
+It 'creates the agent registration identity with two Microsoft Graph permissions and no Azure role' {
     $text = Get-Content -Raw $script:ScriptPath
     $text | Should -Match 'Name = \$directoryIdentityName'
-    $text | Should -Match "GraphAppRoles = @\('Application\.ReadWrite\.OwnedBy'\)\s+\}\s+\)"
+    $text | Should -Match "GraphAppRoles = @\('Application\.ReadWrite\.OwnedBy', 'AgentRegistration\.ReadWrite\.All'\)\s+\}\s+\)"
+    $text | Should -Match "'AgentRegistration\.ReadWrite\.All'\s+= '39fb8c64-7bd3-4107-8515-14d6e55ddda4'"
     $text | Should -Match 'neologik-directory-managed-identity\$nameSuffix'
 }
 

@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.1.13](#version-5113)
 2. [Version 5.1.12](#version-5112)
 2. [Version 5.1.11](#version-5111)
 2. [Version 5.1.10](#version-5110)
@@ -56,12 +57,24 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.1.12 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.12 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
+| `Install-NeologikEnvironment.ps1` | v5.1.13 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.13 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
 | `Remove-NeologikDirectoryObjects.ps1` | 1.0 | Deletes the directory objects of one environment, after the administrator confirms the list |
+
+## Version 5.1.13
+
+**Date**: 2026-11-11
+
+This version is on the line of Neologik Platform v5.1. The onboarding script grants the agent registration identity one more Microsoft Graph application permission, `AgentRegistration.ReadWrite.All`. From version 5.2 of the Neologik Platform, the agent registration identity uses the permission to record each Neologik agent in the agent registry of the Microsoft 365 admin center, with a named owner.
+
+| Item | Change |
+|---|---|
+| `Install-NeologikEnvironment.ps1` | The agent registration identity receives the Microsoft Graph application permissions `Application.ReadWrite.OwnedBy` and `AgentRegistration.ReadWrite.All`. The version of the onboarding kit is v5.1.13 |
+| `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.13 |
+| The documents | `docs/secure-overview.md` lists the new permission of the agent registration identity, with the reason. The summary of permissions in `docs/QUICK-REFERENCE.md` lists the same permission |
 
 ## Version 5.1.12
 
