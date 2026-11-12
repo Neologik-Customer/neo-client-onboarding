@@ -165,49 +165,6 @@ $script:RequiredScopes = @(
     'User.Read.All'
 )
 
-$script:GraphPowerShellAppId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
-$script:MicrosoftGraphAppId  = '00000003-0000-0000-c000-000000000000'
-
-function Grant-AdminConsent {
-    # The script never calls this function. The function would grant the three
-    # permissions to Microsoft Graph PowerShell for the whole tenant. The administrator
-    # gives the consent at the sign-in.
-    Write-Log "Giving administrator consent for the whole tenant..." -Level Info
-
-    $graphPsSp = (Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '$($script:GraphPowerShellAppId)'").value | Select-Object -First 1
-    if (-not $graphPsSp) {
-        Write-Log "  Creating the service principal of Microsoft Graph PowerShell in this tenant..." -Level Info
-        $createBody = @{ appId = $script:GraphPowerShellAppId } | ConvertTo-Json
-        $graphPsSp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/servicePrincipals' -Body $createBody -ContentType 'application/json'
-    }
-    $graphSp = (Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '$($script:MicrosoftGraphAppId)'").value | Select-Object -First 1
-
-    $existing = (Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/oauth2PermissionGrants?`$filter=clientId eq '$($graphPsSp.id)' and resourceId eq '$($graphSp.id)' and consentType eq 'AllPrincipals'").value | Select-Object -First 1
-
-    if ($existing) {
-        $existingScopes = $existing.scope -split ' '
-        $missing = $script:RequiredScopes | Where-Object { $existingScopes -notcontains $_ }
-        if (-not $missing) {
-            Write-Log "  Administrator consent is already given. No change is needed" -Level Success
-            return
-        }
-        $merged = (($existingScopes + $script:RequiredScopes) | Sort-Object -Unique) -join ' '
-        $body = @{ scope = $merged } | ConvertTo-Json
-        Invoke-MgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/oauth2PermissionGrants/$($existing.id)" -Body $body -ContentType 'application/json' | Out-Null
-        Write-Log "  The script added the missing permissions to the existing grant" -Level Success
-    } else {
-        $body = @{
-            clientId    = $graphPsSp.id
-            consentType = 'AllPrincipals'
-            principalId = $null
-            resourceId  = $graphSp.id
-            scope       = ($script:RequiredScopes -join ' ')
-        } | ConvertTo-Json
-        Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/oauth2PermissionGrants' -Body $body -ContentType 'application/json' | Out-Null
-        Write-Log "  Administrator consent is given for the whole tenant" -Level Success
-    }
-}
-
 function Invoke-GraphConnect {
     param([hashtable]$Params)
 

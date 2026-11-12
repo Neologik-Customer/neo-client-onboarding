@@ -1272,75 +1272,7 @@ function Find-NeologikUserByEmail {
 
 #endregion
 
-#region Subscription and Resource Group Management
-
-function New-NeologikSubscription {
-    <#
-    .SYNOPSIS
-        Selects an Azure subscription by name. The script never calls this function.
-        The script uses the subscription of the sign-in.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$SubscriptionName
-    )
-
-    Write-Log "Looking for the subscription $SubscriptionName..." -Level Info
-
-    try {
-        $subscription = Get-AzSubscription -SubscriptionName $SubscriptionName -ErrorAction SilentlyContinue
-
-        if ($subscription) {
-            Write-Log "Subscription '$SubscriptionName' exists, id $($subscription.Id)" -Level Info
-            $script:ConfigData['SubscriptionName'] = $subscription.Name
-            $script:ConfigData['SubscriptionId'] = $subscription.Id
-            
-            # Select this subscription in the Azure session
-            Set-AzContext -SubscriptionId $subscription.Id | Out-Null
-            Write-Log "Selected the subscription $SubscriptionName" -Level Success
-        }
-        else {
-            Write-Log "Subscription '$SubscriptionName' not found." -Level Warning
-            Write-Log "Note: the creation of a subscription requires an Enterprise Agreement or a Microsoft Customer Agreement." -Level Warning
-            
-            # List the available subscriptions
-            $existingSubscriptions = Get-AzSubscription
-            if ($existingSubscriptions) {
-                # An unattended run must name a subscription that exists.
-                if ($script:NonInteractiveMode) {
-                    throw "Subscription '$SubscriptionName' not found. An unattended run cannot ask for another subscription. Give a valid -SubscriptionName."
-                }
-                Write-Host "`nAvailable subscriptions:" -ForegroundColor Yellow
-                $existingSubscriptions | ForEach-Object { Write-Host "  - $($_.Name) ($($_.Id))" }
-
-                Write-Host "`nUse an existing subscription? (Y/N): " -NoNewline -ForegroundColor Cyan
-                $useExisting = Read-Host
-                if ($useExisting -eq 'Y' -or $useExisting -eq 'y' -or [string]::IsNullOrWhiteSpace($useExisting)) {
-                    Write-Host "Enter the name of the subscription: " -NoNewline -ForegroundColor Cyan
-                    $subName = Read-Host
-                    $subscription = Get-AzSubscription -SubscriptionName $subName -ErrorAction Stop
-                    $script:ConfigData['SubscriptionName'] = $subscription.Name
-                    $script:ConfigData['SubscriptionId'] = $subscription.Id
-                    Set-AzContext -SubscriptionId $subscription.Id | Out-Null
-                    Write-Log "Using the existing subscription $subName" -Level Success
-                }
-                else {
-                    throw "The administrator stopped the selection of the subscription."
-                }
-            }
-            else {
-                throw "No subscription found. Create a subscription first."
-            }
-        }
-
-        return $subscription
-    }
-    catch {
-        Write-Log "The selection of the subscription failed: $_" -Level Error
-        throw
-    }
-}
+#region Resource Group Management
 
 function New-NeologikResourceGroup {
     <#
@@ -4963,51 +4895,6 @@ function Set-ConfigFromAnswerFile {
     # The top of this function built the solution name and the short name.
 
     return $regionAbbrev
-}
-
-function Get-UserInput {
-    <#
-    .SYNOPSIS
-        Asks a question that shows a default value. The script never calls this
-        function.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Prompt,
-
-        [Parameter(Mandatory = $true)]
-        [string]$DefaultValue,
-
-        [Parameter(Mandatory = $false)]
-        [switch]$IsSecret
-    )
-
-    Write-Host ""
-    Write-Host $Prompt -ForegroundColor Cyan
-    Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-    Write-Host $DefaultValue -ForegroundColor Yellow
-    
-    if ($IsSecret) {
-        Write-Host "  Press Enter to accept the default value, or type another value. The script hides the characters: " -NoNewline -ForegroundColor Gray
-        $secureInput = Read-Host -AsSecureString
-        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureInput)
-        $userInput = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-    }
-    else {
-        Write-Host "  Press Enter to accept the default value, or type another value: " -NoNewline -ForegroundColor Gray
-        $userInput = Read-Host
-    }
-
-    if ([string]::IsNullOrWhiteSpace($userInput)) {
-        Write-Host "  [OK] Using the default value: $DefaultValue" -ForegroundColor Green
-        return $DefaultValue
-    }
-    else {
-        Write-Host "  [OK] Using: $userInput" -ForegroundColor Green
-        return $userInput
-    }
 }
 
 function Start-NeologikOnboarding {
