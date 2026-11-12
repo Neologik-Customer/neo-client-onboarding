@@ -14,6 +14,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 
 1. [Scripts in this version](#scripts-in-this-version)
 2. [Version 5.2.0](#version-520)
+2. [Version 5.1.13](#version-5113)
 2. [Version 5.1.12](#version-5112)
 2. [Version 5.1.11](#version-5111)
 2. [Version 5.1.10](#version-5110)
@@ -76,6 +77,18 @@ This version is on the line of Neologik Platform v5.2. This version limits the r
 | `Install-NeologikEnvironment.ps1` | Role Based Access Control Administrator on the subscription is limited to Reader and Cost Management Reader, for service principals only |
 | `Install-NeologikEnvironment.ps1` | Step 15 creates the system task managed identity, and gives the managed identity Role Based Access Control Administrator on the resource group with the same condition |
 | `inputs-example.json` | One new answer: `systemTaskIdentityName` |
+
+## Version 5.1.13
+
+**Date**: 2026-11-11
+
+This version is on the line of Neologik Platform v5.1. The onboarding script grants the agent registration identity one more Microsoft Graph application permission, `AgentRegistration.ReadWrite.All`. From version 5.2 of the Neologik Platform, the agent registration identity uses the permission to record each Neologik agent in the agent registry of the Microsoft 365 admin center, with a named owner.
+
+| Item | Change |
+|---|---|
+| `Install-NeologikEnvironment.ps1` | The agent registration identity receives the Microsoft Graph application permissions `Application.ReadWrite.OwnedBy` and `AgentRegistration.ReadWrite.All`. The version of the onboarding kit is v5.1.13 |
+| `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.13 |
+| The documents | `docs/secure-overview.md` lists the new permission of the agent registration identity, with the reason. The summary of permissions in `docs/QUICK-REFERENCE.md` lists the same permission |
 
 ## Version 5.1.12
 

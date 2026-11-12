@@ -2248,6 +2248,9 @@ function Grant-GraphAppRolePermissions {
         # that agent identity blueprint only. The creation of agent identities needs no grant. The service
         # principal of each agent identity blueprint can create the agent identities of that agent identity blueprint.
         'AgentIdUser.ReadWrite.IdentityParentedBy'  = '4aa6e624-eee0-40ab-bdd8-f9639038a614'
+        # The agent registration identity: write the entry of each Neologik agent in the agent registry of the
+        # Microsoft 365 admin center, with a named owner.
+        'AgentRegistration.ReadWrite.All'           = '39fb8c64-7bd3-4107-8515-14d6e55ddda4'
     }
 
     Write-Log "Granting the Microsoft Graph application permissions $($AppRoles -join ', ') to $PrincipalDescription..." -Level Info
@@ -4038,11 +4041,13 @@ function New-NeologikManagedIdentities {
                 Name = $directoryIdentityName
                 DisplayName = "Neologik Agent Registration Identity$displaySuffix"
                 # From version 5.2 of the Neologik Platform, this managed identity creates and changes the application
-                # registrations of Neologik agents from inside the environment. The permission changes only the application
-                # registrations that the managed identity owns. The managed identity holds no Azure role. Nothing can
-                # sign in as the managed identity until a deployment by Neologik adds the sign-in credential.
+                # registrations of Neologik agents from inside the environment, and records each Neologik agent in the
+                # agent registry of the Microsoft 365 admin center with a named owner. Application.ReadWrite.OwnedBy
+                # changes only the application registrations that the managed identity owns. AgentRegistration.ReadWrite.All
+                # writes the agent registry entries of the Neologik agents. The managed identity holds no Azure role.
+                # Nothing can sign in as the managed identity until a deployment by Neologik adds the sign-in credential.
                 Roles = @()
-                GraphAppRoles = @('Application.ReadWrite.OwnedBy')
+                GraphAppRoles = @('Application.ReadWrite.OwnedBy', 'AgentRegistration.ReadWrite.All')
             },
             @{
                 Name = $systemTaskIdentityName
