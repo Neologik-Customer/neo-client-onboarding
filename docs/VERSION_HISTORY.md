@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.1.14](#version-5114)
 2. [Version 5.1.13](#version-5113)
 2. [Version 5.1.12](#version-5112)
 2. [Version 5.1.11](#version-5111)
@@ -57,12 +58,25 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.1.13 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.13 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
+| `Install-NeologikEnvironment.ps1` | v5.1.14 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.14 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
 | `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
 | `Remove-NeologikDirectoryObjects.ps1` | 1.0 | Deletes the directory objects of one environment, after the administrator confirms the list |
+
+## Version 5.1.14
+
+**Date**: 2026-11-12
+
+This version is on the line of Neologik Platform v5.1. The onboarding script no longer creates the agent registration identity, and no longer adds the federated credential `github-deployments-<environment name>` to the deployment identity. A Neologik deployment of version 5.1 signs in with the client secret, and needs neither item.
+
+| Item | Change |
+|---|---|
+| `Install-NeologikEnvironment.ps1` | Step 15 creates two managed identities: the script runner managed identity and the SQL managed identity. The script creates no agent registration identity, and grants no Microsoft Graph application permission to such an identity. The script has no step 12d, so the deployment identity receives no federated credential. The script no longer asks for the name of the agent registration identity or for the environment name. The version of the onboarding kit is v5.1.14 |
+| `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.14 |
+| `inputs-example.json` | The answers `directoryIdentityName` and `environmentName` are gone. The script ignores either answer in an older answer file |
+| The documents | `README.md`, `docs/CREATE-SP-GUIDE.md`, `docs/PRE-ONBOARDING-INFO-GATHERING.md`, `docs/QUICK-REFERENCE.md`, `docs/secure-overview.md` and `docs/TECHNICAL-REFERENCE.md` no longer describe the two items |
 
 ## Version 5.1.13
 

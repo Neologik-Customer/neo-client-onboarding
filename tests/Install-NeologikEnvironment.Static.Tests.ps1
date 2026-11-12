@@ -53,11 +53,11 @@ It 'records the kit version on the resource group, at the version the version hi
     $text | Should -Match ([regex]::Escape("`$script:KitVersion = 'v$top'"))
 }
 
-It 'adds the federated credential of the deployment identity for this environment only' {
-    $script:Defined | Should -Contain 'Set-NeologikDeploymentCredential'
-    $script:Called | Should -Contain 'Set-NeologikDeploymentCredential'
+It 'adds no federated credential to the deployment identity' {
+    $script:Defined | Should -Not -Contain 'Set-NeologikDeploymentCredential'
     $text = Get-Content -Raw $script:ScriptPath
-    $text | Should -Match ([regex]::Escape("claims['sub'] matches 'repo:Neologik-AI*:environment:`$EnvironmentName' and claims['repository_owner_id'] eq '109681438'"))
+    $text | Should -Not -Match 'github-deployments-'
+    $text | Should -Not -Match ([regex]::Escape(":environment:"))
 }
 
 It 'records this version of the onboarding kit only after the steps of this version' {
@@ -65,20 +65,19 @@ It 'records this version of the onboarding kit only after the steps of this vers
     $text | Should -Match ([regex]::Escape('Update-AzTag -ResourceId $rg.ResourceId -Tag @{ NeologikOnboardingKit = $earlierKitVersion } -Operation Merge'))
     $finalWrite = $text.IndexOf('Set-NeologikKitVersionTag -ResourceId "/subscriptions/')
     $finalWrite | Should -BeGreaterThan $text.IndexOf('$null = New-NeologikManagedIdentities')
-    $finalWrite | Should -BeGreaterThan $text.IndexOf('$null = Set-NeologikDeploymentCredential')
 }
 
-It 'ships an example answer file that names the environment name' {
+It 'ships an example answer file that names neither the environment name nor the agent registration identity' {
     $json = Get-Content -Raw (Join-Path (Split-Path -Parent $PSScriptRoot) 'inputs-example.json') | ConvertFrom-Json
-    $json.PSObject.Properties.Name | Should -Contain 'environmentName'
+    $json.PSObject.Properties.Name | Should -Not -Contain 'environmentName'
+    $json.PSObject.Properties.Name | Should -Not -Contain 'directoryIdentityName'
 }
 
-It 'creates the agent registration identity with two Microsoft Graph permissions and no Azure role' {
+It 'creates no agent registration identity and grants no AgentRegistration.ReadWrite.All' {
     $text = Get-Content -Raw $script:ScriptPath
-    $text | Should -Match 'Name = \$directoryIdentityName'
-    $text | Should -Match "GraphAppRoles = @\('Application\.ReadWrite\.OwnedBy', 'AgentRegistration\.ReadWrite\.All'\)\s+\}\s+\)"
-    $text | Should -Match "'AgentRegistration\.ReadWrite\.All'\s+= '39fb8c64-7bd3-4107-8515-14d6e55ddda4'"
-    $text | Should -Match 'neologik-directory-managed-identity\$nameSuffix'
+    $text | Should -Not -Match 'neologik-directory-managed-identity'
+    $text | Should -Not -Match 'AgentRegistration\.ReadWrite\.All'
+    $text | Should -Not -Match 'DirectoryIdentityName'
 }
 
 It 'limits the role on the subscription to Reader and Cost Management Reader, for service principals only' {
