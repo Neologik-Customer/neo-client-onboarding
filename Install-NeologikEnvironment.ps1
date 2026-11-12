@@ -17,9 +17,8 @@
        administrator chooses invitation.
     6. The script creates the resource group, the security groups, the deployment
        identity, the Key Vault, the Platform Sign-in application, the agent identity
-       blueprint, the deployment storage account and three managed identities. The
-       script assigns the roles of each. The script adds one federated credential to
-       the deployment identity.
+       blueprint, the deployment storage account and two managed identities. The
+       script assigns the roles of each.
     7. The script registers the other Azure resource providers and the preview
        features that the Neologik Platform requires, and confirms every registration.
     8. The script writes a configuration file and a log.
@@ -221,7 +220,7 @@ $WarningPreference = 'Continue'
 $script:Version = 'v5.0.15'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.1.13'
+$script:KitVersion = 'v5.1.14'
 
 # The third role of the deployment identity on the subscription: Role Based Access
 # Control Administrator, limited by a condition to two roles, for service principals
@@ -2236,9 +2235,6 @@ function Grant-GraphAppRolePermissions {
         # that agent identity blueprint only. The creation of agent identities needs no grant. The service
         # principal of each agent identity blueprint can create the agent identities of that agent identity blueprint.
         'AgentIdUser.ReadWrite.IdentityParentedBy'  = '4aa6e624-eee0-40ab-bdd8-f9639038a614'
-        # The agent registration identity: write the entry of each Neologik agent in the agent registry of the
-        # Microsoft 365 admin center, with a named owner.
-        'AgentRegistration.ReadWrite.All'           = '39fb8c64-7bd3-4107-8515-14d6e55ddda4'
     }
 
     Write-Log "Granting the Microsoft Graph application permissions $($AppRoles -join ', ') to $PrincipalDescription..." -Level Info
@@ -3163,77 +3159,6 @@ function New-NeologikAgentBlueprint {
 
 #region Key Vault
 
-function Set-NeologikDeploymentCredential {
-    <#
-    .SYNOPSIS
-        Adds one federated credential to the application registration of the deployment
-        identity. The Neologik deployment can then sign in as the deployment identity
-        with no stored secret. The federated credential accepts only a Neologik
-        deployment run that names this environment, and adds no permission.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$ClientId,
-
-        [Parameter(Mandatory = $true)]
-        [string]$EnvironmentName
-    )
-
-    $credentialName = "github-deployments-$EnvironmentName"
-    # The id of the Neologik deployment organisation never changes. GitHub writes the name of the
-    # organisation in the subject in one of two forms, so the expression holds a wildcard straight
-    # after the name and also checks the id.
-    $expression = "claims['sub'] matches 'repo:Neologik-AI*:environment:$EnvironmentName' and claims['repository_owner_id'] eq '109681438'"
-    Write-Log "Adding the federated credential '$credentialName' to the deployment identity..." -Level Info
-
-    try {
-        # A new application registration takes time to reach every server of Microsoft Entra ID. Try again until then
-        $objectId = $null
-        $retryCount = 0
-        $maxRetries = 10
-        while (-not $objectId) {
-            $apps = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=appId eq '$ClientId'&`$select=id" -ErrorAction Stop
-            $objectId = @($apps.value | ForEach-Object { $_.id }) | Select-Object -First 1
-            if (-not $objectId) {
-                $retryCount++
-                if ($retryCount -ge $maxRetries) {
-                    throw "This tenant holds no application registration with the client ID $ClientId. The deployment service principal must come from an application registration in this tenant"
-                }
-                Write-Log "Microsoft Entra ID does not yet show the application registration. The script tries again in 10 seconds. Attempt $retryCount of $maxRetries" -Level Warning
-                Start-Sleep -Seconds 10
-            }
-        }
-
-        $uri = "https://graph.microsoft.com/beta/applications/$objectId/federatedIdentityCredentials"
-        $existing = Invoke-MgGraphRequest -Method GET -Uri "${uri}?`$select=name" -ErrorAction Stop
-        if (@($existing.value | ForEach-Object { $_.name }) -contains $credentialName) {
-            Write-Log "Federated credential '$credentialName' already exists" -Level Info
-        }
-        else {
-            $body = @{
-                name                     = $credentialName
-                issuer                   = 'https://token.actions.githubusercontent.com'
-                audiences                = @('api://AzureADTokenExchange')
-                description              = "Neologik deployment runs of the environment $EnvironmentName sign in as the deployment identity with no stored secret"
-                claimsMatchingExpression = @{ value = $expression; languageVersion = 1 }
-            } | ConvertTo-Json -Depth 5 -Compress
-            Invoke-MgGraphRequest -Method POST -Uri $uri -Body $body -ContentType 'application/json' -ErrorAction Stop | Out-Null
-            Write-Log "Federated credential '$credentialName' created" -Level Success
-        }
-
-        $script:ConfigData['DeploymentCredential'] = @{
-            Name = $credentialName
-            EnvironmentName = $EnvironmentName
-        }
-        return $script:ConfigData['DeploymentCredential']
-    }
-    catch {
-        Write-Log "The script could not add the federated credential to the deployment identity: $_" -Level Error
-        throw
-    }
-}
-
 function New-NeologikKeyVault {
     <#
     .SYNOPSIS
@@ -3920,7 +3845,7 @@ function New-NeologikStorageAccount {
 function New-NeologikManagedIdentities {
     <#
     .SYNOPSIS
-        Creates the three user-assigned managed identities and assigns the roles of
+        Creates the two user-assigned managed identities and assigns the roles of
         each.
     #>
     [CmdletBinding()]
@@ -3947,10 +3872,7 @@ function New-NeologikManagedIdentities {
         [string]$ScriptRunnerIdentityName = "",
 
         [Parameter(Mandatory = $false)]
-        [string]$SqlIdentityName = "",
-
-        [Parameter(Mandatory = $false)]
-        [string]$DirectoryIdentityName = ""
+        [string]$SqlIdentityName = ""
     )
 
     Write-Log "Creating the managed identities..." -Level Info
@@ -3972,7 +3894,6 @@ function New-NeologikManagedIdentities {
         # When a checkpoint holds no name, the script uses the standard name.
         $scriptRunnerName = if (-not [string]::IsNullOrWhiteSpace($ScriptRunnerIdentityName)) { $ScriptRunnerIdentityName.Trim() } else { "neologik-script-runner-service-connection$nameSuffix" }
         $sqlIdentityName = if (-not [string]::IsNullOrWhiteSpace($SqlIdentityName)) { $SqlIdentityName.Trim() } else { "neologik-sql-managed-identity$nameSuffix" }
-        $directoryIdentityName = if (-not [string]::IsNullOrWhiteSpace($DirectoryIdentityName)) { $DirectoryIdentityName.Trim() } else { "neologik-directory-managed-identity$nameSuffix" }
 
         $managedIdentities = @(
             @{
@@ -3990,18 +3911,6 @@ function New-NeologikManagedIdentities {
                 DisplayName = "Neologik SQL Managed Identity$displaySuffix"
                 Roles = @()
                 EntraRole = 'Directory Readers'
-            },
-            @{
-                Name = $directoryIdentityName
-                DisplayName = "Neologik Agent Registration Identity$displaySuffix"
-                # From version 5.2 of the Neologik Platform, this managed identity creates and changes the application
-                # registrations of Neologik agents from inside the environment, and records each Neologik agent in the
-                # agent registry of the Microsoft 365 admin center with a named owner. Application.ReadWrite.OwnedBy
-                # changes only the application registrations that the managed identity owns. AgentRegistration.ReadWrite.All
-                # writes the agent registry entries of the Neologik agents. The managed identity holds no Azure role.
-                # Nothing can sign in as the managed identity until a deployment by Neologik adds the sign-in credential.
-                Roles = @()
-                GraphAppRoles = @('Application.ReadWrite.OwnedBy', 'AgentRegistration.ReadWrite.All')
             }
         )
 
@@ -4328,7 +4237,6 @@ function Export-ConfigurationData {
             'AppRegistration' = $script:ConfigData['AppRegistration']
             'NceAuthApp' = $script:ConfigData['NceAuthApp']
             'AgentBlueprint' = $script:ConfigData['AgentBlueprint']
-            'DeploymentCredential' = $script:ConfigData['DeploymentCredential']
             'KeyVault' = $script:ConfigData['KeyVault']
             'StorageAccount' = $script:ConfigData['StorageAccount']
             'ManagedIdentities' = $script:ConfigData['ManagedIdentities']
@@ -4854,19 +4762,6 @@ function Set-ConfigFromAnswerFile {
     $script:ConfigData['SqlIdentityName'] = if (-not [string]::IsNullOrWhiteSpace($sqlAns)) { $sqlAns.Trim() } else { $sqlComputed }
     $sqlErr = Test-ManagedIdentityNameError $script:ConfigData['SqlIdentityName']
     if ($sqlErr) { throw "sqlIdentityName '$($script:ConfigData['SqlIdentityName'])': $sqlErr" }
-
-    # The name of the agent registration identity, from the answer file or the standard name.
-    $dirComputed = "neologik-directory-managed-identity-$($script:ConfigData['SolutionShortName'])"
-    $dirAns = [string](Get-Answer 'directoryIdentityName')
-    $script:ConfigData['DirectoryIdentityName'] = if (-not [string]::IsNullOrWhiteSpace($dirAns)) { $dirAns.Trim() } else { $dirComputed }
-    $dirErr = Test-ManagedIdentityNameError $script:ConfigData['DirectoryIdentityName']
-    if ($dirErr) { throw "directoryIdentityName '$($script:ConfigData['DirectoryIdentityName'])': $dirErr" }
-
-    # The name of the environment in the Neologik deployment, from the answer file or from the
-    # organisation code and the environment type. The federated credential of the deployment identity names the environment.
-    $environmentNameAns = [string](Get-Answer 'environmentName')
-    $script:ConfigData['EnvironmentName'] = if (-not [string]::IsNullOrWhiteSpace($environmentNameAns)) { $environmentNameAns.Trim().ToLower() } else { "$($script:OrganizationCode)$($script:EnvironmentType)".ToLower() }
-    if ($script:ConfigData['EnvironmentName'] -notmatch '^[a-z0-9]{2,32}$') { throw "environmentName '$($script:ConfigData['EnvironmentName'])': the name must be 2 to 32 lower-case letters and digits" }
 
     # A platform operator creates agents and channels in the Neologik Admin Tool after the deployment.
 
@@ -5670,20 +5565,6 @@ function Start-NeologikOnboarding {
             -DefaultValue $sqlDefault -Validator ${function:Test-ManagedIdentityNameError} `
             -LabelPrefix (Get-PromptLabel $sqlDefault $sqlComputed)
 
-        # The name of the agent registration identity.
-        $dirComputed = "neologik-directory-managed-identity-$($script:ConfigData['SolutionShortName'])"
-        $dirAns = [string](Get-Answer 'directoryIdentityName')
-        $dirDefault = if (-not [string]::IsNullOrWhiteSpace($dirAns)) { $dirAns.Trim() } else { $dirComputed }
-        $script:ConfigData['DirectoryIdentityName'] = Read-NameWithDefault -Title 'Agent Registration Identity Name' `
-            -DefaultValue $dirDefault -Validator ${function:Test-ManagedIdentityNameError} `
-            -LabelPrefix (Get-PromptLabel $dirDefault $dirComputed)
-
-        # The name of the environment in the Neologik deployment, from the answer file or from the
-        # organisation code and the environment type. The federated credential of the deployment identity names the environment.
-        $environmentNameAns = [string](Get-Answer 'environmentName')
-        $script:ConfigData['EnvironmentName'] = if (-not [string]::IsNullOrWhiteSpace($environmentNameAns)) { $environmentNameAns.Trim().ToLower() } else { "$($script:OrganizationCode)$($script:EnvironmentType)".ToLower() }
-        if ($script:ConfigData['EnvironmentName'] -notmatch '^[a-z0-9]{2,32}$') { throw "environmentName '$($script:ConfigData['EnvironmentName'])': the name must be 2 to 32 lower-case letters and digits" }
-
         # A platform operator creates agents and channels in the Neologik Admin Tool after the
         # deployment. A channel uses the standard security group for users that this script creates, or an existing
         # security group that an administrator names. The Neologik Platform creates no security group.
@@ -5975,7 +5856,6 @@ function Start-NeologikOnboarding {
         Write-SummaryRow 'Storage Account Name' $script:ConfigData['DeployStorageAccountName']
         Write-SummaryRow 'Script Runner Identity' $script:ConfigData['ScriptRunnerIdentityName']
         Write-SummaryRow 'SQL Managed Identity' $script:ConfigData['SqlIdentityName']
-        Write-SummaryRow 'Agent Registration Identity' $script:ConfigData['DirectoryIdentityName']
         Write-SummaryRow 'Solution Name' $script:ConfigData['SolutionName']
         Write-SummaryRow 'Solution Short Name' $script:ConfigData['SolutionShortName']
         Write-SummaryRow 'Provider Registration' "$($script:ProviderList.Providers.Count) resource providers and $($script:ProviderList.Features.Count) preview features, from resource-providers.txt"
@@ -6145,14 +6025,7 @@ function Start-NeologikOnboarding {
         $null = New-NeologikAgentBlueprint -DeploySpObjectId $appReg.ServicePrincipal.Id `
             -SponsorUserId $script:ConfigData['CurrentUserId']
 
-        # Step 12d: The federated credential of the deployment identity. Only a signed-in administrator can add the
-        # federated credential, because the deployment identity does not own its own application registration.
-        # A checkpoint from an earlier version holds no environment name, so the script works out the name here.
-        $deploymentEnvironmentName = [string]$script:ConfigData['EnvironmentName']
-        if ([string]::IsNullOrWhiteSpace($deploymentEnvironmentName)) { $deploymentEnvironmentName = "$($script:OrganizationCode)$($script:EnvironmentType)".ToLower() }
-        $null = Set-NeologikDeploymentCredential -ClientId ([string]$appReg.Application.AppId) -EnvironmentName $deploymentEnvironmentName
-
-        # The script has no step 13. Step 5c submits the resource provider registrations that the script needs.
+        # The script has no step 12d and no step 13. Step 5c submits the resource provider registrations that the script needs.
         # Step 15b submits the other registrations and confirms every registration, before the script writes
         # the configuration file.
 
@@ -6182,8 +6055,7 @@ function Start-NeologikOnboarding {
             -EnvironmentType $script:EnvironmentType `
             -EnvironmentIndex $script:EnvironmentIndex `
             -ScriptRunnerIdentityName ([string]$script:ConfigData['ScriptRunnerIdentityName']) `
-            -SqlIdentityName ([string]$script:ConfigData['SqlIdentityName']) `
-            -DirectoryIdentityName ([string]$script:ConfigData['DirectoryIdentityName'])
+            -SqlIdentityName ([string]$script:ConfigData['SqlIdentityName'])
 
         # Step 15b: Submit the registration of every other resource provider and every preview feature in the list.
         # The deployment of the Neologik Platform needs them. This run does not. Then confirm every resource provider

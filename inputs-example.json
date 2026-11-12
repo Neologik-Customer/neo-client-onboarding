@@ -21,8 +21,6 @@
   "storageAccountName": "",
   "scriptRunnerIdentityName": "",
   "sqlIdentityName": "",
-  "directoryIdentityName": "",
-  "environmentName": "",
 
   "skipGuestInvitation": false,
   "_existingAccounts_note": "Read only when skipGuestInvitation is true. addExistingAccountsToGroups true adds accounts you have already created, as guests or as members, to the security groups, and sends no invitation. existingAccountEmails lists their addresses; when it is omitted, the addresses in NeologikGuestUsers.txt are used. Each address must match the account's mail address or user principal name exactly. An address with no matching account is reported and passed over. Accounts added in this way join all four Neologik security groups, including the Admin User Group, which carries Azure administration rights on the resource group.",
