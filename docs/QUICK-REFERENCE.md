@@ -284,7 +284,7 @@ A second run adds no client secret to the Platform Sign-in application while the
 | File | Location | Content |
 |---|---|---|
 | `NeologikOnboarding_<timestamp>.log` | The folder of the onboarding script. The onboarding script uploads a copy to the container `logs` | The log of the run |
-| `Neologik_<org><index>_Configuration_<timestamp>.json` | The folder of the onboarding script. The onboarding script uploads a copy to the container `json` | The name and the id of each object created. The roles assigned. The host name. The sign-in name of the administrator. The addresses of the accounts invited or added. The expiry date of the client secret |
+| `Neologik_<org><index>_Configuration_<timestamp>.json` | The folder of the onboarding script. The onboarding script uploads a copy to the container `json` | The version of the onboarding script and the version of the onboarding kit. The name and the id of each object created. The roles assigned. The host name. The sign-in name of the administrator. The addresses of the accounts invited or added. The expiry date of the client secret |
 | `NeologikCheckpoint.json` | The folder of the onboarding script, while a run is incomplete | The configuration collected so far, in the same form as the configuration file. The onboarding script deletes the checkpoint when the run completes |
 
 None of the three files contains a secret. All three files contain personal data, namely sign-in names and email addresses. Handle the three files as personal data.

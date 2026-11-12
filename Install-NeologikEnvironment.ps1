@@ -221,6 +221,7 @@ $WarningPreference = 'Continue'
 $script:Version = 'v5.0.15'
 
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
+# The configuration file records the same version, in the field KitVersion.
 $script:KitVersion = 'v5.2.0'
 
 # The third role of the deployment identity on the subscription: Role Based Access
@@ -4302,6 +4303,7 @@ function Export-ConfigurationData {
         # The output. The order of the fields is fixed
         $orderedConfig = [ordered]@{
             'ScriptVersion' = $script:Version
+            'KitVersion' = $script:KitVersion
             'GeneratedAt' = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
             'OrganizationName' = $script:OrganizationName
             'OrganizationCode' = $script:OrganizationCode

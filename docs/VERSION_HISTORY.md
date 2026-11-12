@@ -77,6 +77,8 @@ This version is on the line of Neologik Platform v5.2. This version limits the r
 | `Install-NeologikEnvironment.ps1` | Role Based Access Control Administrator on the subscription is limited to Reader and Cost Management Reader, for service principals only |
 | `Install-NeologikEnvironment.ps1` | Step 15 creates the system task managed identity, and gives the managed identity Role Based Access Control Administrator on the resource group with the same condition |
 | `Install-NeologikEnvironment.ps1` | The functions `New-NeologikSubscription` and `Get-UserInput` leave the onboarding script. No part of the onboarding script called either function. No step of the onboarding script changes |
+| `Install-NeologikEnvironment.ps1` | The configuration file records the version of the onboarding kit in the field `KitVersion`, next to the field `ScriptVersion`. The value is the same as the tag `NeologikOnboardingKit` on the resource group |
+| `docs/TECHNICAL-REFERENCE.md` and `docs/QUICK-REFERENCE.md` | The description of the configuration file names the version of the onboarding script and the version of the onboarding kit |
 | `inputs-example.json` | One new answer: `systemTaskIdentityName` |
 | `Upgrade-TeamsAppInstallations.ps1` | Version v0.2.2. The function `Grant-AdminConsent` leaves the script, together with the application ids of Microsoft Graph PowerShell and Microsoft Graph that only the function read. No part of the script called the function. No step of the script changes |
 
