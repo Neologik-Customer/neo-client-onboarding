@@ -319,6 +319,8 @@ The onboarding script makes these changes:
 | The onboarding script marks the PowerShell Gallery as a trusted repository for the user. The setting remains after the run | The onboarding script installs a module |
 | The onboarding script installs the Az modules and the Microsoft Graph modules for the current user | A module is missing, and you accept |
 | The onboarding script updates PowerShell | The PowerShell version is older than 7.4, and you accept |
+| The onboarding script removes each module that the onboarding script installed in the run | A file of an installed module fails the signature check. See [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md#signature-checks) |
+| The onboarding script deletes the PowerShell installer that the onboarding script downloaded | The installer fails the signature check |
 | The onboarding script clears the stored Azure session and the stored Microsoft Graph session of the user | You choose to sign in again |
 
 ## What the onboarding script never does
@@ -329,6 +331,7 @@ The onboarding script makes these changes:
 - The onboarding script never adds the deployment identity or a managed identity to a security group.
 - The onboarding script never assigns a role on the subscription to a managed identity or to a security group.
 - The onboarding script never prints the value of a secret. The onboarding script never writes the value of a secret to the log, to the configuration file or to the checkpoint.
+- The onboarding script never runs a downloaded PowerShell installer and never imports a downloaded module before the signature of the file passes the check.
 - The onboarding script never deletes a directory object, an Azure resource, a role assignment or a credential.
 
 ## What the log records

@@ -71,6 +71,19 @@ The onboarding kit has a version, and each script has a separate version. The ve
 | `Az.ManagedServiceIdentity` | 1.0.0 |
 | `Microsoft.Graph` | 2.0.0 |
 
+### Signature checks
+
+The onboarding script checks the Authenticode signature of each file that the onboarding script downloads. The check runs before the onboarding script runs or imports the file.
+
+| Download | Check |
+|---|---|
+| The PowerShell installer. The onboarding script downloads the installer when the PowerShell version is older than 7.4 and winget is not available | The installer must have a valid signature of Microsoft Corporation. Otherwise the onboarding script deletes the installer, installs nothing and stops |
+| Each PowerShell module that the onboarding script installs, and each module that such a module requires | Each script file must have a valid signature of Microsoft Corporation. Each library must have a valid signature. The Az modules and the Microsoft Graph modules include libraries that other publishers sign, for example Json.NET. The manifest of the module `Microsoft.Graph` loads no code and has no signature. The onboarding script checks each module that the manifest names |
+
+When a module fails the check, the onboarding script imports no module and removes each module that the onboarding script installed in the run. The onboarding script then stops. The log names each file that failed the check.
+
+With `-SkipModuleInstall`, the onboarding script installs no module and checks no module.
+
 ## Parameters
 
 You can run the onboarding script with no parameter. When you give no value for a parameter, the onboarding script takes the value from the answer file or asks a question.
@@ -485,6 +498,8 @@ A Neologik engineer then imports the certificate into Neologik's central Key Vau
 |---|---|---|
 | "The script requires PowerShell 7.4 or later." | The PowerShell version is older than 7.4, or you opened Windows PowerShell | Install PowerShell 7 from https://aka.ms/powershell and open PowerShell 7 |
 | The onboarding script cannot install the modules | The workstation cannot reach the PowerShell Gallery, or a policy prevents the installation | Install each module listed under [PowerShell modules](#powershell-modules) with `Install-Module <name> -Scope CurrentUser`. Then run the onboarding script with `-SkipModuleInstall` |
+| The onboarding script reports that a PowerShell module failed the signature check | A file of a downloaded module has no valid signature, or a script file has the signature of another publisher | Run the onboarding script again later. When the check fails again, email the log to support@neologik.ai |
+| The onboarding script reports that the PowerShell installer failed the signature check | The downloaded installer has no valid signature of Microsoft Corporation | Install PowerShell 7 from https://aka.ms/powershell and open PowerShell 7 |
 | The sign-in fails | The account or the tenant is wrong, or the workstation holds an old session | Run the onboarding script again. Type `Y` at the question `Sign in to Azure again? (default: N)` |
 | "Insufficient permissions" | The account lacks Owner on the subscription or lacks Global Administrator | Obtain the role. Then run the onboarding script again |
 | The onboarding script cannot invite a guest | The external collaboration settings of your tenant prevent invitations | Allow guest invitations in Microsoft Entra ID. Alternatively, create the accounts yourself and choose to add existing accounts |
