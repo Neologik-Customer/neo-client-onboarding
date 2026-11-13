@@ -126,6 +126,7 @@ When the answer file holds the organisation code, the organisation name and the 
 | `fqdn` | The fully qualified host name of the environment. A complete answer file holds this key |
 | `environmentType` | `dev` or `prd` |
 | `azureRegion` | The Azure region |
+| `documentAnalysisRegion` | The Azure region for document analysis, from the list in [PRE-ONBOARDING-INFO-GATHERING.md](PRE-ONBOARDING-INFO-GATHERING.md). Without this key, the onboarding script uses `azureRegion` when that region is on the list. When neither gives a region from the list, the onboarding script asks the question. An unattended run stops instead |
 | `environmentIndex` | `01` to `99` |
 | `environmentName` | The name of the environment in the Neologik deployment: 2 to 32 lower-case letters and digits. The standard name is the organisation code followed by the environment type. Give this answer only when Neologik gives you a different name |
 | `applyResourceTags` | `true` or `false` |
@@ -447,7 +448,7 @@ The configuration file holds these sections:
 | Section | Content |
 |---|---|
 | Versions | `ScriptVersion`, the version of the onboarding script. `KitVersion`, the version of the onboarding kit, the same value as the tag `NeologikOnboardingKit` on the resource group |
-| Environment | The tenant, the subscription, the resource group, the Azure region, the organisation, the host name, the solution name and the short name |
+| Environment | The tenant, the subscription, the resource group, the Azure region, the organisation, the host name, the solution name and the short name. `ContentUnderstandingRegion`, the Azure region for document analysis |
 | `SecurityGroups` | The name and the id of each of the four security groups |
 | `AppRegistration` | The deployment identity: the name, the client id and the roles. The section also records whether the onboarding script created the deployment identity |
 | `NceAuthApp` | The Platform Sign-in application: the name and the client id |

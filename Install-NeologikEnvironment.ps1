@@ -4654,6 +4654,7 @@ function Export-ConfigurationData {
             'SolutionShortName' = $script:ConfigData['SolutionShortName']
             'UserAccount' = $script:ConfigData['UserAccount']
             'AzureRegion' = $script:ConfigData['AzureRegion']
+            'ContentUnderstandingRegion' = $script:ConfigData['ContentUnderstandingRegion']
             'HostName' = $script:ConfigData['HostName']
             'ResourceProvidersPending' = @($script:ConfigData['ResourceProvidersPending'])
             'ResourceTagsEnabled' = [bool]$script:ConfigData['ResourceTagsEnabled']
@@ -5038,6 +5039,116 @@ function Test-AnswerFileComplete {
     return $true
 }
 
+# The list of Azure regions for document analysis. The Neologik Platform analyses documents with Azure
+# Content Understanding. Microsoft lists the regions of that service on this page:
+# https://learn.microsoft.com/azure/ai-services/content-understanding/language-region-support
+$script:DocumentAnalysisRegions = @(
+    'australiaeast', 'canadacentral', 'eastus', 'eastus2', 'japaneast', 'southcentralus',
+    'southeastasia', 'swedencentral', 'uksouth', 'westeurope', 'westus', 'westus3'
+)
+
+function Get-NeologikDocumentAnalysisRegionDefault {
+    # Returns the Azure region of the environment when that region is on the list. Otherwise returns $null.
+    param([string]$AzureRegion)
+    $region = ([string]$AzureRegion).Trim().ToLower()
+    if ($script:DocumentAnalysisRegions -contains $region) { return $region }
+    return $null
+}
+
+function Test-NeologikDocumentAnalysisRegionError {
+    # Returns $null when the region is on the list. Otherwise returns an error message.
+    param([string]$Region)
+    if ($script:DocumentAnalysisRegions -contains ([string]$Region).Trim().ToLower()) { return $null }
+    return "The Azure region '$Region' is not on the list of regions for document analysis. Choose a region from this list: $($script:DocumentAnalysisRegions -join ', ')."
+}
+
+function Resolve-NeologikDocumentAnalysisRegion {
+    <#
+    .SYNOPSIS
+        Chooses the Azure region for document analysis in a run that takes the whole
+        configuration from the answer file. The answer documentAnalysisRegion comes
+        first. Without the answer, the Azure region of the environment applies when
+        that region is on the list. The function throws when neither gives a region
+        from the list. Returns the region.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)][string]$AzureRegion = '',
+        [Parameter(Mandatory = $false)][string]$Answer = ''
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($Answer)) {
+        $answerError = Test-NeologikDocumentAnalysisRegionError $Answer
+        if ($answerError) { throw "documentAnalysisRegion '$Answer': $answerError" }
+        return $Answer.Trim().ToLower()
+    }
+    $regionDefault = Get-NeologikDocumentAnalysisRegionDefault -AzureRegion $AzureRegion
+    if ($regionDefault) { return $regionDefault }
+    throw "documentAnalysisRegion is required, because the Azure region '$AzureRegion' is not on the list of regions for document analysis. Choose a region from this list: $($script:DocumentAnalysisRegions -join ', ')."
+}
+
+function Read-NeologikDocumentAnalysisRegion {
+    <#
+    .SYNOPSIS
+        Asks for the Azure region for document analysis. The question shows the answer
+        from the answer file, or the Azure region of the environment when that region
+        is on the list. Enter accepts the region shown. Without a region to show, the
+        administrator types a region from the list. The function asks again until the
+        region is on the list. Returns the region.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)][string]$AzureRegion = '',
+        [Parameter(Mandatory = $false)][string]$Answer = ''
+    )
+
+    $regionDefault = Get-NeologikDocumentAnalysisRegionDefault -AzureRegion $AzureRegion
+    $shown = $regionDefault
+    if (-not [string]::IsNullOrWhiteSpace($Answer)) {
+        if (Test-NeologikDocumentAnalysisRegionError $Answer) {
+            Write-Host "  [!] The answer file holds the documentAnalysisRegion '$Answer'. The region is not on the list. The script ignores the value." -ForegroundColor Yellow
+        }
+        else {
+            $shown = $Answer.Trim().ToLower()
+        }
+    }
+    $label = Get-PromptLabel $shown $regionDefault
+
+    while ($true) {
+        Write-Host ""
+        Write-Host "Azure Region for Document Analysis:" -ForegroundColor Cyan
+        Write-Host "  Regions for document analysis: $($script:DocumentAnalysisRegions -join ', ')" -ForegroundColor Gray
+        if ($shown) {
+            Write-Host "  $label" -NoNewline -ForegroundColor Gray
+            Write-Host $shown -ForegroundColor Yellow
+            Write-Host "  Press Enter to accept the region shown, or type another region from the list: " -NoNewline -ForegroundColor Gray
+        }
+        else {
+            Write-Host "  The Azure region of the environment, $AzureRegion, is not on the list." -ForegroundColor Gray
+            Write-Host "  Type the region that you agreed with Neologik, from the list: " -NoNewline -ForegroundColor Gray
+        }
+        $typed = [string](Read-Host)
+
+        if ([string]::IsNullOrWhiteSpace($typed)) {
+            if ($shown) {
+                Write-Host "  [OK] Using: $shown" -ForegroundColor Green
+                return $shown
+            }
+            Write-Host "  [X] A region is required. Type a region from the list." -ForegroundColor Red
+            continue
+        }
+
+        $typedError = Test-NeologikDocumentAnalysisRegionError $typed
+        if ($typedError) {
+            Write-Host "  [X] $typedError" -ForegroundColor Red
+            continue
+        }
+        $chosen = $typed.Trim().ToLower()
+        Write-Host "  [OK] Using: $chosen" -ForegroundColor Green
+        return $chosen
+    }
+}
+
 function Get-CafRegionCodes {
     <#
     .SYNOPSIS
@@ -5132,6 +5243,10 @@ function Set-ConfigFromAnswerFile {
     }
     $script:AzureRegion = $rg
     $regionAbbrev = ([string]$script:MicrosoftCAFRegionCodes[$rg]).ToLower()
+
+    # The Azure region for document analysis. Without the answer, the Azure region of the environment
+    # applies when that region is on the list.
+    $script:ConfigData['ContentUnderstandingRegion'] = Resolve-NeologikDocumentAnalysisRegion -AzureRegion $rg -Answer ([string](Get-Answer 'documentAnalysisRegion'))
 
     # Environment index. The default value is '01'
     $ei = [string](Get-Answer 'environmentIndex')
@@ -5842,6 +5957,10 @@ function Start-NeologikOnboarding {
             }
         }
 
+        # The Azure region for document analysis. The question shows the Azure region of the environment
+        # when that region is on the list.
+        $script:ConfigData['ContentUnderstandingRegion'] = Read-NeologikDocumentAnalysisRegion -AzureRegion $script:AzureRegion -Answer ([string](Get-Answer 'documentAnalysisRegion'))
+
         # Environment index
         # The question shows a valid environment index from the answer file, from 1 to 99.
         $indexDefault = Get-Answer 'environmentIndex'
@@ -6276,6 +6395,7 @@ function Start-NeologikOnboarding {
         Write-SummaryRow 'Environment Type' $script:EnvironmentType
         Write-SummaryRow 'Environment Index' $script:EnvironmentIndex
         Write-SummaryRow 'Azure Region' $script:AzureRegion
+        Write-SummaryRow 'Document Analysis' $script:ConfigData['ContentUnderstandingRegion']
         Write-SummaryRow 'Resource Group Name' $script:ResourceGroupName
         Write-SummaryRow 'Key Vault Name' $script:KeyVaultNameOverride
         Write-SummaryRow 'Storage Account Name' $script:ConfigData['DeployStorageAccountName']
@@ -6356,6 +6476,12 @@ function Start-NeologikOnboarding {
             if (-not $script:ConfigData.ContainsKey('UseExistingServicePrincipal')) {
                 $script:ConfigData['UseExistingServicePrincipal'] = $false
                 $script:ConfigData['ExistingServicePrincipalObjectId'] = ''
+            }
+
+            # A checkpoint of an earlier version can hold no Azure region for document analysis. The script then
+            # uses the Azure region of the environment when that region is on the list.
+            if ([string]::IsNullOrWhiteSpace([string]$script:ConfigData['ContentUnderstandingRegion'])) {
+                $script:ConfigData['ContentUnderstandingRegion'] = Get-NeologikDocumentAnalysisRegionDefault -AzureRegion $script:AzureRegion
             }
 
             Write-Host "`n  >> The script restored the configuration from the checkpoint and asks no question" -ForegroundColor Gray

@@ -9,6 +9,9 @@
   "azureRegion": "uksouth",
   "environmentIndex": "01",
 
+  "_documentAnalysisRegion_note": "The Azure region for document analysis, agreed with Neologik. Choose one of australiaeast, canadacentral, eastus, eastus2, japaneast, southcentralus, southeastasia, swedencentral, uksouth, westeurope, westus and westus3. Leave the field empty to use azureRegion, when azureRegion is on that list.",
+  "documentAnalysisRegion": "",
+
   "_resourceTags_note": "applyResourceTags true (the default) tags every Azure resource the script creates with Vendor, ApplicationName, ManagedBy, Environment, Solution and DeploymentDate. Choose true if your Azure Policies refuse untagged resources. resourceTagsCustom holds optional tags of your own, as an object or as a string of the form Key=Value,Key2=Value2. Keys use letters, digits, full stops, underscores and hyphens; values contain no comma and no equals sign. A custom tag replaces a standard tag of the same name. Ignored when applyResourceTags is false.",
   "applyResourceTags": true,
   "resourceTagsCustom": {},

@@ -115,7 +115,7 @@ Sometimes the onboarding script cannot make the check for Global Administrator. 
 
 | Input | Content |
 |---|---|
-| The answer file, `inputs.json`. The answer file is in the folder of the onboarding script, or the parameter `-AnswerFile` names the answer file | The organisation code, the organisation name and the host name. The environment type, the Azure region and the environment index. The resource names and the tags. The choices about guests and existing accounts. The deployment service principal that you created |
+| The answer file, `inputs.json`. The answer file is in the folder of the onboarding script, or the parameter `-AnswerFile` names the answer file | The organisation code, the organisation name and the host name. The environment type, the Azure region, the Azure region for document analysis and the environment index. The resource names and the tags. The choices about guests and existing accounts. The deployment service principal that you created |
 | Command-line parameters | The organisation code, the environment type and the Azure region. The tenant, the subscription and the name of the Key Vault. The deployment service principal that you created. The switches `-NonInteractive`, `-AcceptTerms`, `-FreshRun`, `-SkipModuleInstall`, `-SkipGuestInvitation` and `-SkipPowerShellUpdate` |
 | `NeologikGuestUsers.txt` | The Neologik support accounts that the onboarding script invites as guests, when you choose invitation |
 | `resource-providers.txt` | The list of resource providers and preview features |
@@ -298,7 +298,7 @@ A second run adds no client secret to the Platform Sign-in application while the
 | File | Location | Content |
 |---|---|---|
 | `NeologikOnboarding_<timestamp>.log` | The folder of the onboarding script. The onboarding script uploads a copy to the container `logs` | The log of the run |
-| `Neologik_<org><index>_Configuration_<timestamp>.json` | The folder of the onboarding script. The onboarding script uploads a copy to the container `json` | The version of the onboarding script and the version of the onboarding kit. The name and the id of each object created. The roles assigned. The host name. The sign-in name of the administrator. The addresses of the accounts invited or added. The expiry date of the client secret |
+| `Neologik_<org><index>_Configuration_<timestamp>.json` | The folder of the onboarding script. The onboarding script uploads a copy to the container `json` | The version of the onboarding script and the version of the onboarding kit. The name and the id of each object created. The roles assigned. The host name. The Azure region for document analysis. The sign-in name of the administrator. The addresses of the accounts invited or added. The expiry date of the client secret |
 | `NeologikCheckpoint.json` | The folder of the onboarding script, while a run is incomplete | The configuration collected so far, in the same form as the configuration file. The onboarding script deletes the checkpoint when the run completes |
 
 None of the three files contains a secret. All three files contain personal data, namely sign-in names and email addresses. Handle the three files as personal data.
