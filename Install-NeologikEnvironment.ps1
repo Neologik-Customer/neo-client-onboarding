@@ -74,10 +74,11 @@
     When the administrator declines invitation, the script asks whether to add
     existing accounts to the security groups. The script sends no invitation. The
     keys in the answer file are 'addExistingAccountsToGroups' and
-    'existingAccountEmails'. Each address must match the mail address or the user
-    principal name of an account. The script reports an address that matches no
-    account and continues. Each account added in this way joins all four Neologik
-    security groups. One of the four is the Admin User Group.
+    'existingAccountEmails'. The script finds each existing account by the mail
+    address, the user principal name or another mail address of the account. The
+    script reports an address that matches no account and continues. Each account
+    added in this way joins all four Neologik security groups. One of the four is
+    the Admin User Group.
 
 .PARAMETER ExistingServicePrincipalObjectId
     The object ID of the enterprise application of a deployment service principal
@@ -1879,11 +1880,11 @@ function Invoke-ExistingAccountResolution {
         function sends no invitation.
     .DESCRIPTION
         The script calls the function when the administrator declined invitation and
-        chose to add existing accounts. The function looks up each address by mail
-        address and by user principal name. The function adds each account found to
-        the list. The function reports an address that matches no account and
-        continues. An administrator can add such an account in Microsoft Entra ID
-        later.
+        chose to add existing accounts. The function finds each account by the mail
+        address, the user principal name or another mail address of the account. The
+        function adds each account found to the list. The function reports an address
+        that matches no account and continues. An administrator can add such an
+        account in Microsoft Entra ID later.
     #>
     [CmdletBinding()]
     param(
@@ -1913,7 +1914,7 @@ function Invoke-ExistingAccountResolution {
             }
         }
         else {
-            Write-Log "No account in this tenant has the mail address or the user principal name $email. The script continues without the account. Create the account and add the account to the security groups in Microsoft Entra ID later." -Level Warning
+            Write-Log "No account in this tenant has $email as the mail address, the user principal name or another mail address. The script continues without the account. Create the account and add the account to the security groups in Microsoft Entra ID later." -Level Warning
         }
     }
 
@@ -6257,8 +6258,9 @@ function Start-NeologikOnboarding {
                         # The administrator types one address on each line. A line can hold several addresses, separated by
                         # commas. An empty line ends the entry.
                         Write-Host "  Enter the email addresses, one on each line. A line can hold several addresses" -ForegroundColor Gray
-                        Write-Host "  separated by commas. Each address must match the mail address or the user" -ForegroundColor Gray
-                        Write-Host "  principal name of the account exactly. Press Enter on an empty line to finish." -ForegroundColor Gray
+                        Write-Host "  separated by commas. The script finds each account by the mail address, the" -ForegroundColor Gray
+                        Write-Host "  user principal name or another mail address of the account. Press Enter on" -ForegroundColor Gray
+                        Write-Host "  an empty line to finish." -ForegroundColor Gray
                         $emails = @(Read-EmailAddressList)
                         if ($emails.Count -eq 0) {
                             Write-Host "  No address entered. The script adds no account to the security groups." -ForegroundColor Yellow

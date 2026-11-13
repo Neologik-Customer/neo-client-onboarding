@@ -273,7 +273,7 @@ The onboarding script also adds the tag `NeologikOnboardingKit` to the resource 
 
 ### Guest users
 
-When you choose invitation, the onboarding script invites each address in `NeologikGuestUsers.txt` and each address that you add at the question. The onboarding script sends no invitation to an address that already has an account in the tenant. The onboarding script uses the existing account, whether the account is a guest or a member.
+When you choose invitation, the onboarding script invites each address in `NeologikGuestUsers.txt` and each address that you add at the question. The onboarding script sends no invitation to an address that already belongs to an account in the tenant. The onboarding script finds that account by the mail address, the user principal name or another mail address of the account. The onboarding script uses the existing account, whether the account is a guest or a member.
 
 `NeologikGuestUsers.txt` has this format:
 
@@ -283,7 +283,7 @@ When you choose invitation, the onboarding script invites each address in `Neolo
 | The onboarding script ignores a blank line |
 | A line that begins with `#` is a comment |
 
-When you decline invitation, the onboarding script asks whether to add existing accounts to the security groups. The onboarding script sends no invitation. Each address must match the mail address or the user principal name of an account exactly. The onboarding script reports an address that matches no account and continues.
+When you decline invitation, the onboarding script asks whether to add existing accounts to the security groups. The onboarding script sends no invitation. The onboarding script finds each existing account by the mail address, the user principal name or another mail address of the account. The onboarding script reports an address that matches no account and continues.
 
 Each account that you invite or add joins all four security groups. One of the four is the group `Neologik Admin User Group - <short name>`. List only the accounts that need Neologik administration and support access.
 

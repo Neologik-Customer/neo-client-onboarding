@@ -152,7 +152,7 @@ The onboarding script reads each directory object before a write. The onboarding
 
 | Directory object | Call | Properties | When the onboarding script writes |
 |---|---|---|---|
-| Guest invitation | `New-MgInvitation` | The address. A redirect to the Azure portal. An invitation email | You chose invitation, and no account has that mail address or that user principal name |
+| Guest invitation | `New-MgInvitation` | The address. A redirect to the Azure portal. An invitation email | You chose invitation, and no account holds the address as the mail address, the user principal name or another mail address |
 | Security group | `New-MgGroup` | Display name and description. Security enabled. Not mail enabled | The security group is absent |
 | Name of a security group | `Update-MgGroup` | Display name and description | The tenant holds the group `Neologik NCE Contributors - <short name>` under one of two other names that the onboarding script recognises. The security group keeps the id and the members. A new environment holds no security group with either name |
 | Description of a security group | `Update-MgGroup` | Description. See [The descriptions that the onboarding script writes](#the-descriptions-that-the-onboarding-script-writes) | The security group exists with another description. When the update fails, the onboarding script reports a warning and continues |
