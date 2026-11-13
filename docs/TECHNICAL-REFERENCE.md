@@ -378,7 +378,7 @@ Each federated credential trusts one repository of the Neologik deployment. Each
 
 | Managed identity | Purpose | Roles |
 |---|---|---|
-| `neologik-script-runner-service-connection-<short name>` | The deployment runs scripts inside Azure as this managed identity | Reader, Key Vault Secrets Officer and Azure Bot Service Contributor Role on the resource group. No role on the subscription |
+| `neologik-script-runner-service-connection-<short name>` | The deployment runs scripts inside Azure as this managed identity | Reader and Key Vault Secrets Officer on the resource group. No role on the subscription |
 | `neologik-sql-managed-identity-<short name>` | Azure SQL uses this managed identity to look up Microsoft Entra accounts at sign-in | Directory Readers in Microsoft Entra ID |
 | `neologik-directory-managed-identity-<short name>` | From version 5.2 of the Neologik Platform, this managed identity creates and changes the application registrations of Neologik agents from inside your environment. Nothing can sign in as the managed identity until a deployment by Neologik adds the sign-in credential | No Azure role. The Microsoft Graph application permission `Application.ReadWrite.OwnedBy`, which creates application registrations and changes only the application registrations that the managed identity owns |
 

@@ -44,7 +44,7 @@ The onboarding script grants access on the resource group. The onboarding script
 | Service principal of the agent identity blueprint | Microsoft Graph application permissions | `AgentIdUser.ReadWrite.IdentityParentedBy` |
 | Agent registration identity | Microsoft Graph application permissions | `Application.ReadWrite.OwnedBy`<br>`AgentRegistration.ReadWrite.All` |
 | The group `Neologik Admin User Group - <short name>` | Resource group | Contributor<br>Azure Kubernetes Service Cluster Admin Role<br>Azure Kubernetes Service RBAC Cluster Admin<br>Key Vault Administrator<br>Key Vault Secrets Officer<br>Key Vault Certificates Officer<br>Storage Blob Data Owner<br>Storage Blob Data Contributor<br>Storage Table Data Contributor<br>Cognitive Services Data Reader<br>Cognitive Services OpenAI Contributor<br>Search Index Data Reader<br>Azure AI Developer |
-| Script runner managed identity | Resource group | Reader<br>Key Vault Secrets Officer<br>Azure Bot Service Contributor Role |
+| Script runner managed identity | Resource group | Reader<br>Key Vault Secrets Officer |
 | System task managed identity | Resource group | Role Based Access Control Administrator, which cannot assign Owner, User Access Administrator or Role Based Access Control Administrator, and assigns every other role to service principals only |
 | SQL managed identity | Microsoft Entra directory role | Directory Readers |
 | The signed-in administrator | Resource group | Key Vault Secrets Officer<br>Storage Blob Data Contributor |

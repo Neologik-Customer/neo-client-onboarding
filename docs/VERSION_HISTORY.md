@@ -89,6 +89,7 @@ This version is on the line of Neologik Platform v5.2. This version limits the r
 | `Upgrade-TeamsAppInstallations.ps1` | Version v0.2.3. Before the script imports the Microsoft Graph modules that the script installed, the script checks the Authenticode signature of each file of each module. When a file fails the check, the script removes each module that the script installed in the run, and stops |
 | `docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md`, `docs/UNINSTALL-GUIDE.md`, `docs/TEAMS-APP-UPGRADE-GUIDE.md` and `docs/TECHNICAL-REFERENCE.md` | Each document describes the signature check of the script that the document covers |
 | The Neologik guest users | The onboarding script also finds a Neologik guest whose account holds the listed address among the other mail addresses of the account. An account first invited under another address holds the listed address there. The onboarding script sends that guest no second invitation |
+| `Install-NeologikEnvironment.ps1` | The script runner managed identity holds Reader and Key Vault Secrets Officer on the resource group. `docs/QUICK-REFERENCE.md`, `docs/TECHNICAL-REFERENCE.md` and `docs/secure-overview.md` list the two roles |
 | `inputs-example.json` | One new answer: `systemTaskIdentityName` |
 | `Upgrade-TeamsAppInstallations.ps1` | Version v0.2.2. The function `Grant-AdminConsent` leaves the script, together with the application ids of Microsoft Graph PowerShell and Microsoft Graph that only the function read. No part of the script called the function. No step of the script changes |
 

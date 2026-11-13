@@ -4299,7 +4299,7 @@ function New-NeologikManagedIdentities {
                 # the runner virtual machine. The scripts read and write secrets in the Key Vault. Every one of these
                 # resources is in the resource group. The managed identity holds no role on the subscription.
                 Roles = @()
-                RGRoles = @('Reader', 'Key Vault Secrets Officer', 'Azure Bot Service Contributor Role')
+                RGRoles = @('Reader', 'Key Vault Secrets Officer')
                 # The script runner identity receives no Microsoft Graph application permission.
             },
             @{
