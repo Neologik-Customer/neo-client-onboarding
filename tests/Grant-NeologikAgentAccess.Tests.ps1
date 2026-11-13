@@ -370,6 +370,8 @@ BeforeAll {
     Mock Get-NeologikLoadedModuleVersion { $null }
     Mock Install-NeologikModule { param($Name) $script:Installs += $Name }
     Mock Import-NeologikModule { param($Name, $RequiredVersion) $script:Imports += "$Name $RequiredVersion" }
+    # The signature check reads the modules of the workstation. Grant-NeologikAgentAccess.Signatures.Tests.ps1 tests the check.
+    Mock Assert-NeologikModuleSignature { }
     Mock Test-NeologikCommand { $true }
     Mock Invoke-NeologikAzureCli { @{ ExitCode = 0; Output = @('eyJ0b2tlbg') } }
     # every endpoint answers, and the script's own device code
@@ -691,6 +693,7 @@ Context 'Modules and sign-in' {
         $code = Invoke-Run @{ AgentGrantsFile = (New-GrantsFile -Grants @((New-AgentGrantEntry))) }
         $code | Should -Be 0
         $script:Installs | Should -Contain 'Microsoft.Graph.Applications'
+        Should -Invoke Assert-NeologikModuleSignature -Times 1 -Exactly -ParameterFilter { (@($Modules) | ForEach-Object { $_['Name'] }) -join ',' -eq 'Microsoft.Graph.Applications' }
         $script:Imports | Should -Contain 'Microsoft.Graph.Authentication 2.38.0'
         $script:Imports | Should -Contain 'Microsoft.Graph.Applications 2.38.0'
         # The grants need no group or directory-role module.

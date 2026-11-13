@@ -50,10 +50,12 @@
     # Shows what a run would upgrade and upgrades nothing.
 
 .NOTES
-    Version: v0.2.2
+    Version: v0.2.3
     Requires: PowerShell 7.4 or later
     Requires: the Microsoft Graph PowerShell modules. The script installs the modules
     for the current user when the modules are missing
+    Signature check: before the script loads a module that the script installed, the
+    script checks the signature of each file of the module
     Requires: a Global Administrator at the first run, to give consent for the tenant
     Delegated Microsoft Graph permissions requested at the sign-in:
         - AppCatalog.Read.All
@@ -80,7 +82,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $InformationPreference = 'Continue'
 
-$script:Version = 'v0.2.2'
+$script:Version = 'v0.2.3'
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 $script:LogFile = Join-Path $PSScriptRoot "TeamsAppUpgrade_$($script:FileTimestamp).log"
 $script:ReportFile = Join-Path $PSScriptRoot "TeamsAppUpgrade_$($script:FileTimestamp).csv"
@@ -147,12 +149,292 @@ function Install-GraphModule {
             Write-Log "Installing $module for the current user..." -Level Info
             Install-Module -Name $module -Scope CurrentUser -Force -AllowClobber
         }
+
+        # Check the signature of each file that the download brought, before the script imports any module.
+        Assert-NeologikModuleSignature -Modules @($missing | ForEach-Object { @{ Name = $_; MinVersion = '' } })
     }
 
     foreach ($module in $required) {
         Import-Module $module -ErrorAction Stop
     }
     Write-Log "The Microsoft Graph modules are ready" -Level Success
+}
+
+# The file types that the signature check of a module reads. Microsoft Corporation publishes each
+# module that the script installs, and signs each script file of the module. A module also holds
+# libraries that other publishers sign, for example Json.NET. A library needs a valid signature of
+# any publisher.
+$script:ModuleScriptExtensions = @('.ps1', '.psm1', '.psd1', '.ps1xml', '.cdxml')
+$script:ModuleLibraryExtensions = @('.dll', '.exe')
+
+function Get-NeologikSignatureProblem {
+    <#
+    .SYNOPSIS
+        Checks the Authenticode signature of one file. Returns an empty string when the
+        file passes the check. Otherwise returns the reason.
+    .DESCRIPTION
+        A file passes when Windows reports a valid signature. With -MicrosoftOnly, the
+        certificate that signed the file must also name the organisation Microsoft
+        Corporation.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$MicrosoftOnly
+    )
+
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    switch ([string]$signature.Status) {
+        'Valid' { }
+        'NotSigned' { return 'the file has no signature' }
+        'HashMismatch' { return 'the file changed after the publisher signed the file' }
+        default { return "Windows reports the signature status $($signature.Status)" }
+    }
+    $subject = if ($signature.SignerCertificate) { [string]$signature.SignerCertificate.Subject } else { '' }
+    if ($MicrosoftOnly -and $subject -notmatch '(^|,)\s*O=Microsoft Corporation\s*(,|$)') {
+        return "the signer is not Microsoft Corporation. The certificate names $subject"
+    }
+    return ''
+}
+
+function Test-NeologikReferenceAssembly {
+    <#
+    .SYNOPSIS
+        Returns $true when a library is a reference assembly. .NET refuses to run the code
+        of a reference assembly. The function reads the metadata of the file and runs
+        nothing.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $stream = $null
+    $peReader = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        $peReader = [System.Reflection.PortableExecutable.PEReader]::new($stream)
+        if (-not $peReader.HasMetadata) { return $false }
+        $reader = [System.Reflection.Metadata.PEReaderExtensions]::GetMetadataReader($peReader)
+        if (-not $reader.IsAssembly) { return $false }
+        foreach ($handle in $reader.GetAssemblyDefinition().GetCustomAttributes()) {
+            $attribute = $reader.GetCustomAttribute($handle)
+            if ($attribute.Constructor.Kind -ne [System.Reflection.Metadata.HandleKind]::MemberReference) { continue }
+            $constructor = $reader.GetMemberReference([System.Reflection.Metadata.MemberReferenceHandle]$attribute.Constructor)
+            if ($constructor.Parent.Kind -ne [System.Reflection.Metadata.HandleKind]::TypeReference) { continue }
+            $type = $reader.GetTypeReference([System.Reflection.Metadata.TypeReferenceHandle]$constructor.Parent)
+            if ($reader.GetString($type.Namespace) -eq 'System.Runtime.CompilerServices' -and $reader.GetString($type.Name) -eq 'ReferenceAssemblyAttribute') {
+                return $true
+            }
+        }
+        return $false
+    }
+    catch {
+        # A file that is not a .NET library counts as no reference assembly. So does a file that this version of PowerShell cannot read.
+        return $false
+    }
+    finally {
+        if ($peReader) { $peReader.Dispose() }
+        if ($stream) { $stream.Dispose() }
+    }
+}
+
+function Get-NeologikRequiredModuleList {
+    <#
+    .SYNOPSIS
+        Returns each entry of RequiredModules in a module manifest. The function parses
+        the manifest and reads only the value of RequiredModules, as data. The function
+        can therefore read a manifest whose other values depend on the edition of
+        PowerShell. The function runs nothing.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+    if (@($errors).Count -gt 0) {
+        throw "the manifest does not parse: $(@($errors)[0].Message)"
+    }
+    $table = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.HashtableAst] }, $false)
+    if (-not $table) {
+        throw 'the manifest holds no table of values'
+    }
+    foreach ($pair in $table.KeyValuePairs) {
+        if ([string]$pair.Item1.SafeGetValue() -ne 'RequiredModules') { continue }
+        $value = if ($pair.Item2 -is [System.Management.Automation.Language.PipelineBaseAst]) { $pair.Item2.GetPureExpression() } else { $null }
+        if (-not $value) {
+            throw 'the value of RequiredModules is not data'
+        }
+        return @($value.SafeGetValue() | Where-Object { $_ })
+    }
+    return @()
+}
+
+function Get-NeologikModuleSignatureProblem {
+    <#
+    .SYNOPSIS
+        Checks the Authenticode signature of each script file and each library of one
+        installed module. Returns one line for each file that fails the check.
+    .DESCRIPTION
+        Each script file must have a valid signature of Microsoft Corporation. Each
+        library must have a valid signature of any publisher. A reference assembly with
+        no signature passes, because .NET refuses to run the code of a reference
+        assembly.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Version,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ModuleBase
+    )
+
+    $extensions = $script:ModuleScriptExtensions + $script:ModuleLibraryExtensions
+    $files = @(Get-ChildItem -LiteralPath $ModuleBase -Recurse -File -ErrorAction Stop |
+        Where-Object { $extensions -contains $_.Extension.ToLowerInvariant() })
+    $problems = @()
+
+    foreach ($file in $files) {
+        $isLibrary = $script:ModuleLibraryExtensions -contains $file.Extension.ToLowerInvariant()
+        $problem = Get-NeologikSignatureProblem -Path $file.FullName -MicrosoftOnly:(-not $isLibrary)
+        if (-not $problem) { continue }
+
+        # .NET refuses to run the code of a reference assembly, so a reference assembly with no signature passes.
+        if ($isLibrary -and
+            [string](Get-AuthenticodeSignature -LiteralPath $file.FullName).Status -eq 'NotSigned' -and
+            (Test-NeologikReferenceAssembly -Path $file.FullName)) {
+            Write-Log "The library $($file.FullName) of the module $Name $Version is a reference assembly with no signature. .NET runs no code of a reference assembly" -Level Info
+            continue
+        }
+
+        $problems += "the module $Name $Version, file $($file.FullName): $problem"
+    }
+    return $problems
+}
+
+function Find-NeologikInstalledModule {
+    <#
+    .SYNOPSIS
+        Returns the installed module at a required version, or the newest installed
+        version at or above a minimum version. Returns nothing when no installed version
+        matches.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [Parameter(Mandatory = $false)]
+        [string]$MinimumVersion,
+
+        [Parameter(Mandatory = $false)]
+        [string]$RequiredVersion
+    )
+
+    $modules = @(Get-Module -ListAvailable -Name $Name -ErrorAction SilentlyContinue)
+    if ($RequiredVersion) {
+        $modules = @($modules | Where-Object { $_.Version -eq [Version]$RequiredVersion })
+    }
+    elseif ($MinimumVersion) {
+        $modules = @($modules | Where-Object { $_.Version -ge [Version]$MinimumVersion })
+    }
+    return $modules | Sort-Object Version -Descending | Select-Object -First 1
+}
+
+function Assert-NeologikModuleSignature {
+    <#
+    .SYNOPSIS
+        Checks the signature of each file of the modules that the script installed, before
+        the script imports any module. Stops the run when a file fails the check.
+    .DESCRIPTION
+        The function checks each module that the script installed, at the version that
+        the script uses. The function also checks each module that the manifest of such a
+        module requires, at the version that the manifest names. When a file fails the
+        check, the function removes each module that -Modules names, which the script
+        installed in this run. The next run then downloads and checks each module again.
+        The function then stops the run.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [array]$Modules
+    )
+
+    Write-Log "Checking the signature of each file of the installed modules..." -Level Info
+    $problems = @()
+    $installed = @()
+    $checked = @{}
+    $queue = [System.Collections.Generic.Queue[object]]::new()
+
+    foreach ($module in $Modules) {
+        $found = Find-NeologikInstalledModule -Name $module.Name -MinimumVersion $module.MinVersion
+        if ($found) {
+            $installed += $found
+            $queue.Enqueue($found)
+        }
+        else {
+            $problems += "the module $($module.Name), which is not installed after the download"
+        }
+    }
+
+    while ($queue.Count -gt 0) {
+        $current = $queue.Dequeue()
+        if ($checked.ContainsKey($current.ModuleBase)) { continue }
+        $checked[$current.ModuleBase] = $true
+        $problems += @(Get-NeologikModuleSignatureProblem -Name $current.Name -Version ([string]$current.Version) -ModuleBase $current.ModuleBase)
+
+        # Each module that the manifest requires. The script reads the manifest as data and runs nothing.
+        $manifestPath = Join-Path $current.ModuleBase "$($current.Name).psd1"
+        if (-not (Test-Path -LiteralPath $manifestPath)) { continue }
+        try {
+            $requiredModules = @(Get-NeologikRequiredModuleList -Path $manifestPath)
+        }
+        catch {
+            $problems += "the module $($current.Name) $($current.Version), whose manifest the script cannot read: $($_.Exception.Message)"
+            continue
+        }
+        foreach ($required in $requiredModules) {
+            $spec = if ($required -is [hashtable]) { $required } else { @{ ModuleName = [string]$required } }
+            $requiredModule = Find-NeologikInstalledModule -Name $spec['ModuleName'] -RequiredVersion $spec['RequiredVersion'] -MinimumVersion $spec['ModuleVersion']
+            if ($requiredModule) {
+                $queue.Enqueue($requiredModule)
+            }
+            else {
+                Write-Log "The module $($spec['ModuleName']), which the module $($current.Name) requires, is not installed. The script checks no file of that module" -Level Warning
+            }
+        }
+    }
+
+    if ($problems.Count -eq 0) {
+        Write-Log "Each file of the installed modules has a valid signature" -Level Success
+        return
+    }
+
+    foreach ($problem in $problems) {
+        Write-Log "The signature check failed for $problem" -Level Error
+    }
+    foreach ($module in $installed) {
+        try {
+            Remove-Item -LiteralPath $module.ModuleBase -Recurse -Force -ErrorAction Stop
+            Write-Log "Removed the module $($module.Name) $($module.Version), which the script installed in this run" -Level Warning
+        }
+        catch {
+            Write-Log "The script could not remove the folder $($module.ModuleBase). Delete the folder before the next run: $($_.Exception.Message)" -Level Warning
+        }
+    }
+    throw "A PowerShell module failed the signature check. The script imported no module and stops. The script removed each module that the script installed in this run. The log names each file that failed the check. Run the script again later. When the check fails again, email the log to support@neologik.ai."
 }
 
 #endregion

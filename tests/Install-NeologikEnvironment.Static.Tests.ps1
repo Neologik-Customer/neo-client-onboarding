@@ -53,11 +53,11 @@ It 'records the kit version on the resource group, at the version the version hi
     $text | Should -Match ([regex]::Escape("`$script:KitVersion = 'v$top'"))
 }
 
-It 'adds the federated credential of the deployment identity for this environment only' {
-    $script:Defined | Should -Contain 'Set-NeologikDeploymentCredential'
-    $script:Called | Should -Contain 'Set-NeologikDeploymentCredential'
+It 'adds no federated credential to the deployment identity' {
+    $script:Defined | Should -Not -Contain 'Set-NeologikDeploymentCredential'
     $text = Get-Content -Raw $script:ScriptPath
-    $text | Should -Match ([regex]::Escape("claims['sub'] matches 'repo:Neologik-AI*:environment:`$EnvironmentName' and claims['repository_owner_id'] eq '109681438'"))
+    $text | Should -Not -Match 'github-deployments-'
+    $text | Should -Not -Match ([regex]::Escape(":environment:"))
 }
 
 It 'records this version of the onboarding kit only after the steps of this version' {
@@ -65,20 +65,28 @@ It 'records this version of the onboarding kit only after the steps of this vers
     $text | Should -Match ([regex]::Escape('Update-AzTag -ResourceId $rg.ResourceId -Tag @{ NeologikOnboardingKit = $earlierKitVersion } -Operation Merge'))
     $finalWrite = $text.IndexOf('Set-NeologikKitVersionTag -ResourceId "/subscriptions/')
     $finalWrite | Should -BeGreaterThan $text.IndexOf('$null = New-NeologikManagedIdentities')
-    $finalWrite | Should -BeGreaterThan $text.IndexOf('$null = Set-NeologikDeploymentCredential')
 }
 
-It 'ships an example answer file that names the environment name' {
+It 'ships an example answer file that names the agent registration identity and no environment name' {
     $json = Get-Content -Raw (Join-Path (Split-Path -Parent $PSScriptRoot) 'inputs-example.json') | ConvertFrom-Json
-    $json.PSObject.Properties.Name | Should -Contain 'environmentName'
+    $json.PSObject.Properties.Name | Should -Contain 'directoryIdentityName'
+    $json.PSObject.Properties.Name | Should -Not -Contain 'environmentName'
 }
 
-It 'creates the agent registration identity with two Microsoft Graph permissions and no Azure role' {
+It 'creates the agent registration identity with one Microsoft Graph permission and no Azure role' {
     $text = Get-Content -Raw $script:ScriptPath
     $text | Should -Match 'Name = \$directoryIdentityName'
-    $text | Should -Match "GraphAppRoles = @\('Application\.ReadWrite\.OwnedBy', 'AgentRegistration\.ReadWrite\.All'\)\s+\}"
-    $text | Should -Match "'AgentRegistration\.ReadWrite\.All'\s+= '39fb8c64-7bd3-4107-8515-14d6e55ddda4'"
+    $text | Should -Match "GraphAppRoles = @\('Application\.ReadWrite\.OwnedBy'\)\s+\}"
     $text | Should -Match 'neologik-directory-managed-identity\$nameSuffix'
+    $text | Should -Not -Match 'AgentRegistration\.ReadWrite\.All'
+}
+
+It 'asks for the name of the agent registration identity and passes the name to step 15' {
+    $text = Get-Content -Raw $script:ScriptPath
+    ([regex]::Matches($text, [regex]::Escape("Get-Answer 'directoryIdentityName'"))).Count | Should -Be 2 -Because 'the answer file run and the run with questions both read the answer'
+    $text | Should -Match ([regex]::Escape("Read-NameWithDefault -Title 'Agent Registration Identity Name'"))
+    $text | Should -Match ([regex]::Escape("-DirectoryIdentityName ([string]`$script:ConfigData['DirectoryIdentityName'])"))
+    $text | Should -Not -Match ([regex]::Escape("Get-Answer 'environmentName'"))
 }
 
 It 'creates the system task managed identity with the limited role on the resource group' {
@@ -88,11 +96,18 @@ It 'creates the system task managed identity with the limited role on the resour
     $text | Should -Match 'neologik-system-task-managed-identity'
 }
 
-It 'stops both identities assigning the three administrator roles, and limits other assignments to service principals' {
+It 'stops the system task managed identity assigning the three administrator roles, and limits other assignments to service principals' {
     $text = Get-Content -Raw $script:ScriptPath
     $text | Should -Match 'ForAnyOfAllValues:GuidNotEquals'
     $text | Should -Match "PrincipalType\] ForAnyOfAnyValues:StringEqualsIgnoreCase \{\{'ServicePrincipal'\}\}"
     $text | Should -Not -Match 'fbc52c3f-28ad-4303-a892-8a056630b8f1'
+    @([regex]::Matches($text, '-Condition \$script:ResourceGroupRoleCondition')).Count | Should -Be 1 -Because 'only the system task managed identity holds the limited role on the resource group'
+}
+
+It 'gives the deployment identity Role Based Access Control Administrator on the resource group without a condition' {
+    $text = Get-Content -Raw $script:ScriptPath
+    $text | Should -Match ([regex]::Escape("`$rgRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')"))
+    $text | Should -Not -Match ([regex]::Escape('Scope = $rgScope; Condition = $script:ResourceGroupRoleCondition'))
 }
 
 It 'limits the role on the subscription to Reader and Cost Management Reader, for service principals only' {

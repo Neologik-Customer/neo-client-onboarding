@@ -22,7 +22,7 @@ Neologik deploys and operates the Neologik Platform through one deployment ident
 | Microsoft Graph | The deployment identity holds two Microsoft Graph application permissions in your directory: `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Application registrations | The permission `Application.ReadWrite.OwnedBy` lets the deployment identity manage only the application registrations that the deployment identity owns |
 | Agent identity blueprint | The permission `AgentIdentityBlueprint.AddRemoveCreds.All` lets the deployment identity add and remove credentials on the agent identity blueprint of the environment |
-| Sign-in | A Neologik deployment signs in as the deployment identity with the client secret, or with the federated credential `github-deployments-<environment name>`. The federated credential holds no secret, accepts only a Neologik deployment run that names this environment, and adds no permission |
+| Sign-in | A Neologik deployment signs in as the deployment identity with the client secret |
 
 The onboarding kit includes each script in full. Approvers can read each script before an administrator runs the script.
 
@@ -206,6 +206,7 @@ Each question shows a default value or an example. Press Enter to accept a defau
 | Organization Name, the full name of the organisation | The full name of your organisation | None |
 | Host name of the environment, fully qualified | The fully qualified host name of the environment, for example `neologik.contoso.com`. The onboarding script removes an `https://` prefix and a path | None |
 | Azure Region | The Azure region for the resources, for example `uksouth`. Type `list` to see each region that the subscription can use | `uksouth` |
+| Azure Region for Document Analysis | The Azure region for document analysis that you agreed with Neologik. The question lists the regions that offer document analysis | The Azure region of the environment, when that region is on the list. Otherwise none |
 | Environment Index Number | A number from 01 to 99. The number separates two environments of the same type | `01` |
 | Resource Group Name, Key Vault Name, Deployment Storage Account Name, Script Runner Managed Identity Name, SQL Managed Identity Name, Agent Registration Identity Name, System Task Managed Identity Name | Press Enter to accept each standard name. Type another name when you prefer a name of your choice | The standard name, shown on screen |
 | Apply Azure resource tags to created resources? | `true` to tag each resource that the onboarding script creates. The tags are Vendor, ApplicationName, ManagedBy, Environment, Solution and DeploymentDate. Choose `true` when an Azure Policy in your subscription refuses a resource without tags | `true` |

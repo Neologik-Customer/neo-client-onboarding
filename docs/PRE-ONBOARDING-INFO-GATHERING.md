@@ -9,7 +9,7 @@ This document lists the values to collect and the decisions to make before you r
 | [1. Agreed with Neologik](#1-agreed-with-neologik) | You and Neologik agree the values together | The onboarding script asks for the host name only |
 | [2. Organisation](#2-organisation) | You | Yes |
 | [3. Environment](#3-environment) | You | Yes |
-| [4. Azure](#4-azure) | You | The onboarding script asks for the Azure region. The onboarding script takes the subscription from your sign-in, or from the parameter `-SubscriptionName` |
+| [4. Azure](#4-azure) | You | The onboarding script asks for the Azure region and the Azure region for document analysis. The onboarding script takes the subscription from your sign-in, or from the parameter `-SubscriptionName` |
 | [5. Decisions](#5-decisions) | You | Yes |
 
 ## Contents
@@ -62,14 +62,15 @@ To raise the limit, select the quota line and select **New Quota Request**.
 |---|---|---|
 | Subscription | The subscription that holds the environment. The onboarding script uses the subscription of your sign-in. To use another subscription, name the subscription with the parameter `-SubscriptionName` | The subscription of your sign-in |
 | Azure region | The name of an Azure region, for example `uksouth`, `ukwest`, `northeurope`, `westeurope`, `switzerlandnorth`, `eastus` or `westus`. Agree the Azure region with Neologik, because some Azure services are not available in every Azure region | `uksouth` |
+| Azure region for document analysis | The Neologik Platform sends documents to this Azure region for analysis. Agree the region with Neologik. The region must be one of `australiaeast`, `canadacentral`, `eastus`, `eastus2`, `japaneast`, `southcentralus`, `southeastasia`, `swedencentral`, `uksouth`, `westeurope`, `westus` and `westus3`. Choose the Azure region of the environment when that region is on the list | The Azure region of the environment, when that region is on the list. Otherwise none, and the value is required |
 
 ## 5. Decisions
 
 | Decision | Detail | Default |
 |---|---|---|
-| Resource names | The onboarding script proposes a standard name for the resource group, the Key Vault, the storage account and the three managed identities. When you have a naming standard for Azure, prepare the six names before the run. Send the naming standard to Neologik, so that the deployment names the other resources to the same standard | The standard names |
+| Resource names | The onboarding script proposes a standard name for the resource group, the Key Vault, the storage account and the four managed identities. When you have a naming standard for Azure, prepare the seven names before the run. Send the naming standard to Neologik, so that the deployment names the other resources to the same standard | The standard names |
 | Resource tags | Decide whether the onboarding script tags the resources that the onboarding script creates. Decide which further tags to add. Choose tags when an Azure Policy in your subscription refuses a resource without tags | The onboarding script tags the resources |
-| Neologik guest users | Decide whether the onboarding script invites the Neologik support accounts in `NeologikGuestUsers.txt` as guests. The alternative is to create accounts for Neologik support staff in your own tenant. For the alternative, have the exact address of each account ready. Each address must match the mail address or the user principal name of the account | The onboarding script invites the accounts |
+| Neologik guest users | Decide whether the onboarding script invites the Neologik support accounts in `NeologikGuestUsers.txt` as guests. The alternative is to create accounts for Neologik support staff in your own tenant. For the alternative, have the exact address of each account ready. The onboarding script finds each account by the mail address, the user principal name or another mail address of the account | The onboarding script invites the accounts |
 | Deployment service principal | Decide whether the onboarding script creates the deployment service principal, or you create the deployment service principal. To create the deployment service principal yourself, follow [CREATE-SP-GUIDE.md](CREATE-SP-GUIDE.md). Have the object ID of the enterprise application ready. Give the client secret to the onboarding script. Alternatively, add the client secret to the Key Vault before the first deployment | The onboarding script creates the deployment service principal |
 
 The onboarding script asks no question about agents. A platform operator creates agents and channels in the Neologik Admin Tool after Neologik deploys the environment.
