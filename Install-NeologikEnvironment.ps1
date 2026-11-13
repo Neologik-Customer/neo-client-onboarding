@@ -217,12 +217,13 @@ $ErrorActionPreference = 'Stop'
 $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
-# Script version
-$script:Version = 'v5.0.15'
-
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
 # The configuration file records the same version, in the field KitVersion.
 $script:KitVersion = 'v5.2.0'
+
+# The version of the onboarding script is the version of the onboarding kit, so the two versions never differ.
+# The script prints the version when a run starts. The configuration file records the version in the field ScriptVersion.
+$script:Version = $script:KitVersion
 
 # The third role of the deployment identity on the subscription: Role Based Access
 # Control Administrator, limited by a condition to two roles, for service principals

@@ -33,6 +33,16 @@ It 'records the version of the onboarding kit in the field KitVersion' {
     $config.KitVersion | Should -Match '^v\d+\.\d+\.\d+$'
 }
 
+It 'reports the version of the onboarding kit as the version of the onboarding script' {
+    $script:Version | Should -Be $script:KitVersion
+    (Get-Content -Raw $script:ScriptPath) | Should -Match ([regex]::Escape('$script:Version = $script:KitVersion'))
+    Export-ConfigurationData
+    $config = Get-Content -Raw $script:OutputFile | ConvertFrom-Json
+    $config.ScriptVersion | Should -Be $config.KitVersion
+    Write-ScriptHeader
+    Should -Invoke Write-Host -ParameterFilter { "$Object" -match [regex]::Escape("|          $($script:KitVersion) ") }
+}
+
 It 'keeps the field ScriptVersion first and writes the field KitVersion next to it' {
     Export-ConfigurationData
     $config = Get-Content -Raw $script:OutputFile | ConvertFrom-Json

@@ -16,10 +16,10 @@ This document describes the onboarding script, `Install-NeologikEnvironment.ps1`
 
 | Item | Value |
 |---|---|
-| Version of the onboarding script | The value of `$script:Version` in `Install-NeologikEnvironment.ps1`. The onboarding script prints the version when a run starts. The configuration file records the version in the field `ScriptVersion` |
+| Version of the onboarding script | The version of the onboarding kit. In `Install-NeologikEnvironment.ps1`, `$script:Version` takes the value of `$script:KitVersion`. The onboarding script prints the version when a run starts. The configuration file records the version in the field `ScriptVersion` |
 | Version of the onboarding kit | The value of `$script:KitVersion` in `Install-NeologikEnvironment.ps1`. The onboarding script records the version on the resource group. The configuration file records the version in the field `KitVersion` |
 
-The onboarding kit has a version, and each script has a separate version. The version of the onboarding kit follows the version of the Neologik Platform. The version of a script changes when the script changes.
+The onboarding kit has a version, which follows the version of the Neologik Platform. The onboarding script reports the version of the onboarding kit as the version of the onboarding script. Each other script has a separate version. The version of each other script changes when that script changes.
 
 ## Contents
 
@@ -447,7 +447,7 @@ The configuration file holds these sections:
 
 | Section | Content |
 |---|---|
-| Versions | `ScriptVersion`, the version of the onboarding script. `KitVersion`, the version of the onboarding kit, the same value as the tag `NeologikOnboardingKit` on the resource group |
+| Versions | `ScriptVersion`, the version of the onboarding script, and `KitVersion`, the version of the onboarding kit. The two fields hold the same value. The tag `NeologikOnboardingKit` on the resource group holds the same value too |
 | Environment | The tenant, the subscription, the resource group, the Azure region, the organisation, the host name, the solution name and the short name. `ContentUnderstandingRegion`, the Azure region for document analysis |
 | `SecurityGroups` | The name and the id of each of the four security groups |
 | `AppRegistration` | The deployment identity: the name, the client id and the roles. The section also records whether the onboarding script created the deployment identity |
