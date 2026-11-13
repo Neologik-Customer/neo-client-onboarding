@@ -98,6 +98,13 @@ It 'parses without errors and holds only standard ASCII' {
     @($bytes | Where-Object { $_ -gt 127 }).Count | Should -Be 0
 }
 
+It 'shows the synopsis and the description of the script in Get-Help, not only the syntax line' {
+    # PowerShell reads no help block that follows a #Requires line directly, and Get-Help then shows only the syntax line.
+    $help = Get-Help -Name $script:ScriptPath -Full
+    $help.Synopsis | Should -Match '^Deletes the directory objects of one Neologik Platform environment'
+    ($help.Description | Out-String) | Should -Match 'uninstall guide'
+}
+
 It 'requests only the five delegated permissions that the deletions need' {
     & $script:ScriptPath -ShortName abcprd01 | Out-Null
     $global:RemovalTest.ConnectScopes | Should -HaveCount 5

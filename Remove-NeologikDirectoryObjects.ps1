@@ -1,4 +1,5 @@
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Deletes the directory objects of one Neologik Platform environment from your
