@@ -22,7 +22,7 @@ Neologik deploys and operates the Neologik Platform through one deployment ident
 | Microsoft Graph | The deployment identity holds two Microsoft Graph application permissions in your directory: `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Application registrations | The permission `Application.ReadWrite.OwnedBy` lets the deployment identity manage only the application registrations that the deployment identity owns |
 | Agent identity blueprint | The permission `AgentIdentityBlueprint.AddRemoveCreds.All` lets the deployment identity add and remove credentials on the agent identity blueprint of the environment |
-| Sign-in | A Neologik deployment signs in as the deployment identity with the client secret, or with the federated credential `github-deployments-<environment name>`. The federated credential holds no secret, accepts only a Neologik deployment run that names this environment, and adds no permission |
+| Sign-in | A Neologik deployment signs in as the deployment identity with the client secret |
 
 The onboarding kit includes each script in full. Approvers can read each script before an administrator runs the script.
 

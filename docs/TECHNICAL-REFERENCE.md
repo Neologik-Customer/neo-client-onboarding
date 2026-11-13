@@ -128,7 +128,6 @@ When the answer file holds the organisation code, the organisation name and the 
 | `azureRegion` | The Azure region |
 | `documentAnalysisRegion` | The Azure region for document analysis, from the list in [PRE-ONBOARDING-INFO-GATHERING.md](PRE-ONBOARDING-INFO-GATHERING.md). Without this key, the onboarding script uses `azureRegion` when that region is on the list. When neither gives a region from the list, the onboarding script asks the question. An unattended run stops instead |
 | `environmentIndex` | `01` to `99` |
-| `environmentName` | The name of the environment in the Neologik deployment: 2 to 32 lower-case letters and digits. The standard name is the organisation code followed by the environment type. Give this answer only when Neologik gives you a different name |
 | `applyResourceTags` | `true` or `false` |
 | `resourceTagsCustom` | Further tags, written as an object or as a string of `key=value` pairs |
 | `solutionName`, `solutionShortName` | The solution name and the short name. See [Naming](#naming) |
@@ -216,7 +215,6 @@ The onboarding script builds every standard name from two values: the solution n
 | SQL managed identity | `neologik-sql-managed-identity-<short name>` | `neologik-sql-managed-identity-abcprd01` |
 | Agent registration identity | `neologik-directory-managed-identity-<short name>` | `neologik-directory-managed-identity-abcprd01` |
 | System task managed identity | `neologik-system-task-managed-identity-<short name>` | `neologik-system-task-managed-identity-abcprd01` |
-| Federated credential of the deployment identity | `github-deployments-<environment name>` | `github-deployments-abcprd` |
 | Security groups | `Neologik User Group - <short name>`<br>`Neologik NCE Contributors - <short name>`<br>`Neologik NCE Admins - <short name>`<br>`Neologik Admin User Group - <short name>` | `Neologik User Group - abcprd01` |
 | Deployment identity | `Neologik GitHub Service Connection - <short name>` | `Neologik GitHub Service Connection - abcprd01` |
 | Platform Sign-in application | `Neologik Platform Sign-in - <short name>` | `Neologik Platform Sign-in - abcprd01` |
@@ -226,7 +224,7 @@ The onboarding script builds every standard name from two values: the solution n
 
 | Name | Where you can change the name |
 |---|---|
-| The names of the resource group, the Key Vault, the deployment storage account and the three managed identities | At the question on screen, or in the answer file |
+| The names of the resource group, the Key Vault, the deployment storage account and the four managed identities | At the question on screen, or in the answer file |
 | The solution name and the short name | In the answer file only |
 
 The short name is also the last part of the name of each security group, each application and each managed identity.
@@ -381,7 +379,8 @@ Each federated credential trusts one repository of the Neologik deployment. Each
 |---|---|---|
 | `neologik-script-runner-service-connection-<short name>` | The deployment runs scripts inside Azure as this managed identity | Reader and Key Vault Secrets Officer on the resource group. No role on the subscription |
 | `neologik-sql-managed-identity-<short name>` | Azure SQL uses this managed identity to look up Microsoft Entra accounts at sign-in | Directory Readers in Microsoft Entra ID |
-| `neologik-directory-managed-identity-<short name>` | From version 5.2 of the Neologik Platform, this managed identity creates and changes the application registrations of Neologik agents from inside your environment. Nothing can sign in as the managed identity until a deployment by Neologik adds the sign-in credential | No Azure role. The Microsoft Graph application permission `Application.ReadWrite.OwnedBy`, which creates application registrations and changes only the application registrations that the managed identity owns |
+| `neologik-directory-managed-identity-<short name>` | The agent registration identity. From version 5.2 of the Neologik Platform, this managed identity creates and changes the application registrations of Neologik agents from inside your environment. Nothing can sign in as the managed identity until a deployment by Neologik adds the sign-in credential | No Azure role. The Microsoft Graph application permission `Application.ReadWrite.OwnedBy`, which creates application registrations and changes only the application registrations that the managed identity owns |
+| `neologik-system-task-managed-identity-<short name>` | The system task managed identity. From version 5.2 of the Neologik Platform, this managed identity creates the identities and role assignments of Neologik agents from inside your environment. Nothing can sign in as the managed identity until a deployment by Neologik adds the sign-in credential | Role Based Access Control Administrator on the resource group. The role cannot assign Owner, User Access Administrator or Role Based Access Control Administrator, and assigns every other role to service principals only. No Microsoft Graph application permission |
 
 ### Roles of the Admin User Group
 
@@ -453,7 +452,6 @@ The configuration file holds these sections:
 | `AppRegistration` | The deployment identity: the name, the client id and the roles. The section also records whether the onboarding script created the deployment identity |
 | `NceAuthApp` | The Platform Sign-in application: the name and the client id |
 | `AgentBlueprint` | The agent identity blueprint: the name, the ids and the names of the federated credentials |
-| `DeploymentCredential` | The federated credential of the deployment identity: the name, and the name of the environment that the federated credential accepts |
 | `KeyVault`, `StorageAccount`, `ManagedIdentities` | The name and the id of each resource |
 | Accounts | The sign-in name of the administrator who ran the onboarding script, and the addresses of the accounts invited or added |
 | `ResourceProvidersPending` | Each registration that is still in progress |

@@ -135,20 +135,6 @@ Context 'Security groups' {
 
 Context 'Federated credentials' {
 
-    It 'adds the federated credential of the deployment identity with a plain English description' {
-        Mock Invoke-MgGraphRequest {
-            param($Method, $Uri, $Body)
-            if ($Method -eq 'POST') { $script:Posts += [pscustomobject]@{ Uri = $Uri; Body = ($Body | ConvertFrom-Json) }; return }
-            if ($Uri -like '*federatedIdentityCredentials*') { return @{ value = @() } }
-            if ($Uri -like '*applications*filter*') { return @{ value = @(@{ id = 'deployment-application' }) } }
-        }
-        $null = Set-NeologikDeploymentCredential -ClientId '6f1c2d3e-0000-4000-8000-000000000010' -EnvironmentName 'abcprd'
-        @($script:Posts).Count | Should -Be 1
-        $script:Posts[0].Body.name | Should -Be 'github-deployments-abcprd'
-        $script:Posts[0].Body.description | Should -BeExactly 'This federated credential lets a Neologik deployment run for the environment abcprd sign in as the deployment identity with no stored secret. The federated credential adds no permission.'
-        Assert-PlainDescription $script:Posts[0].Body.description
-    }
-
     It 'adds one federated credential for each repository to the agent identity blueprint, each with a plain English description' {
         Mock Grant-GraphAppRolePermissions { }
         Mock Invoke-MgGraphRequest {

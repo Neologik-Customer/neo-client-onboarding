@@ -14,6 +14,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 
 1. [Scripts in this version](#scripts-in-this-version)
 2. [Version 5.2.0](#version-520)
+2. [Version 5.1.14](#version-5114)
 2. [Version 5.1.13](#version-5113)
 2. [Version 5.1.12](#version-5112)
 2. [Version 5.1.11](#version-5111)
@@ -94,8 +95,23 @@ This version is on the line of Neologik Platform v5.2. This version limits the r
 | `Install-NeologikEnvironment.ps1` | After the Azure region, the onboarding script asks for the Azure region for document analysis. The question shows the Azure region of the environment as the default when that region is on the list of regions for document analysis. The answer must be a region from the list. The configuration file records the region in the field `ContentUnderstandingRegion` |
 | `README.md`, `docs/PRE-ONBOARDING-INFO-GATHERING.md`, `docs/TECHNICAL-REFERENCE.md` and `docs/QUICK-REFERENCE.md` | Each document describes the Azure region for document analysis. `docs/PRE-ONBOARDING-INFO-GATHERING.md` lists the regions |
 | `Install-NeologikEnvironment.ps1` | The onboarding script reports the version of the onboarding kit as the version of the onboarding script. The version printed at the start of a run, the field `ScriptVersion` of the configuration file and the tag `NeologikOnboardingKit` all read v5.2.0. The technical reference describes the one version |
-| `inputs-example.json` | Two new answers: `systemTaskIdentityName` and `documentAnalysisRegion` |
+| `Install-NeologikEnvironment.ps1` | Step 15 creates the agent registration identity again. The agent registration identity holds no Azure role and one Microsoft Graph application permission, `Application.ReadWrite.OwnedBy`, which changes only the application registrations that the agent registration identity owns. The script grants no `AgentRegistration.ReadWrite.All`. The script asks for the name of the agent registration identity again. As in version 5.1.14, the deployment identity receives no federated credential, and the script asks for no environment name |
+| `README.md`, `docs/PRE-ONBOARDING-INFO-GATHERING.md`, `docs/QUICK-REFERENCE.md`, `docs/secure-overview.md` and `docs/TECHNICAL-REFERENCE.md` | Each document describes the agent registration identity and the one permission, and counts four managed identities. `docs/TECHNICAL-REFERENCE.md` describes the system task managed identity |
+| `inputs-example.json` | The answer `directoryIdentityName` is back. Two answers are new: `systemTaskIdentityName` and `documentAnalysisRegion`. The answer `environmentName` stays gone |
 | `Upgrade-TeamsAppInstallations.ps1` | Version v0.2.2. The function `Grant-AdminConsent` leaves the script, together with the application ids of Microsoft Graph PowerShell and Microsoft Graph that only the function read. No part of the script called the function. No step of the script changes |
+
+## Version 5.1.14
+
+**Date**: 2026-11-12
+
+This version is on the line of Neologik Platform v5.1. The onboarding script no longer creates the agent registration identity, and no longer adds the federated credential `github-deployments-<environment name>` to the deployment identity. A Neologik deployment of version 5.1 signs in with the client secret, and needs neither item.
+
+| Item | Change |
+|---|---|
+| `Install-NeologikEnvironment.ps1` | Step 15 creates two managed identities: the script runner managed identity and the SQL managed identity. The script creates no agent registration identity, and grants no Microsoft Graph application permission to such an identity. The script has no step 12d, so the deployment identity receives no federated credential. The script no longer asks for the name of the agent registration identity or for the environment name. The version of the onboarding kit is v5.1.14 |
+| `Grant-NeologikAgentAccess.ps1` | The version of the onboarding kit is v5.1.14 |
+| `inputs-example.json` | The answers `directoryIdentityName` and `environmentName` are gone. The script ignores either answer in an older answer file |
+| The documents | `README.md`, `docs/CREATE-SP-GUIDE.md`, `docs/PRE-ONBOARDING-INFO-GATHERING.md`, `docs/QUICK-REFERENCE.md`, `docs/secure-overview.md` and `docs/TECHNICAL-REFERENCE.md` no longer describe the two items |
 
 ## Version 5.1.13
 
