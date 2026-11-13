@@ -170,6 +170,94 @@ Context 'Assert-NeologikModuleSignature' {
             Should -Throw -ExpectedMessage '*failed the signature check*'
         Test-Path -LiteralPath $meta | Should -BeFalse
     }
+
+    It 'passes a reference assembly that has no signature' {
+        $base = New-TestModule -Name 'Contoso.Exchange' -Version '3.10.1'
+        $null = New-Item -ItemType Directory -Path (Join-Path $base 'ref') -Force
+        Set-Content -LiteralPath (Join-Path $base 'ref\Contoso.Exchange.Reference.dll') -Value 'A reference assembly for the test.'
+        $script:Signatures['ref\Contoso.Exchange.Reference.dll'] = New-Signature -Status 'NotSigned' -Subject ''
+        Mock Test-NeologikReferenceAssembly { $Path -like '*\ref\*' }
+        { Assert-NeologikModuleSignature -Modules @(@{ Name = 'Contoso.Exchange'; MinVersion = '3.0.0' }) } | Should -Not -Throw
+        Should -Invoke Test-NeologikReferenceAssembly -Times 1 -Exactly
+        Test-Path -LiteralPath $base | Should -BeTrue
+    }
+
+    It 'stops the run when a library with no signature is not a reference assembly' {
+        $null = New-TestModule -Name 'Contoso.Storage' -Version '9.7.0'
+        $script:Signatures['Contoso.Storage.dll'] = New-Signature -Status 'NotSigned' -Subject ''
+        { Assert-NeologikModuleSignature -Modules @(@{ Name = 'Contoso.Storage'; MinVersion = '6.0.0' }) } |
+            Should -Throw -ExpectedMessage '*failed the signature check*'
+    }
+
+    It 'stops the run when a reference assembly has an invalid signature' {
+        $base = New-TestModule -Name 'Contoso.Exchange' -Version '3.10.1'
+        $null = New-Item -ItemType Directory -Path (Join-Path $base 'ref') -Force
+        Set-Content -LiteralPath (Join-Path $base 'ref\Contoso.Exchange.Reference.dll') -Value 'A reference assembly for the test.'
+        $script:Signatures['ref\Contoso.Exchange.Reference.dll'] = New-Signature -Status 'HashMismatch'
+        Mock Test-NeologikReferenceAssembly { $true }
+        { Assert-NeologikModuleSignature -Modules @(@{ Name = 'Contoso.Exchange'; MinVersion = '3.0.0' }) } |
+            Should -Throw -ExpectedMessage '*failed the signature check*'
+    }
+
+    It 'checks the modules that a manifest requires when the other values of the manifest depend on the edition of PowerShell' {
+        $null = New-TestModule -Name 'Contoso.Base' -Version '1.4.0'
+        $base = Join-Path $script:ModuleRoot 'Contoso.Exchange\3.10.1'
+        $null = New-Item -ItemType Directory -Path $base -Force
+        Set-Content -LiteralPath (Join-Path $base 'Contoso.Exchange.psd1') -Value "@{ ModuleVersion = '3.10.1'; RootModule = if (`$PSEdition -eq 'Core') { 'Contoso.Exchange.psm1' } else { 'Contoso.Exchange.psm1' }; RequiredModules = @(@{ ModuleName = 'Contoso.Base'; ModuleVersion = '1.0.0' }) }"
+        Set-Content -LiteralPath (Join-Path $base 'Contoso.Exchange.psm1') -Value '# A script module for the test.'
+        { Assert-NeologikModuleSignature -Modules @(@{ Name = 'Contoso.Exchange'; MinVersion = '3.0.0' }) } | Should -Not -Throw
+        Should -Invoke Get-AuthenticodeSignature -Times 1 -Exactly -ParameterFilter { "$LiteralPath" -like '*Contoso.Base.psm1' }
+    }
+}
+
+Context 'Get-NeologikRequiredModuleList' {
+
+    It 'returns each entry, with the exact version or the module name' {
+        $path = Join-Path $TestDrive 'Contoso.Static.psd1'
+        Set-Content -LiteralPath $path -Value "@{ ModuleVersion = '1.0.0'; RequiredModules = @(@{ ModuleName = 'Contoso.A'; RequiredVersion = '2.38.0' }, 'Contoso.B') }"
+        $list = @(Get-NeologikRequiredModuleList -Path $path)
+        $list.Count | Should -Be 2
+        $list[0]['ModuleName'] | Should -Be 'Contoso.A'
+        $list[0]['RequiredVersion'] | Should -Be '2.38.0'
+        $list[1] | Should -Be 'Contoso.B'
+    }
+
+    It 'returns nothing for a manifest that requires no module' {
+        $path = Join-Path $TestDrive 'Contoso.Alone.psd1'
+        Set-Content -LiteralPath $path -Value "@{ ModuleVersion = '1.0.0'; RootModule = 'Contoso.Alone.psm1' }"
+        @(Get-NeologikRequiredModuleList -Path $path).Count | Should -Be 0
+    }
+
+    It 'refuses a value of RequiredModules that is not data' {
+        $path = Join-Path $TestDrive 'Contoso.Dynamic.psd1'
+        Set-Content -LiteralPath $path -Value "@{ ModuleVersion = '1.0.0'; RequiredModules = if (`$PSEdition -eq 'Core') { @('Contoso.A') } else { @('Contoso.B') } }"
+        { Get-NeologikRequiredModuleList -Path $path } | Should -Throw -ExpectedMessage '*not data*'
+    }
+}
+
+Context 'Test-NeologikReferenceAssembly' {
+
+    BeforeAll {
+        # Two real libraries, compiled for the test: a reference assembly and an ordinary library.
+        $script:ReferenceLibrary = Join-Path $TestDrive 'Contoso.Reference.dll'
+        $script:RuntimeLibrary = Join-Path $TestDrive 'Contoso.Runtime.dll'
+        Add-Type -TypeDefinition '[assembly: System.Runtime.CompilerServices.ReferenceAssembly] namespace Contoso.Reference { public class Sample { } }' -OutputAssembly $script:ReferenceLibrary -OutputType Library
+        Add-Type -TypeDefinition 'namespace Contoso.Runtime { public class Sample { } }' -OutputAssembly $script:RuntimeLibrary -OutputType Library
+    }
+
+    It 'recognises a reference assembly' {
+        Test-NeologikReferenceAssembly -Path $script:ReferenceLibrary | Should -BeTrue
+    }
+
+    It 'does not count an ordinary library as a reference assembly' {
+        Test-NeologikReferenceAssembly -Path $script:RuntimeLibrary | Should -BeFalse
+    }
+
+    It 'does not count a file that is not a library as a reference assembly' {
+        $path = Join-Path $TestDrive 'Contoso.Text.dll'
+        Set-Content -LiteralPath $path -Value 'Text, not a library.'
+        Test-NeologikReferenceAssembly -Path $path | Should -BeFalse
+    }
 }
 
 Context 'Install-RequiredModules' {

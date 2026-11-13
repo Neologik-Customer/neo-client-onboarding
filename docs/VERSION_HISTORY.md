@@ -62,8 +62,8 @@ The table shows the version that each script reports.
 | `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.2.0 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
-| `Upgrade-TeamsAppInstallations.ps1` | v0.2.2 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
-| `Remove-NeologikDirectoryObjects.ps1` | 1.0 | Deletes the directory objects of one environment, after the administrator confirms the list |
+| `Upgrade-TeamsAppInstallations.ps1` | v0.2.3 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+| `Remove-NeologikDirectoryObjects.ps1` | 1.1 | Deletes the directory objects of one environment, after the administrator confirms the list |
 
 ## Version 5.2.0
 
@@ -83,6 +83,11 @@ This version is on the line of Neologik Platform v5.2. This version limits the r
 | `docs/QUICK-REFERENCE.md` | A new section lists each description that the onboarding script writes into the directory |
 | `Install-NeologikEnvironment.ps1` | The onboarding script checks the Authenticode signature of each file that the onboarding script downloads. A downloaded PowerShell installer runs only with a valid signature of Microsoft Corporation. Each script file of each installed module needs a valid signature of Microsoft Corporation, and each library a valid signature. When a module fails the check, the onboarding script removes each module that the onboarding script installed in the run, and stops before the onboarding script imports any module |
 | `docs/TECHNICAL-REFERENCE.md` and `docs/QUICK-REFERENCE.md` | A new section describes the signature checks. The changes to the workstation list the removal of a module that fails the check |
+| `Install-NeologikEnvironment.ps1` | The signature check accepts a reference assembly with no signature, because .NET refuses to run the code of a reference assembly. The check also reads the modules that a manifest requires when the other values of the manifest depend on the edition of PowerShell |
+| `Grant-NeologikAgentAccess.ps1` | Before the grants script loads a module that the grants script installed, the grants script checks the Authenticode signature of each file of the module. The check uses the rules of the onboarding script. When a file fails the check, the grants script removes each module that the grants script installed for the step, loads none of those modules and prints what to do. The Exchange Online module holds two reference assemblies with no signature, which pass the check |
+| `Remove-NeologikDirectoryObjects.ps1` | Version 1.1. Before the script imports the module `Microsoft.Graph.Authentication` that the script installed, the script checks the Authenticode signature of each file of the module. When a file fails the check, the script removes the module and stops with exit code 1 |
+| `Upgrade-TeamsAppInstallations.ps1` | Version v0.2.3. Before the script imports the Microsoft Graph modules that the script installed, the script checks the Authenticode signature of each file of each module. When a file fails the check, the script removes each module that the script installed in the run, and stops |
+| `docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md`, `docs/UNINSTALL-GUIDE.md`, `docs/TEAMS-APP-UPGRADE-GUIDE.md` and `docs/TECHNICAL-REFERENCE.md` | Each document describes the signature check of the script that the document covers |
 | `inputs-example.json` | One new answer: `systemTaskIdentityName` |
 | `Upgrade-TeamsAppInstallations.ps1` | Version v0.2.2. The function `Grant-AdminConsent` leaves the script, together with the application ids of Microsoft Graph PowerShell and Microsoft Graph that only the function read. No part of the script called the function. No step of the script changes |
 

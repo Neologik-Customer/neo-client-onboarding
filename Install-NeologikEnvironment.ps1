@@ -747,6 +747,84 @@ function Test-NeologikManifestLoadsNoCode {
     return $true
 }
 
+function Test-NeologikReferenceAssembly {
+    <#
+    .SYNOPSIS
+        Returns $true when a library is a reference assembly. .NET refuses to run the code
+        of a reference assembly. The function reads the metadata of the file and runs
+        nothing.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $stream = $null
+    $peReader = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        $peReader = [System.Reflection.PortableExecutable.PEReader]::new($stream)
+        if (-not $peReader.HasMetadata) { return $false }
+        $reader = [System.Reflection.Metadata.PEReaderExtensions]::GetMetadataReader($peReader)
+        if (-not $reader.IsAssembly) { return $false }
+        foreach ($handle in $reader.GetAssemblyDefinition().GetCustomAttributes()) {
+            $attribute = $reader.GetCustomAttribute($handle)
+            if ($attribute.Constructor.Kind -ne [System.Reflection.Metadata.HandleKind]::MemberReference) { continue }
+            $constructor = $reader.GetMemberReference([System.Reflection.Metadata.MemberReferenceHandle]$attribute.Constructor)
+            if ($constructor.Parent.Kind -ne [System.Reflection.Metadata.HandleKind]::TypeReference) { continue }
+            $type = $reader.GetTypeReference([System.Reflection.Metadata.TypeReferenceHandle]$constructor.Parent)
+            if ($reader.GetString($type.Namespace) -eq 'System.Runtime.CompilerServices' -and $reader.GetString($type.Name) -eq 'ReferenceAssemblyAttribute') {
+                return $true
+            }
+        }
+        return $false
+    }
+    catch {
+        # A file that is not a .NET library counts as no reference assembly. So does a file that this version of PowerShell cannot read.
+        return $false
+    }
+    finally {
+        if ($peReader) { $peReader.Dispose() }
+        if ($stream) { $stream.Dispose() }
+    }
+}
+
+function Get-NeologikRequiredModuleList {
+    <#
+    .SYNOPSIS
+        Returns each entry of RequiredModules in a module manifest. The function parses
+        the manifest and reads only the value of RequiredModules, as data. The function
+        can therefore read a manifest whose other values depend on the edition of
+        PowerShell. The function runs nothing.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+    if (@($errors).Count -gt 0) {
+        throw "the manifest does not parse: $(@($errors)[0].Message)"
+    }
+    $table = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.HashtableAst] }, $false)
+    if (-not $table) {
+        throw 'the manifest holds no table of values'
+    }
+    foreach ($pair in $table.KeyValuePairs) {
+        if ([string]$pair.Item1.SafeGetValue() -ne 'RequiredModules') { continue }
+        $value = if ($pair.Item2 -is [System.Management.Automation.Language.PipelineBaseAst]) { $pair.Item2.GetPureExpression() } else { $null }
+        if (-not $value) {
+            throw 'the value of RequiredModules is not data'
+        }
+        return @($value.SafeGetValue() | Where-Object { $_ })
+    }
+    return @()
+}
+
 function Get-NeologikModuleSignatureProblem {
     <#
     .SYNOPSIS
@@ -754,10 +832,11 @@ function Get-NeologikModuleSignatureProblem {
         installed module. Returns one line for each file that fails the check.
     .DESCRIPTION
         Each script file must have a valid signature of Microsoft Corporation. Each
-        library must have a valid signature of any publisher. A module whose only file
-        is a manifest that loads no code passes without a signature. The module
-        Microsoft.Graph is such a module: the manifest names the Microsoft Graph
-        modules, and the script checks each of those modules.
+        library must have a valid signature of any publisher. A reference assembly with
+        no signature passes, because .NET refuses to run the code of a reference
+        assembly. A module whose only file is a manifest that loads no code passes
+        without a signature. The module Microsoft.Graph is such a module: the manifest
+        names the Microsoft Graph modules, and the script checks each of those modules.
     #>
     [CmdletBinding()]
     param(
@@ -786,6 +865,14 @@ function Get-NeologikModuleSignatureProblem {
             [string](Get-AuthenticodeSignature -LiteralPath $file.FullName).Status -eq 'NotSigned' -and
             (Test-NeologikManifestLoadsNoCode -Path $file.FullName)) {
             Write-Log "The manifest of the module $Name $Version loads no code and has no signature. The script checks each module that the manifest names" -Level Info
+            continue
+        }
+
+        # .NET refuses to run the code of a reference assembly, so a reference assembly with no signature passes.
+        if ($isLibrary -and
+            [string](Get-AuthenticodeSignature -LiteralPath $file.FullName).Status -eq 'NotSigned' -and
+            (Test-NeologikReferenceAssembly -Path $file.FullName)) {
+            Write-Log "The library $($file.FullName) of the module $Name $Version is a reference assembly with no signature. .NET runs no code of a reference assembly" -Level Info
             continue
         }
 
@@ -832,9 +919,9 @@ function Assert-NeologikModuleSignature {
         The function checks each module that the script installed, at the version that
         the script uses. The function also checks each module that the manifest of such a
         module requires, at the version that the manifest names. When a file fails the
-        check, the function removes each module that the script installed in this run, so
-        that the next run downloads and checks each module again. The function then stops
-        the run.
+        check, the function removes each module that -Modules names, which the script
+        installed in this run. The next run then downloads and checks each module again.
+        The function then stops the run.
     #>
     [CmdletBinding()]
     param(
@@ -869,13 +956,13 @@ function Assert-NeologikModuleSignature {
         $manifestPath = Join-Path $current.ModuleBase "$($current.Name).psd1"
         if (-not (Test-Path -LiteralPath $manifestPath)) { continue }
         try {
-            $manifest = Import-PowerShellDataFile -LiteralPath $manifestPath -ErrorAction Stop
+            $requiredModules = @(Get-NeologikRequiredModuleList -Path $manifestPath)
         }
         catch {
             $problems += "the module $($current.Name) $($current.Version), whose manifest the script cannot read: $($_.Exception.Message)"
             continue
         }
-        foreach ($required in @($manifest['RequiredModules'] | Where-Object { $_ })) {
+        foreach ($required in $requiredModules) {
             $spec = if ($required -is [hashtable]) { $required } else { @{ ModuleName = [string]$required } }
             $requiredModule = Find-NeologikInstalledModule -Name $spec['ModuleName'] -RequiredVersion $spec['RequiredVersion'] -MinimumVersion $spec['ModuleVersion']
             if ($requiredModule) {

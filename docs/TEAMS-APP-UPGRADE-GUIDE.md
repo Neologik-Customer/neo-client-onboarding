@@ -32,6 +32,8 @@ Step 2 saves time. Without step 2, Microsoft Teams upgrades each user only when 
 | Workstation | Windows, macOS or Linux, with PowerShell 7.4 or later. Windows PowerShell 5.1 cannot run the script. The script needs no administrator rights on the workstation |
 | Network | The workstation must reach Microsoft Graph and the PowerShell Gallery |
 
+The script installs the modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Users` and `Microsoft.Graph.Teams` for your user account when a module is missing. Before the script loads the modules, the script checks the Authenticode signature of each file of each module that the script installed. When a file fails the check, the script removes each module that the script installed in the run, and stops.
+
 To check the PowerShell version:
 
 ```powershell
@@ -141,6 +143,7 @@ The script makes one change only. The script upgrades the Teams app that a user 
 | The script finds no Neologik Teams app | Nobody has uploaded the Teams app package, or the Teams app package is in another tenant | Complete step 1. Check the tenant that the sign-in shows |
 | The report shows `Failed` for a user | Microsoft Teams refused the upgrade for that user | Read the reason in the column `Status`. Run the script again |
 | The run ended early | An error occurred, or somebody closed the window | Run the script again. The report shows `AlreadyLatest` for each user that the earlier run upgraded |
+| The script reports that a PowerShell module failed the signature check | A file of a downloaded module has no valid signature, or a script file has the signature of another publisher | Run the script again later. When the check fails again, email the log to support@neologik.ai |
 
 ## Help
 

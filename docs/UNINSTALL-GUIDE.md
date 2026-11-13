@@ -187,6 +187,8 @@ The managed identities of the environment went with the resource group in step 5
 4. Read the list that the script prints. Type `DELETE` to go ahead.
 5. Run the command again. When the script prints `Nothing is left to remove`, the step is complete. Microsoft Entra can take a few minutes to catch up, so a second run soon after the first may list an object that has already gone.
 
+When the module `Microsoft.Graph.Authentication` is missing, the script installs the module for your user account. Before the script loads the module, the script checks the Authenticode signature of each file of the module. When a file fails the check, the script removes the module and stops with exit code 1.
+
 ### Delete the guest accounts
 
 1. In the Microsoft Entra admin centre, https://entra.microsoft.com, open **Users**, then **All users**.
@@ -260,6 +262,7 @@ Azure and Microsoft Entra keep some deleted items for a fixed period, which is a
 | The deletion of the resource group is refused because of a lock | Your organisation has placed a resource lock on the resource group or on a resource | Remove the lock, then delete the resource group again |
 | Azure refuses to purge the Key Vault | The Key Vault has purge protection | No action. Azure removes the vault after 90 days |
 | The script reports `Authorization_RequestDenied` | The account is not a Global Administrator, or the consent was declined | Sign in as a Global Administrator and accept the permissions |
+| The script reports that a PowerShell module failed the signature check | A file of the downloaded module `Microsoft.Graph.Authentication` has no valid signature, or a script file has the signature of another publisher | Run the script again later. When the check fails again, email a copy of the messages to support@neologik.ai |
 
 ## Help
 

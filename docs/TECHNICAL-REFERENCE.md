@@ -78,9 +78,11 @@ The onboarding script checks the Authenticode signature of each file that the on
 | Download | Check |
 |---|---|
 | The PowerShell installer. The onboarding script downloads the installer when the PowerShell version is older than 7.4 and winget is not available | The installer must have a valid signature of Microsoft Corporation. Otherwise the onboarding script deletes the installer, installs nothing and stops |
-| Each PowerShell module that the onboarding script installs, and each module that such a module requires | Each script file must have a valid signature of Microsoft Corporation. Each library must have a valid signature. The Az modules and the Microsoft Graph modules include libraries that other publishers sign, for example Json.NET. The manifest of the module `Microsoft.Graph` loads no code and has no signature. The onboarding script checks each module that the manifest names |
+| Each PowerShell module that the onboarding script installs, and each module that such a module requires | Each script file must have a valid signature of Microsoft Corporation. Each library must have a valid signature. The Az modules and the Microsoft Graph modules include libraries that other publishers sign, for example Json.NET. A reference assembly with no signature passes, because .NET refuses to run the code of a reference assembly. The manifest of the module `Microsoft.Graph` loads no code and has no signature. The onboarding script checks each module that the manifest names |
 
 When a module fails the check, the onboarding script imports no module and removes each module that the onboarding script installed in the run. The onboarding script then stops. The log names each file that failed the check.
+
+`Grant-NeologikAgentAccess.ps1`, `Remove-NeologikDirectoryObjects.ps1` and `Upgrade-TeamsAppInstallations.ps1` apply the same checks to the modules that each script installs.
 
 With `-SkipModuleInstall`, the onboarding script installs no module and checks no module.
 
