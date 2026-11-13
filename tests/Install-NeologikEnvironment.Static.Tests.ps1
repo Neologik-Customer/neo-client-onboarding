@@ -88,11 +88,18 @@ It 'creates the system task managed identity with the limited role on the resour
     $text | Should -Match 'neologik-system-task-managed-identity'
 }
 
-It 'stops both identities assigning the three administrator roles, and limits other assignments to service principals' {
+It 'stops the system task managed identity assigning the three administrator roles, and limits other assignments to service principals' {
     $text = Get-Content -Raw $script:ScriptPath
     $text | Should -Match 'ForAnyOfAllValues:GuidNotEquals'
     $text | Should -Match "PrincipalType\] ForAnyOfAnyValues:StringEqualsIgnoreCase \{\{'ServicePrincipal'\}\}"
     $text | Should -Not -Match 'fbc52c3f-28ad-4303-a892-8a056630b8f1'
+    @([regex]::Matches($text, '-Condition \$script:ResourceGroupRoleCondition')).Count | Should -Be 1 -Because 'only the system task managed identity holds the limited role on the resource group'
+}
+
+It 'gives the deployment identity Role Based Access Control Administrator on the resource group without a condition' {
+    $text = Get-Content -Raw $script:ScriptPath
+    $text | Should -Match ([regex]::Escape("`$rgRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')"))
+    $text | Should -Not -Match ([regex]::Escape('Scope = $rgScope; Condition = $script:ResourceGroupRoleCondition'))
 }
 
 It 'limits the role on the subscription to Reader and Cost Management Reader, for service principals only' {

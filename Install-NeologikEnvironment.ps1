@@ -246,9 +246,10 @@ $script:LimitedSubRoleConditionVersion = '2.0'
 $script:LimitedSubRoleCondition = ("((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/write'}})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {{'ServicePrincipal'}})) AND ((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/delete'}})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {{'ServicePrincipal'}}))" -f ($script:LimitedSubRoleAssignableIds -join ', '))
 
 # Role Based Access Control Administrator on the resource group of the environment, held by
-# the deployment identity and the system task managed identity. The condition stops each
-# identity assigning or removing Owner, User Access Administrator or Role Based Access Control Administrator.
-# Each identity can assign or remove every other role for service principals only.
+# the system task managed identity. The condition stops the managed identity assigning or removing
+# Owner, User Access Administrator or Role Based Access Control Administrator. The managed identity
+# can assign or remove every other role for service principals only. The deployment identity holds
+# Role Based Access Control Administrator on the resource group without a condition.
 # Owner, User Access Administrator, then Role Based Access Control Administrator.
 $script:ResourceGroupRoleExcludedIds = @(
     '8e3af657-a8ff-443c-a75c-2fe8c4bcb635',
@@ -2825,7 +2826,7 @@ function Confirm-NeologikDeploymentIdentityRoles {
         of the deployment identity at the subscription and at the resource group
         and compares them with the roles the deployment needs. A role counts
         only at its own scope and only with the condition the onboarding script
-        gives it: each Role Based Access Control Administrator role with its condition,
+        gives it: the limited role on the subscription with its condition,
         every other role without one. A new assignment can take a moment to
         appear in a read, so the script reads again, up to six times. A role
         still missing stops the run and names the role and the scope. The
@@ -2856,7 +2857,6 @@ function Confirm-NeologikDeploymentIdentityRoles {
     foreach ($roleName in $SubscriptionRoles) { $wanted += @{ Role = $roleName; Scope = $subScope; Condition = '' } }
     $wanted += @{ Role = $script:LimitedSubRole; Scope = $subScope; Condition = $script:LimitedSubRoleCondition }
     foreach ($roleName in $ResourceGroupRoles) { $wanted += @{ Role = $roleName; Scope = $rgScope; Condition = '' } }
-    $wanted += @{ Role = $script:LimitedSubRole; Scope = $rgScope; Condition = $script:ResourceGroupRoleCondition }
 
     Write-Log "Reading back the roles of the deployment identity..." -Level Info
     $missing = @()
@@ -3004,9 +3004,9 @@ function Set-AppRegistrationRoles {
 
         # The roles of the deployment identity on the resource group. The deployment creates role
         # assignments for the identities of the cluster. The deployment identity therefore needs the role
-        # Role Based Access Control Administrator, with the condition at the top of this script.
+        # Role Based Access Control Administrator. The role on the resource group has no limit.
         $rgScope = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName"
-        $rgRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor')
+        $rgRoles = @('Contributor', 'Key Vault Certificates Officer', 'Key Vault Secrets Officer', 'Storage Blob Data Contributor', 'Azure Kubernetes Service RBAC Cluster Admin', 'Monitoring Contributor', 'Role Based Access Control Administrator')
 
         foreach ($roleName in $rgRoles) {
             Write-Log "Assigning the role $roleName on the resource group..." -Level Info
@@ -3049,12 +3049,6 @@ function Set-AppRegistrationRoles {
                 }
             }
         }
-
-        # Role Based Access Control Administrator on the resource group, with the condition at the top of this script.
-        Set-NeologikConditionedRole -ObjectId $ServicePrincipalId `
-            -Scope $rgScope `
-            -Condition $script:ResourceGroupRoleCondition `
-            -Description 'limited so that the identity cannot assign Owner, User Access Administrator or this role'
 
         # Read the roles back. The configuration file records what the deployment identity holds,
         # and a missing role stops the run here, in front of the administrator.

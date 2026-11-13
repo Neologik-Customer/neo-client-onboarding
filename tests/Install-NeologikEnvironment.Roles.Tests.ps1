@@ -124,8 +124,8 @@ Context 'Set-AppRegistrationRoles' {
             (New-Assignment -Role 'Role Based Access Control Administrator' -Scope $script:SubScope -Condition $script:LimitedSubRoleCondition)
         )
         Set-AppRegistrationRoles -ServicePrincipalId $script:Sp -SubscriptionId '810ff294-0000-4000-8000-000000000002' -ResourceGroupName 'rg-neo-abcprd-uks-01' -SecurityGroups $script:Groups | Should -BeTrue
-        $script:Writes | Should -Contain "NEW Role Based Access Control Administrator $($script:RgScope) limited"
-        foreach ($role in ($script:RgRoles | Where-Object { $_ -ne 'Role Based Access Control Administrator' })) { $script:Writes | Should -Contain "NEW $role $($script:RgScope)" }
+        $script:Writes | Should -Contain "NEW Role Based Access Control Administrator $($script:RgScope)"
+        foreach ($role in $script:RgRoles) { $script:Writes | Should -Contain "NEW $role $($script:RgScope)" }
         @($script:Writes).Count | Should -Be $script:RgRoles.Count -Because 'the subscription roles were already held, so only the resource group roles are written'
     }
 
@@ -137,12 +137,25 @@ Context 'Set-AppRegistrationRoles' {
         $record.RolesConfirmedAt | Should -Not -BeNullOrEmpty
     }
 
+    It 'gives the deployment identity each role that the deployment check of the Neologik Platform requires' {
+        Set-AppRegistrationRoles -ServicePrincipalId $script:Sp -SubscriptionId '810ff294-0000-4000-8000-000000000002' -ResourceGroupName 'rg-neo-abcprd-uks-01' -SecurityGroups $script:Groups | Should -BeTrue
+        $atResourceGroupOrAbove = @($script:Assignments | Where-Object { $_.Scope -eq $script:SubScope -or $_.Scope -eq $script:RgScope })
+        # A role that writes role assignments, held without a condition, at the resource group or above.
+        @($atResourceGroupOrAbove | Where-Object { $_.RoleDefinitionName -in @('Role Based Access Control Administrator', 'User Access Administrator', 'Owner') -and -not $_.Condition }).Count | Should -BeGreaterThan 0
+        # A role that writes resources, at the resource group or above.
+        @($atResourceGroupOrAbove | Where-Object { $_.RoleDefinitionName -in @('Contributor', 'Owner') }).Count | Should -BeGreaterThan 0
+        # A role that reads the subscription, at the subscription.
+        @($script:Assignments | Where-Object { $_.Scope -eq $script:SubScope -and $_.RoleDefinitionName -in @('Reader', 'Contributor', 'Owner') }).Count | Should -BeGreaterThan 0
+        # The role on the subscription keeps the condition that limits the role to two roles.
+        @($script:Assignments | Where-Object { $_.Scope -eq $script:SubScope -and $_.RoleDefinitionName -eq 'Role Based Access Control Administrator' }).Condition | Should -Be $script:LimitedSubRoleCondition
+    }
+
     It 'writes nothing on a subscription that already holds every role' {
         $script:Assignments = @(
             (New-Assignment -Role 'Reader' -Scope $script:SubScope),
             (New-Assignment -Role 'Cost Management Contributor' -Scope $script:SubScope),
             (New-Assignment -Role 'Role Based Access Control Administrator' -Scope $script:SubScope -Condition $script:LimitedSubRoleCondition)
-        ) + @($script:RgRoles | ForEach-Object { if ($_ -eq 'Role Based Access Control Administrator') { New-Assignment -Role $_ -Scope $script:RgScope -Condition $script:ResourceGroupRoleCondition } else { New-Assignment -Role $_ -Scope $script:RgScope } })
+        ) + @($script:RgRoles | ForEach-Object { New-Assignment -Role $_ -Scope $script:RgScope })
         Set-AppRegistrationRoles -ServicePrincipalId $script:Sp -SubscriptionId '810ff294-0000-4000-8000-000000000002' -ResourceGroupName 'rg-neo-abcprd-uks-01' -SecurityGroups $script:Groups | Should -BeTrue
         $script:Writes | Should -BeNullOrEmpty
     }

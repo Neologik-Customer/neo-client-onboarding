@@ -73,9 +73,9 @@ This version is on the line of Neologik Platform v5.2. This version limits the r
 
 | Item | Change |
 |---|---|
-| `Install-NeologikEnvironment.ps1` | The deployment identity holds Role Based Access Control Administrator on the resource group with a condition. The deployment identity cannot assign or remove Owner, User Access Administrator or Role Based Access Control Administrator, and can assign or remove every other role for service principals only |
+| `Install-NeologikEnvironment.ps1` | The deployment identity holds Role Based Access Control Administrator on the resource group without a condition, as in version 5.1.14. A deployment of Neologik Platform v5.1 checks this role before the first step. The deployment stops when this role has a condition |
 | `Install-NeologikEnvironment.ps1` | Role Based Access Control Administrator on the subscription is limited to Reader and Cost Management Reader, for service principals only |
-| `Install-NeologikEnvironment.ps1` | Step 15 creates the system task managed identity, and gives the managed identity Role Based Access Control Administrator on the resource group with the same condition |
+| `Install-NeologikEnvironment.ps1` | Step 15 creates the system task managed identity, and gives the managed identity Role Based Access Control Administrator on the resource group with a condition. The managed identity cannot assign or remove Owner, User Access Administrator or Role Based Access Control Administrator, and can assign or remove every other role for service principals only |
 | `Install-NeologikEnvironment.ps1` | The functions `New-NeologikSubscription` and `Get-UserInput` leave the onboarding script. No part of the onboarding script called either function. No step of the onboarding script changes |
 | `Install-NeologikEnvironment.ps1` | The configuration file records the version of the onboarding kit in the field `KitVersion`, next to the field `ScriptVersion`. The value is the same as the tag `NeologikOnboardingKit` on the resource group |
 | `docs/TECHNICAL-REFERENCE.md` and `docs/QUICK-REFERENCE.md` | The description of the configuration file names the version of the onboarding script and the version of the onboarding kit |
