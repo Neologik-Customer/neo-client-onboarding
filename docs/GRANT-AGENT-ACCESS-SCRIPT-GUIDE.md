@@ -44,10 +44,12 @@ The grants script installs the PowerShell modules that the run needs, for your u
 | Two Microsoft Graph modules, `Microsoft.Graph.Authentication` and `Microsoft.Graph.Applications` | Every run |
 | The Exchange Online module, `ExchangeOnlineManagement` | A run with a mailbox grants file |
 
+Before the grants script loads a module that the grants script installed, the grants script checks the Authenticode signature of each file of the module. The grants script uses the rules of the onboarding script, which [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md#signature-checks) describes. When a file fails the check, the grants script removes each module that the grants script installed for the step, and loads none of those modules. The grants script then prints what to do.
+
 Before the grants script changes anything, the grants script confirms three facts.
 
 1. The workstation can reach each Microsoft address that the grants script uses.
-2. The PowerShell modules load.
+2. The PowerShell modules load. A module that the grants script installs passes the signature check first.
 3. The signed-in account holds an active Global Administrator role.
 
 ## How to run the grants script
@@ -115,6 +117,7 @@ Exchange Online can take up to two hours to apply a role. The summary then reads
 - The grants script never removes a grant that a file lists. The grants script never removes the role assignments of an identity that a file records as in use.
 - The grants script never sends anything to Neologik. You send the files of the run.
 - The grants script never stores your sign-in.
+- The grants script never loads a module that the grants script installed before the signature check of the module passes.
 
 ## What the sign-in asks you to approve
 

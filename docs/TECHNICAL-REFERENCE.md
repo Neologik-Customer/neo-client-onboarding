@@ -16,10 +16,10 @@ This document describes the onboarding script, `Install-NeologikEnvironment.ps1`
 
 | Item | Value |
 |---|---|
-| Version of the onboarding script | The value of `$script:Version` in `Install-NeologikEnvironment.ps1`. The onboarding script prints the version when a run starts |
-| Version of the onboarding kit | The value of `$script:KitVersion` in `Install-NeologikEnvironment.ps1`. The onboarding script records the version on the resource group |
+| Version of the onboarding script | The version of the onboarding kit. In `Install-NeologikEnvironment.ps1`, `$script:Version` takes the value of `$script:KitVersion`. The onboarding script prints the version when a run starts. The configuration file records the version in the field `ScriptVersion` |
+| Version of the onboarding kit | The value of `$script:KitVersion` in `Install-NeologikEnvironment.ps1`. The onboarding script records the version on the resource group. The configuration file records the version in the field `KitVersion` |
 
-The onboarding kit has a version, and each script has a separate version. The version of the onboarding kit follows the version of the Neologik Platform. The version of a script changes when the script changes.
+The onboarding kit has a version, which follows the version of the Neologik Platform. The onboarding script reports the version of the onboarding kit as the version of the onboarding script. Each other script has a separate version. The version of each other script changes when that script changes.
 
 ## Contents
 
@@ -71,6 +71,21 @@ The onboarding kit has a version, and each script has a separate version. The ve
 | `Az.ManagedServiceIdentity` | 1.0.0 |
 | `Microsoft.Graph` | 2.0.0 |
 
+### Signature checks
+
+The onboarding script checks the Authenticode signature of each file that the onboarding script downloads. The check runs before the onboarding script runs or imports the file.
+
+| Download | Check |
+|---|---|
+| The PowerShell installer. The onboarding script downloads the installer when the PowerShell version is older than 7.4 and winget is not available | The installer must have a valid signature of Microsoft Corporation. Otherwise the onboarding script deletes the installer, installs nothing and stops |
+| Each PowerShell module that the onboarding script installs, and each module that such a module requires | Each script file must have a valid signature of Microsoft Corporation. Each library must have a valid signature. The Az modules and the Microsoft Graph modules include libraries that other publishers sign, for example Json.NET. A reference assembly with no signature passes, because .NET refuses to run the code of a reference assembly. The manifest of the module `Microsoft.Graph` loads no code and has no signature. The onboarding script checks each module that the manifest names |
+
+When a module fails the check, the onboarding script imports no module and removes each module that the onboarding script installed in the run. The onboarding script then stops. The log names each file that failed the check.
+
+`Grant-NeologikAgentAccess.ps1`, `Remove-NeologikDirectoryObjects.ps1` and `Upgrade-TeamsAppInstallations.ps1` apply the same checks to the modules that each script installs.
+
+With `-SkipModuleInstall`, the onboarding script installs no module and checks no module.
+
 ## Parameters
 
 You can run the onboarding script with no parameter. When you give no value for a parameter, the onboarding script takes the value from the answer file or asks a question.
@@ -111,11 +126,12 @@ When the answer file holds the organisation code, the organisation name and the 
 | `fqdn` | The fully qualified host name of the environment. A complete answer file holds this key |
 | `environmentType` | `dev` or `prd` |
 | `azureRegion` | The Azure region |
+| `documentAnalysisRegion` | The Azure region for document analysis, from the list in [PRE-ONBOARDING-INFO-GATHERING.md](PRE-ONBOARDING-INFO-GATHERING.md). Without this key, the onboarding script uses `azureRegion` when that region is on the list. When neither gives a region from the list, the onboarding script asks the question. An unattended run stops instead |
 | `environmentIndex` | `01` to `99` |
 | `applyResourceTags` | `true` or `false` |
 | `resourceTagsCustom` | Further tags, written as an object or as a string of `key=value` pairs |
 | `solutionName`, `solutionShortName` | The solution name and the short name. See [Naming](#naming) |
-| `resourceGroupName`<br>`keyVaultName`<br>`storageAccountName`<br>`scriptRunnerIdentityName`<br>`sqlIdentityName` | Names of your choice for the five resources |
+| `resourceGroupName`<br>`keyVaultName`<br>`storageAccountName`<br>`scriptRunnerIdentityName`<br>`sqlIdentityName`<br>`directoryIdentityName`<br>`systemTaskIdentityName` | Names of your choice for the seven resources |
 | `skipGuestInvitation` | `true` to invite no guest |
 | `addExistingAccountsToGroups` | `true` to add existing accounts to the security groups. The onboarding script reads this key only when `skipGuestInvitation` is `true` |
 | `existingAccountEmails` | The email addresses of the existing accounts. Without this key, the onboarding script uses the addresses in `NeologikGuestUsers.txt` |
@@ -197,6 +213,8 @@ The onboarding script builds every standard name from two values: the solution n
 | Deployment storage account | `stneodeploy<org><env><region><index>`, cut to 24 characters | `stneodeployabcprduks01` |
 | Script runner managed identity | `neologik-script-runner-service-connection-<short name>` | `neologik-script-runner-service-connection-abcprd01` |
 | SQL managed identity | `neologik-sql-managed-identity-<short name>` | `neologik-sql-managed-identity-abcprd01` |
+| Agent registration identity | `neologik-directory-managed-identity-<short name>` | `neologik-directory-managed-identity-abcprd01` |
+| System task managed identity | `neologik-system-task-managed-identity-<short name>` | `neologik-system-task-managed-identity-abcprd01` |
 | Security groups | `Neologik User Group - <short name>`<br>`Neologik NCE Contributors - <short name>`<br>`Neologik NCE Admins - <short name>`<br>`Neologik Admin User Group - <short name>` | `Neologik User Group - abcprd01` |
 | Deployment identity | `Neologik GitHub Service Connection - <short name>` | `Neologik GitHub Service Connection - abcprd01` |
 | Platform Sign-in application | `Neologik Platform Sign-in - <short name>` | `Neologik Platform Sign-in - abcprd01` |
@@ -206,7 +224,7 @@ The onboarding script builds every standard name from two values: the solution n
 
 | Name | Where you can change the name |
 |---|---|
-| The names of the resource group, the Key Vault, the deployment storage account and the two managed identities | At the question on screen, or in the answer file |
+| The names of the resource group, the Key Vault, the deployment storage account and the four managed identities | At the question on screen, or in the answer file |
 | The solution name and the short name | In the answer file only |
 
 The short name is also the last part of the name of each security group, each application and each managed identity.
@@ -255,7 +273,7 @@ The onboarding script also adds the tag `NeologikOnboardingKit` to the resource 
 
 ### Guest users
 
-When you choose invitation, the onboarding script invites each address in `NeologikGuestUsers.txt` and each address that you add at the question. The onboarding script sends no invitation to an address that already has an account in the tenant. The onboarding script uses the existing account, whether the account is a guest or a member.
+When you choose invitation, the onboarding script invites each address in `NeologikGuestUsers.txt` and each address that you add at the question. The onboarding script sends no invitation to an address that already belongs to an account in the tenant. The onboarding script finds that account by the mail address, the user principal name or another mail address of the account. The onboarding script uses the existing account, whether the account is a guest or a member.
 
 `NeologikGuestUsers.txt` has this format:
 
@@ -265,7 +283,7 @@ When you choose invitation, the onboarding script invites each address in `Neolo
 | The onboarding script ignores a blank line |
 | A line that begins with `#` is a comment |
 
-When you decline invitation, the onboarding script asks whether to add existing accounts to the security groups. The onboarding script sends no invitation. Each address must match the mail address or the user principal name of an account exactly. The onboarding script reports an address that matches no account and continues.
+When you decline invitation, the onboarding script asks whether to add existing accounts to the security groups. The onboarding script sends no invitation. The onboarding script finds each existing account by the mail address, the user principal name or another mail address of the account. The onboarding script reports an address that matches no account and continues.
 
 Each account that you invite or add joins all four security groups. One of the four is the group `Neologik Admin User Group - <short name>`. List only the accounts that need Neologik administration and support access.
 
@@ -359,8 +377,10 @@ Each federated credential trusts one repository of the Neologik deployment. Each
 
 | Managed identity | Purpose | Roles |
 |---|---|---|
-| `neologik-script-runner-service-connection-<short name>` | The deployment runs scripts inside Azure as this managed identity | Reader, Key Vault Secrets Officer and Azure Bot Service Contributor Role on the resource group. No role on the subscription |
+| `neologik-script-runner-service-connection-<short name>` | The deployment runs scripts inside Azure as this managed identity | Reader and Key Vault Secrets Officer on the resource group. No role on the subscription |
 | `neologik-sql-managed-identity-<short name>` | Azure SQL uses this managed identity to look up Microsoft Entra accounts at sign-in | Directory Readers in Microsoft Entra ID |
+| `neologik-directory-managed-identity-<short name>` | The agent registration identity. From version 5.2 of the Neologik Platform, this managed identity creates and changes the application registrations of Neologik agents from inside your environment. Nothing can sign in as the managed identity until a deployment by Neologik adds the sign-in credential | No Azure role. The Microsoft Graph application permission `Application.ReadWrite.OwnedBy`, which creates application registrations and changes only the application registrations that the managed identity owns |
+| `neologik-system-task-managed-identity-<short name>` | The system task managed identity. From version 5.2 of the Neologik Platform, this managed identity creates the identities and role assignments of Neologik agents from inside your environment. Nothing can sign in as the managed identity until a deployment by Neologik adds the sign-in credential | Role Based Access Control Administrator on the resource group. The role cannot assign Owner, User Access Administrator or Role Based Access Control Administrator, and assigns every other role to service principals only. No Microsoft Graph application permission |
 
 ### Roles of the Admin User Group
 
@@ -426,7 +446,8 @@ The configuration file holds these sections:
 
 | Section | Content |
 |---|---|
-| Environment | The tenant, the subscription, the resource group, the Azure region, the organisation, the host name, the solution name and the short name |
+| Versions | `ScriptVersion`, the version of the onboarding script, and `KitVersion`, the version of the onboarding kit. The two fields hold the same value. The tag `NeologikOnboardingKit` on the resource group holds the same value too |
+| Environment | The tenant, the subscription, the resource group, the Azure region, the organisation, the host name, the solution name and the short name. `ContentUnderstandingRegion`, the Azure region for document analysis |
 | `SecurityGroups` | The name and the id of each of the four security groups |
 | `AppRegistration` | The deployment identity: the name, the client id and the roles. The section also records whether the onboarding script created the deployment identity |
 | `NceAuthApp` | The Platform Sign-in application: the name and the client id |
@@ -478,6 +499,8 @@ A Neologik engineer then imports the certificate into Neologik's central Key Vau
 |---|---|---|
 | "The script requires PowerShell 7.4 or later." | The PowerShell version is older than 7.4, or you opened Windows PowerShell | Install PowerShell 7 from https://aka.ms/powershell and open PowerShell 7 |
 | The onboarding script cannot install the modules | The workstation cannot reach the PowerShell Gallery, or a policy prevents the installation | Install each module listed under [PowerShell modules](#powershell-modules) with `Install-Module <name> -Scope CurrentUser`. Then run the onboarding script with `-SkipModuleInstall` |
+| The onboarding script reports that a PowerShell module failed the signature check | A file of a downloaded module has no valid signature, or a script file has the signature of another publisher | Run the onboarding script again later. When the check fails again, email the log to support@neologik.ai |
+| The onboarding script reports that the PowerShell installer failed the signature check | The downloaded installer has no valid signature of Microsoft Corporation | Install PowerShell 7 from https://aka.ms/powershell and open PowerShell 7 |
 | The sign-in fails | The account or the tenant is wrong, or the workstation holds an old session | Run the onboarding script again. Type `Y` at the question `Sign in to Azure again? (default: N)` |
 | "Insufficient permissions" | The account lacks Owner on the subscription or lacks Global Administrator | Obtain the role. Then run the onboarding script again |
 | The onboarding script cannot invite a guest | The external collaboration settings of your tenant prevent invitations | Allow guest invitations in Microsoft Entra ID. Alternatively, create the accounts yourself and choose to add existing accounts |

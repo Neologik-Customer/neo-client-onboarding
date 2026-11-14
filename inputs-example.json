@@ -9,11 +9,14 @@
   "azureRegion": "uksouth",
   "environmentIndex": "01",
 
+  "_documentAnalysisRegion_note": "The Azure region for document analysis, agreed with Neologik. Choose one of australiaeast, canadacentral, eastus, eastus2, japaneast, southcentralus, southeastasia, swedencentral, uksouth, westeurope, westus and westus3. Leave the field empty to use azureRegion, when azureRegion is on that list.",
+  "documentAnalysisRegion": "",
+
   "_resourceTags_note": "applyResourceTags true (the default) tags every Azure resource the script creates with Vendor, ApplicationName, ManagedBy, Environment, Solution and DeploymentDate. Choose true if your Azure Policies refuse untagged resources. resourceTagsCustom holds optional tags of your own, as an object or as a string of the form Key=Value,Key2=Value2. Keys use letters, digits, full stops, underscores and hyphens; values contain no comma and no equals sign. A custom tag replaces a standard tag of the same name. Ignored when applyResourceTags is false.",
   "applyResourceTags": true,
   "resourceTagsCustom": {},
 
-  "_naming_note": "Optional names of your own. Leave a field empty, or remove it, to accept the standard name. solutionName: neo-<org><env>-<region>-<index>, for example neo-abcprd-uks-01. solutionShortName: <org><env><index>, for example abcprd01; it also forms the suffix of the security group, application and managed identity names. keyVaultName: 3 to 24 characters, letters, digits and hyphens, beginning with a letter. storageAccountName: 3 to 24 characters, lower-case letters and digits. scriptRunnerIdentityName and sqlIdentityName: 3 to 128 characters, letters, digits, hyphens and underscores, beginning with a letter or digit.",
+  "_naming_note": "Optional names of your own. Leave a field empty, or remove it, to accept the standard name. solutionName: neo-<org><env>-<region>-<index>, for example neo-abcprd-uks-01. solutionShortName: <org><env><index>, for example abcprd01; it also forms the suffix of the security group, application and managed identity names. keyVaultName: 3 to 24 characters, letters, digits and hyphens, beginning with a letter. storageAccountName: 3 to 24 characters, lower-case letters and digits. scriptRunnerIdentityName, sqlIdentityName, directoryIdentityName and systemTaskIdentityName: 3 to 128 characters, letters, digits, hyphens and underscores, beginning with a letter or digit. directoryIdentityName names the agent registration identity. systemTaskIdentityName names the system task managed identity.",
   "solutionName": "",
   "solutionShortName": "",
   "resourceGroupName": "",
@@ -21,9 +24,11 @@
   "storageAccountName": "",
   "scriptRunnerIdentityName": "",
   "sqlIdentityName": "",
+  "directoryIdentityName": "",
+  "systemTaskIdentityName": "",
 
   "skipGuestInvitation": false,
-  "_existingAccounts_note": "Read only when skipGuestInvitation is true. addExistingAccountsToGroups true adds accounts you have already created, as guests or as members, to the security groups, and sends no invitation. existingAccountEmails lists their addresses; when it is omitted, the addresses in NeologikGuestUsers.txt are used. Each address must match the account's mail address or user principal name exactly. An address with no matching account is reported and passed over. Accounts added in this way join all four Neologik security groups, including the Admin User Group, which carries Azure administration rights on the resource group.",
+  "_existingAccounts_note": "Read only when skipGuestInvitation is true. addExistingAccountsToGroups true adds accounts you have already created, as guests or as members, to the security groups, and sends no invitation. existingAccountEmails lists their addresses; when it is omitted, the addresses in NeologikGuestUsers.txt are used. The script finds each account by the mail address, the user principal name or another mail address of the account. An address with no matching account is reported and passed over. Accounts added in this way join all four Neologik security groups, including the Admin User Group, which carries Azure administration rights on the resource group.",
   "addExistingAccountsToGroups": false,
   "existingAccountEmails": [],
   "useExistingServicePrincipal": false,

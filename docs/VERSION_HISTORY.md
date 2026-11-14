@@ -13,6 +13,7 @@ This document lists the versions of the Neologik onboarding kit. For each versio
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 5.2.0](#version-520)
 2. [Version 5.1.14](#version-5114)
 2. [Version 5.1.13](#version-5113)
 2. [Version 5.1.12](#version-5112)
@@ -58,12 +59,46 @@ The table shows the version that each script reports.
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Install-NeologikEnvironment.ps1` | v5.1.14 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
-| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.1.14 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
+| `Install-NeologikEnvironment.ps1` | v5.2.0 | Prepares the Azure subscription and the Microsoft Entra tenant for one Neologik Platform environment |
+| `Grant-NeologikAgentAccess.ps1` | Onboarding kit version v5.2.0 | Applies the grants that agents and Apps need to work unattended in Microsoft 365, from the agent grants file and the mailbox grants file |
 | `Export-NeologikCertificate.ps1` | 1.1 | Builds the PFX file for the TLS certificate of the environment, on the workstation |
 | `Register-NeologikResourceProviders.ps1` | 1.0 | Confirms the Azure resource provider registrations on the subscription |
-| `Upgrade-TeamsAppInstallations.ps1` | v0.2.1 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
-| `Remove-NeologikDirectoryObjects.ps1` | 1.0 | Deletes the directory objects of one environment, after the administrator confirms the list |
+| `Upgrade-TeamsAppInstallations.ps1` | v0.2.3 | Upgrades the Neologik Teams app that each user has installed to the latest version in the Teams app catalogue |
+| `Remove-NeologikDirectoryObjects.ps1` | 1.1 | Deletes the directory objects of one environment, after the administrator confirms the list |
+
+## Version 5.2.0
+
+**Date**: 2026-11-10
+
+This version is on the line of Neologik Platform v5.2. This version limits the roles that the identities of the Neologik Platform can assign.
+
+| Item | Change |
+|---|---|
+| `Install-NeologikEnvironment.ps1` | The deployment identity holds Role Based Access Control Administrator on the resource group without a condition, as in version 5.1.14. A deployment of Neologik Platform v5.1 checks this role before the first step. The deployment stops when this role has a condition |
+| `Install-NeologikEnvironment.ps1` | Role Based Access Control Administrator on the subscription is limited to Reader and Cost Management Reader, for service principals only |
+| `Install-NeologikEnvironment.ps1` | Step 15 creates the system task managed identity, and gives the managed identity Role Based Access Control Administrator on the resource group with a condition. The managed identity cannot assign or remove Owner, User Access Administrator or Role Based Access Control Administrator, and can assign or remove every other role for service principals only |
+| `Install-NeologikEnvironment.ps1` | The functions `New-NeologikSubscription` and `Get-UserInput` leave the onboarding script. No part of the onboarding script called either function. No step of the onboarding script changes |
+| `Install-NeologikEnvironment.ps1` | The configuration file records the version of the onboarding kit in the field `KitVersion`, next to the field `ScriptVersion`. The value is the same as the tag `NeologikOnboardingKit` on the resource group |
+| `docs/TECHNICAL-REFERENCE.md` and `docs/QUICK-REFERENCE.md` | The description of the configuration file names the version of the onboarding script and the version of the onboarding kit |
+| `Install-NeologikEnvironment.ps1` | The description of each security group and of each federated credential that the onboarding script creates names each object in full, in plain English. When a security group exists with another description, the onboarding script writes the description of this version |
+| `docs/QUICK-REFERENCE.md` | A new section lists each description that the onboarding script writes into the directory |
+| `Install-NeologikEnvironment.ps1` | The onboarding script checks the Authenticode signature of each file that the onboarding script downloads. A downloaded PowerShell installer runs only with a valid signature of Microsoft Corporation. Each script file of each installed module needs a valid signature of Microsoft Corporation, and each library a valid signature. When a module fails the check, the onboarding script removes each module that the onboarding script installed in the run, and stops before the onboarding script imports any module |
+| `docs/TECHNICAL-REFERENCE.md` and `docs/QUICK-REFERENCE.md` | A new section describes the signature checks. The changes to the workstation list the removal of a module that fails the check |
+| `Install-NeologikEnvironment.ps1` | The signature check accepts a reference assembly with no signature, because .NET refuses to run the code of a reference assembly. The check also reads the modules that a manifest requires when the other values of the manifest depend on the edition of PowerShell |
+| `Grant-NeologikAgentAccess.ps1` | Before the grants script loads a module that the grants script installed, the grants script checks the Authenticode signature of each file of the module. The check uses the rules of the onboarding script. When a file fails the check, the grants script removes each module that the grants script installed for the step, loads none of those modules and prints what to do. The Exchange Online module holds two reference assemblies with no signature, which pass the check |
+| `Remove-NeologikDirectoryObjects.ps1` | Version 1.1. Before the script imports the module `Microsoft.Graph.Authentication` that the script installed, the script checks the Authenticode signature of each file of the module. When a file fails the check, the script removes the module and stops with exit code 1 |
+| `Remove-NeologikDirectoryObjects.ps1` | `Get-Help` shows the synopsis and the description of the script. A blank line separates the line `#Requires -Version 7.4` from the help block. The script stays at version 1.1 |
+| `Upgrade-TeamsAppInstallations.ps1` | Version v0.2.3. Before the script imports the Microsoft Graph modules that the script installed, the script checks the Authenticode signature of each file of each module. When a file fails the check, the script removes each module that the script installed in the run, and stops |
+| `docs/GRANT-AGENT-ACCESS-SCRIPT-GUIDE.md`, `docs/UNINSTALL-GUIDE.md`, `docs/TEAMS-APP-UPGRADE-GUIDE.md` and `docs/TECHNICAL-REFERENCE.md` | Each document describes the signature check of the script that the document covers |
+| The Neologik guest users | The onboarding script also finds a Neologik guest whose account holds the listed address among the other mail addresses of the account. An account first invited under another address holds the listed address there. The onboarding script sends that guest no second invitation. The same lookup finds each existing account that the onboarding script adds to the security groups. The questions, the answer file note and the documents describe the lookup |
+| `Install-NeologikEnvironment.ps1` | The script runner managed identity holds Reader and Key Vault Secrets Officer on the resource group. `docs/QUICK-REFERENCE.md`, `docs/TECHNICAL-REFERENCE.md` and `docs/secure-overview.md` list the two roles |
+| `Install-NeologikEnvironment.ps1` | After the Azure region, the onboarding script asks for the Azure region for document analysis. The question shows the Azure region of the environment as the default when that region is on the list of regions for document analysis. The answer must be a region from the list. The configuration file records the region in the field `ContentUnderstandingRegion` |
+| `README.md`, `docs/PRE-ONBOARDING-INFO-GATHERING.md`, `docs/TECHNICAL-REFERENCE.md` and `docs/QUICK-REFERENCE.md` | Each document describes the Azure region for document analysis. `docs/PRE-ONBOARDING-INFO-GATHERING.md` lists the regions |
+| `Install-NeologikEnvironment.ps1` | The onboarding script reports the version of the onboarding kit as the version of the onboarding script. The version printed at the start of a run, the field `ScriptVersion` of the configuration file and the tag `NeologikOnboardingKit` all read v5.2.0. The technical reference describes the one version |
+| `Install-NeologikEnvironment.ps1` | Step 15 creates the agent registration identity again. The agent registration identity holds no Azure role and one Microsoft Graph application permission, `Application.ReadWrite.OwnedBy`, which changes only the application registrations that the agent registration identity owns. The script grants no `AgentRegistration.ReadWrite.All`. The script asks for the name of the agent registration identity again. As in version 5.1.14, the deployment identity receives no federated credential, and the script asks for no environment name |
+| `README.md`, `docs/PRE-ONBOARDING-INFO-GATHERING.md`, `docs/QUICK-REFERENCE.md`, `docs/secure-overview.md` and `docs/TECHNICAL-REFERENCE.md` | Each document describes the agent registration identity and the one permission, and counts four managed identities. `docs/TECHNICAL-REFERENCE.md` describes the system task managed identity |
+| `inputs-example.json` | The answer `directoryIdentityName` is back. Two answers are new: `systemTaskIdentityName` and `documentAnalysisRegion`. The answer `environmentName` stays gone |
+| `Upgrade-TeamsAppInstallations.ps1` | Version v0.2.2. The function `Grant-AdminConsent` leaves the script, together with the application ids of Microsoft Graph PowerShell and Microsoft Graph that only the function read. No part of the script called the function. No step of the script changes |
 
 ## Version 5.1.14
 

@@ -1,7 +1,8 @@
 #Requires -Version 7.4
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
-    Tests of the role assignment checks of Install-NeologikEnvironment.ps1.
+    Tests of the role assignment checks of Install-NeologikEnvironment.ps1,
+    and of the roles that step 15 gives the script runner managed identity.
 
     Azure answers a read at a scope with the assignment at that scope and
     every assignment inherited from a parent scope. The script must count an
@@ -137,6 +138,19 @@ Context 'Set-AppRegistrationRoles' {
         $record.RolesConfirmedAt | Should -Not -BeNullOrEmpty
     }
 
+    It 'gives the deployment identity each role that the deployment check of the Neologik Platform requires' {
+        Set-AppRegistrationRoles -ServicePrincipalId $script:Sp -SubscriptionId '810ff294-0000-4000-8000-000000000002' -ResourceGroupName 'rg-neo-abcprd-uks-01' -SecurityGroups $script:Groups | Should -BeTrue
+        $atResourceGroupOrAbove = @($script:Assignments | Where-Object { $_.Scope -eq $script:SubScope -or $_.Scope -eq $script:RgScope })
+        # A role that writes role assignments, held without a condition, at the resource group or above.
+        @($atResourceGroupOrAbove | Where-Object { $_.RoleDefinitionName -in @('Role Based Access Control Administrator', 'User Access Administrator', 'Owner') -and -not $_.Condition }).Count | Should -BeGreaterThan 0
+        # A role that writes resources, at the resource group or above.
+        @($atResourceGroupOrAbove | Where-Object { $_.RoleDefinitionName -in @('Contributor', 'Owner') }).Count | Should -BeGreaterThan 0
+        # A role that reads the subscription, at the subscription.
+        @($script:Assignments | Where-Object { $_.Scope -eq $script:SubScope -and $_.RoleDefinitionName -in @('Reader', 'Contributor', 'Owner') }).Count | Should -BeGreaterThan 0
+        # The role on the subscription keeps the condition that limits the role to two roles.
+        @($script:Assignments | Where-Object { $_.Scope -eq $script:SubScope -and $_.RoleDefinitionName -eq 'Role Based Access Control Administrator' }).Condition | Should -Be $script:LimitedSubRoleCondition
+    }
+
     It 'writes nothing on a subscription that already holds every role' {
         $script:Assignments = @(
             (New-Assignment -Role 'Reader' -Scope $script:SubScope),
@@ -212,6 +226,77 @@ Context 'Set-NeologikLimitedSubscriptionRole' {
         $script:Writes | Should -Be @("REMOVE $($script:LimitedSubRole) $($script:SubScope)", "NEW $($script:LimitedSubRole) $($script:SubScope) limited")
         $held = @($script:Assignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })
         $held[0].Condition | Should -Be $script:LimitedSubRoleCondition
+    }
+}
+
+Context 'New-NeologikManagedIdentities: the script runner managed identity' {
+
+    BeforeAll {
+        # Stubs for the Az and Microsoft Graph cmdlets that step 15 calls: a command must exist before Pester can mock it.
+        function Get-AzUserAssignedIdentity { [CmdletBinding()] param($ResourceGroupName, $Name) }
+        function New-AzUserAssignedIdentity { [CmdletBinding()] param($ResourceGroupName, $Name, $Location, $Tag) }
+        function Get-MgDirectoryRole { [CmdletBinding()] param($Filter) }
+        function Get-MgDirectoryRoleTemplate { [CmdletBinding()] param([switch]$All) }
+        function New-MgDirectoryRole { [CmdletBinding()] param($RoleTemplateId) }
+        function Get-MgDirectoryRoleMember { [CmdletBinding()] param($DirectoryRoleId) }
+        function New-MgDirectoryRoleMemberByRef { [CmdletBinding()] param($DirectoryRoleId, $BodyParameter) }
+
+        $script:RunnerName = 'neologik-script-runner-service-connection-abcprd01'
+        $script:Runner = "principal-$($script:RunnerName)"
+        $script:StepArgs = @{ ResourceGroupName = 'rg-neo-abcprd-uks-01'; Location = 'uksouth'; SubscriptionId = '810ff294-0000-4000-8000-000000000002' }
+
+        Mock Import-Module { }
+        Mock Confirm-ResourceProviderReady { }
+        Mock Get-NeologikResourceTags { }
+        Mock Get-AzUserAssignedIdentity { }
+        Mock New-AzUserAssignedIdentity {
+            param($ResourceGroupName, $Name, $Location, $Tag)
+            [pscustomobject]@{ Name = $Name; PrincipalId = "principal-$Name"; ClientId = "client-$Name"; Id = "/resourceGroups/$ResourceGroupName/userAssignedIdentities/$Name" }
+        }
+        Mock Get-MgDirectoryRole { [pscustomobject]@{ Id = 'directory-readers' } }
+        Mock Get-MgDirectoryRoleMember { }
+        Mock New-MgDirectoryRoleMemberByRef { }
+        Mock Set-NeologikConditionedRole { }
+        # Each managed identity has its own principal id, so this context records the object id of each write.
+        Mock New-AzRoleAssignment {
+            param($ObjectId, $RoleDefinitionName, $RoleDefinitionId, $Scope, $Condition, $ConditionVersion)
+            $script:Assignments += @{ ObjectId = $ObjectId; RoleDefinitionName = $RoleDefinitionName; Scope = $Scope; Condition = [string]$Condition }
+            $script:Writes += "NEW $ObjectId $RoleDefinitionName $Scope"
+        }
+    }
+
+    BeforeEach {
+        $script:ConfigData['SolutionShortName'] = 'abcprd01'
+    }
+
+    It 'gives the script runner managed identity Reader and Key Vault Secrets Officer on the resource group, and no other role' {
+        $null = New-NeologikManagedIdentities @script:StepArgs
+        $held = @($script:Assignments | Where-Object { $_.ObjectId -eq $script:Runner })
+        @($held | ForEach-Object { "$($_.RoleDefinitionName) at $($_.Scope)" } | Sort-Object) |
+            Should -Be @("Key Vault Secrets Officer at $($script:RgScope)", "Reader at $($script:RgScope)")
+        @($held | Where-Object { $_.Condition }) | Should -BeNullOrEmpty
+    }
+
+    It 'records the two roles of the script runner managed identity in the configuration file' {
+        $null = New-NeologikManagedIdentities @script:StepArgs
+        $record = @($script:ConfigData['ManagedIdentities'] | Where-Object { $_.Name -eq $script:RunnerName })
+        $record.Count | Should -Be 1
+        @($record[0].RGRoles) | Should -Be @('Reader', 'Key Vault Secrets Officer')
+        @($record[0].SubscriptionRoles) | Should -BeNullOrEmpty
+    }
+
+    It 'writes no role for the script runner managed identity when the managed identity already holds the two roles' {
+        Mock Get-AzUserAssignedIdentity {
+            param($ResourceGroupName, $Name)
+            if ($Name -eq $script:RunnerName) { [pscustomobject]@{ Name = $Name; PrincipalId = "principal-$Name"; ClientId = "client-$Name"; Id = "/resourceGroups/$ResourceGroupName/userAssignedIdentities/$Name" } }
+        }
+        $script:Assignments = @(
+            @{ ObjectId = $script:Runner; RoleDefinitionName = 'Reader'; Scope = $script:RgScope; Condition = '' },
+            @{ ObjectId = $script:Runner; RoleDefinitionName = 'Key Vault Secrets Officer'; Scope = $script:RgScope; Condition = '' }
+        )
+        $null = New-NeologikManagedIdentities @script:StepArgs
+        @($script:Writes | Where-Object { $_ -like "NEW $($script:Runner) *" }) | Should -BeNullOrEmpty
+        Should -Invoke New-AzUserAssignedIdentity -Times 0 -Exactly -ParameterFilter { $Name -eq $script:RunnerName }
     }
 }
 

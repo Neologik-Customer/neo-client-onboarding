@@ -17,8 +17,8 @@
        administrator chooses invitation.
     6. The script creates the resource group, the security groups, the deployment
        identity, the Key Vault, the Platform Sign-in application, the agent identity
-       blueprint, the deployment storage account and two managed identities. The
-       script assigns the roles of each.
+       blueprint, the deployment storage account and four managed identities. The
+       script assigns the roles and permissions of each.
     7. The script registers the other Azure resource providers and the preview
        features that the Neologik Platform requires, and confirms every registration.
     8. The script writes a configuration file and a log.
@@ -74,10 +74,11 @@
     When the administrator declines invitation, the script asks whether to add
     existing accounts to the security groups. The script sends no invitation. The
     keys in the answer file are 'addExistingAccountsToGroups' and
-    'existingAccountEmails'. Each address must match the mail address or the user
-    principal name of an account. The script reports an address that matches no
-    account and continues. Each account added in this way joins all four Neologik
-    security groups. One of the four is the Admin User Group.
+    'existingAccountEmails'. The script finds each existing account by the mail
+    address, the user principal name or another mail address of the account. The
+    script reports an address that matches no account and continues. Each account
+    added in this way joins all four Neologik security groups. One of the four is
+    the Admin User Group.
 
 .PARAMETER ExistingServicePrincipalObjectId
     The object ID of the enterprise application of a deployment service principal
@@ -216,11 +217,13 @@ $ErrorActionPreference = 'Stop'
 $InformationPreference = 'Continue'
 $WarningPreference = 'Continue'
 
-# Script version
-$script:Version = 'v5.0.15'
-
 # The version of the onboarding kit. The script records the version on the resource group, in the tag NeologikOnboardingKit.
-$script:KitVersion = 'v5.1.14'
+# The configuration file records the same version, in the field KitVersion.
+$script:KitVersion = 'v5.2.0'
+
+# The version of the onboarding script is the version of the onboarding kit, so the two versions never differ.
+# The script prints the version when a run starts. The configuration file records the version in the field ScriptVersion.
+$script:Version = $script:KitVersion
 
 # The third role of the deployment identity on the subscription: Role Based Access
 # Control Administrator, limited by a condition to two roles, for service principals
@@ -242,6 +245,19 @@ $script:LimitedSubRoleAssignableIds = @(
 )
 $script:LimitedSubRoleConditionVersion = '2.0'
 $script:LimitedSubRoleCondition = ("((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/write'}})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {{'ServicePrincipal'}})) AND ((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/delete'}})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {{'ServicePrincipal'}}))" -f ($script:LimitedSubRoleAssignableIds -join ', '))
+
+# Role Based Access Control Administrator on the resource group of the environment, held by
+# the system task managed identity. The condition stops the managed identity assigning or removing
+# Owner, User Access Administrator or Role Based Access Control Administrator. The managed identity
+# can assign or remove every other role for service principals only. The deployment identity holds
+# Role Based Access Control Administrator on the resource group without a condition.
+# Owner, User Access Administrator, then Role Based Access Control Administrator.
+$script:ResourceGroupRoleExcludedIds = @(
+    '8e3af657-a8ff-443c-a75c-2fe8c4bcb635',
+    '18d7d88d-d35e-4fb5-a5c3-7773c20a72d9',
+    'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
+)
+$script:ResourceGroupRoleCondition = ("((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/write'}})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAllValues:GuidNotEquals {{{0}}} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {{'ServicePrincipal'}})) AND ((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/delete'}})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAllValues:GuidNotEquals {{{0}}} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {{'ServicePrincipal'}}))" -f ($script:ResourceGroupRoleExcludedIds -join ', '))
 
 # The time stamp of the run. The names of the log and of the configuration file hold the time stamp.
 $script:FileTimestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -297,6 +313,12 @@ $script:RequiredModules = @(
     @{ Name = 'Az.ManagedServiceIdentity'; MinVersion = '1.0.0' },
     @{ Name = 'Microsoft.Graph'; MinVersion = '2.0.0' }
 )
+
+# The file types that the signature check of a module reads. Microsoft Corporation publishes each
+# required module and signs each script file of the module. A module also holds libraries that other
+# publishers sign, for example Json.NET. A library needs a valid signature of any publisher.
+$script:ModuleScriptExtensions = @('.ps1', '.psm1', '.psd1', '.ps1xml', '.cdxml')
+$script:ModuleLibraryExtensions = @('.dll', '.exe')
 
 # Azure requires multi-factor authentication for every create, update and delete. This
 # claims challenge requests the 'p1' authentication-context claim at the sign-in. The
@@ -665,6 +687,317 @@ function Set-NeologikKitVersionTag {
 
 #endregion
 
+#region Signature Checks
+
+function Get-NeologikSignatureProblem {
+    <#
+    .SYNOPSIS
+        Checks the Authenticode signature of one file. Returns an empty string when the
+        file passes the check. Otherwise returns the reason.
+    .DESCRIPTION
+        A file passes when Windows reports a valid signature. With -MicrosoftOnly, the
+        certificate that signed the file must also name the organisation Microsoft
+        Corporation.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$MicrosoftOnly
+    )
+
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    switch ([string]$signature.Status) {
+        'Valid' { }
+        'NotSigned' { return 'the file has no signature' }
+        'HashMismatch' { return 'the file changed after the publisher signed the file' }
+        default { return "Windows reports the signature status $($signature.Status)" }
+    }
+    $subject = if ($signature.SignerCertificate) { [string]$signature.SignerCertificate.Subject } else { '' }
+    if ($MicrosoftOnly -and $subject -notmatch '(^|,)\s*O=Microsoft Corporation\s*(,|$)') {
+        return "the signer is not Microsoft Corporation. The certificate names $subject"
+    }
+    return ''
+}
+
+function Test-NeologikManifestLoadsNoCode {
+    <#
+    .SYNOPSIS
+        Returns $true when a module manifest loads no code: no root module, no
+        nested module, no assembly, no script, no type file and no format file. The
+        function reads the manifest as data and runs nothing.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    try {
+        $data = Import-PowerShellDataFile -LiteralPath $Path -ErrorAction Stop
+    }
+    catch {
+        return $false
+    }
+    foreach ($key in @('RootModule', 'ModuleToProcess', 'NestedModules', 'RequiredAssemblies', 'ScriptsToProcess', 'TypesToProcess', 'FormatsToProcess')) {
+        if ($data.ContainsKey($key) -and @($data[$key] | Where-Object { $_ }).Count -gt 0) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Test-NeologikReferenceAssembly {
+    <#
+    .SYNOPSIS
+        Returns $true when a library is a reference assembly. .NET refuses to run the code
+        of a reference assembly. The function reads the metadata of the file and runs
+        nothing.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $stream = $null
+    $peReader = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        $peReader = [System.Reflection.PortableExecutable.PEReader]::new($stream)
+        if (-not $peReader.HasMetadata) { return $false }
+        $reader = [System.Reflection.Metadata.PEReaderExtensions]::GetMetadataReader($peReader)
+        if (-not $reader.IsAssembly) { return $false }
+        foreach ($handle in $reader.GetAssemblyDefinition().GetCustomAttributes()) {
+            $attribute = $reader.GetCustomAttribute($handle)
+            if ($attribute.Constructor.Kind -ne [System.Reflection.Metadata.HandleKind]::MemberReference) { continue }
+            $constructor = $reader.GetMemberReference([System.Reflection.Metadata.MemberReferenceHandle]$attribute.Constructor)
+            if ($constructor.Parent.Kind -ne [System.Reflection.Metadata.HandleKind]::TypeReference) { continue }
+            $type = $reader.GetTypeReference([System.Reflection.Metadata.TypeReferenceHandle]$constructor.Parent)
+            if ($reader.GetString($type.Namespace) -eq 'System.Runtime.CompilerServices' -and $reader.GetString($type.Name) -eq 'ReferenceAssemblyAttribute') {
+                return $true
+            }
+        }
+        return $false
+    }
+    catch {
+        # A file that is not a .NET library counts as no reference assembly. So does a file that this version of PowerShell cannot read.
+        return $false
+    }
+    finally {
+        if ($peReader) { $peReader.Dispose() }
+        if ($stream) { $stream.Dispose() }
+    }
+}
+
+function Get-NeologikRequiredModuleList {
+    <#
+    .SYNOPSIS
+        Returns each entry of RequiredModules in a module manifest. The function parses
+        the manifest and reads only the value of RequiredModules, as data. The function
+        can therefore read a manifest whose other values depend on the edition of
+        PowerShell. The function runs nothing.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+    if (@($errors).Count -gt 0) {
+        throw "the manifest does not parse: $(@($errors)[0].Message)"
+    }
+    $table = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.HashtableAst] }, $false)
+    if (-not $table) {
+        throw 'the manifest holds no table of values'
+    }
+    foreach ($pair in $table.KeyValuePairs) {
+        if ([string]$pair.Item1.SafeGetValue() -ne 'RequiredModules') { continue }
+        $value = if ($pair.Item2 -is [System.Management.Automation.Language.PipelineBaseAst]) { $pair.Item2.GetPureExpression() } else { $null }
+        if (-not $value) {
+            throw 'the value of RequiredModules is not data'
+        }
+        return @($value.SafeGetValue() | Where-Object { $_ })
+    }
+    return @()
+}
+
+function Get-NeologikModuleSignatureProblem {
+    <#
+    .SYNOPSIS
+        Checks the Authenticode signature of each script file and each library of one
+        installed module. Returns one line for each file that fails the check.
+    .DESCRIPTION
+        Each script file must have a valid signature of Microsoft Corporation. Each
+        library must have a valid signature of any publisher. A reference assembly with
+        no signature passes, because .NET refuses to run the code of a reference
+        assembly. A module whose only file is a manifest that loads no code passes
+        without a signature. The module Microsoft.Graph is such a module: the manifest
+        names the Microsoft Graph modules, and the script checks each of those modules.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Version,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ModuleBase
+    )
+
+    $extensions = $script:ModuleScriptExtensions + $script:ModuleLibraryExtensions
+    $files = @(Get-ChildItem -LiteralPath $ModuleBase -Recurse -File -ErrorAction Stop |
+        Where-Object { $extensions -contains $_.Extension.ToLowerInvariant() })
+    $problems = @()
+
+    foreach ($file in $files) {
+        $isLibrary = $script:ModuleLibraryExtensions -contains $file.Extension.ToLowerInvariant()
+        $problem = Get-NeologikSignatureProblem -Path $file.FullName -MicrosoftOnly:(-not $isLibrary)
+        if (-not $problem) { continue }
+
+        # A manifest with no signature passes when the manifest is the only file of the module and loads no code.
+        if ($files.Count -eq 1 -and $file.Name -eq "$Name.psd1" -and
+            [string](Get-AuthenticodeSignature -LiteralPath $file.FullName).Status -eq 'NotSigned' -and
+            (Test-NeologikManifestLoadsNoCode -Path $file.FullName)) {
+            Write-Log "The manifest of the module $Name $Version loads no code and has no signature. The script checks each module that the manifest names" -Level Info
+            continue
+        }
+
+        # .NET refuses to run the code of a reference assembly, so a reference assembly with no signature passes.
+        if ($isLibrary -and
+            [string](Get-AuthenticodeSignature -LiteralPath $file.FullName).Status -eq 'NotSigned' -and
+            (Test-NeologikReferenceAssembly -Path $file.FullName)) {
+            Write-Log "The library $($file.FullName) of the module $Name $Version is a reference assembly with no signature. .NET runs no code of a reference assembly" -Level Info
+            continue
+        }
+
+        $problems += "the module $Name $Version, file $($file.FullName): $problem"
+    }
+    return $problems
+}
+
+function Find-NeologikInstalledModule {
+    <#
+    .SYNOPSIS
+        Returns the installed module at a required version, or the newest installed
+        version at or above a minimum version. Returns nothing when no installed version
+        matches.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [Parameter(Mandatory = $false)]
+        [string]$MinimumVersion,
+
+        [Parameter(Mandatory = $false)]
+        [string]$RequiredVersion
+    )
+
+    $modules = @(Get-Module -ListAvailable -Name $Name -ErrorAction SilentlyContinue)
+    if ($RequiredVersion) {
+        $modules = @($modules | Where-Object { $_.Version -eq [Version]$RequiredVersion })
+    }
+    elseif ($MinimumVersion) {
+        $modules = @($modules | Where-Object { $_.Version -ge [Version]$MinimumVersion })
+    }
+    return $modules | Sort-Object Version -Descending | Select-Object -First 1
+}
+
+function Assert-NeologikModuleSignature {
+    <#
+    .SYNOPSIS
+        Checks the signature of each file of the modules that the script installed, before
+        the script imports any module. Stops the run when a file fails the check.
+    .DESCRIPTION
+        The function checks each module that the script installed, at the version that
+        the script uses. The function also checks each module that the manifest of such a
+        module requires, at the version that the manifest names. When a file fails the
+        check, the function removes each module that -Modules names, which the script
+        installed in this run. The next run then downloads and checks each module again.
+        The function then stops the run.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [array]$Modules
+    )
+
+    Write-Log "Checking the signature of each file of the installed modules..." -Level Info
+    $problems = @()
+    $installed = @()
+    $checked = @{}
+    $queue = [System.Collections.Generic.Queue[object]]::new()
+
+    foreach ($module in $Modules) {
+        $found = Find-NeologikInstalledModule -Name $module.Name -MinimumVersion $module.MinVersion
+        if ($found) {
+            $installed += $found
+            $queue.Enqueue($found)
+        }
+        else {
+            $problems += "the module $($module.Name), which is not installed after the download"
+        }
+    }
+
+    while ($queue.Count -gt 0) {
+        $current = $queue.Dequeue()
+        if ($checked.ContainsKey($current.ModuleBase)) { continue }
+        $checked[$current.ModuleBase] = $true
+        $problems += @(Get-NeologikModuleSignatureProblem -Name $current.Name -Version ([string]$current.Version) -ModuleBase $current.ModuleBase)
+
+        # Each module that the manifest requires. The script reads the manifest as data and runs nothing.
+        $manifestPath = Join-Path $current.ModuleBase "$($current.Name).psd1"
+        if (-not (Test-Path -LiteralPath $manifestPath)) { continue }
+        try {
+            $requiredModules = @(Get-NeologikRequiredModuleList -Path $manifestPath)
+        }
+        catch {
+            $problems += "the module $($current.Name) $($current.Version), whose manifest the script cannot read: $($_.Exception.Message)"
+            continue
+        }
+        foreach ($required in $requiredModules) {
+            $spec = if ($required -is [hashtable]) { $required } else { @{ ModuleName = [string]$required } }
+            $requiredModule = Find-NeologikInstalledModule -Name $spec['ModuleName'] -RequiredVersion $spec['RequiredVersion'] -MinimumVersion $spec['ModuleVersion']
+            if ($requiredModule) {
+                $queue.Enqueue($requiredModule)
+            }
+            else {
+                Write-Log "The module $($spec['ModuleName']), which the module $($current.Name) requires, is not installed. The script checks no file of that module" -Level Warning
+            }
+        }
+    }
+
+    if ($problems.Count -eq 0) {
+        Write-Log "Each file of the installed modules has a valid signature" -Level Success
+        return
+    }
+
+    foreach ($problem in $problems) {
+        Write-Log "The signature check failed for $problem" -Level Error
+    }
+    foreach ($module in $installed) {
+        try {
+            Remove-Item -LiteralPath $module.ModuleBase -Recurse -Force -ErrorAction Stop
+            Write-Log "Removed the module $($module.Name) $($module.Version), which the script installed in this run" -Level Warning
+        }
+        catch {
+            Write-Log "The script could not remove the folder $($module.ModuleBase). Delete the folder before the next run: $($_.Exception.Message)" -Level Warning
+        }
+    }
+    throw "A PowerShell module failed the signature check. The script imported no module and stops. The script removed each module that the script installed in this run. The log names each file that failed the check. Run the script again later. When the check fails again, email the log to support@neologik.ai."
+}
+
+#endregion
+
 #region PowerShell Version Management
 
 function Test-PowerShellVersion {
@@ -733,6 +1066,14 @@ function Install-PowerShellLatest {
 
             Write-Log "Downloading $($installer.name)..." -Level Info
             Invoke-WebRequest -Uri $installer.browser_download_url -OutFile $installerPath -UseBasicParsing
+
+            # The installer runs only with a valid signature of Microsoft Corporation, which signs each PowerShell installer.
+            $signatureProblem = Get-NeologikSignatureProblem -Path $installerPath -MicrosoftOnly
+            if ($signatureProblem) {
+                Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
+                throw "The PowerShell installer $($installer.name) failed the signature check: $signatureProblem. The script deleted the installer and installed nothing. Install PowerShell 7 from https://aka.ms/powershell and run the script again."
+            }
+            Write-Log "The PowerShell installer has a valid signature of Microsoft Corporation" -Level Success
             
             Write-Log "Installing PowerShell from the installer file..." -Level Info
             Start-Process msiexec.exe -ArgumentList "/i `"$installerPath`" /qn /norestart" -Wait -NoNewWindow
@@ -813,6 +1154,9 @@ function Install-RequiredModules {
             throw
         }
     }
+
+    # Check the signature of each file that the download brought, before the script imports any module.
+    Assert-NeologikModuleSignature -Modules $Modules
 }
 
 #endregion
@@ -1225,11 +1569,14 @@ function Test-RequiredPermissions {
 function Find-NeologikUserByEmail {
     <#
     .SYNOPSIS
-        Finds a user account by mail address or by user principal name.
+        Finds a user account by mail address, by user principal name or by another
+        mail address of the account.
     .DESCRIPTION
         The function sends a Microsoft Graph request on the open session. The function
         returns the id and the displayName of the account. The function returns $null
-        when no account matches or when the request fails.
+        when no account matches or when the request fails. A guest first invited under
+        another address keeps this address in otherMails, so the function also matches
+        otherMails, and the script does not invite that guest again.
     #>
     [CmdletBinding()]
     param(
@@ -1238,7 +1585,7 @@ function Find-NeologikUserByEmail {
     )
 
     $safeEmail = $Email -replace "'", "''"
-    $filter = [uri]::EscapeDataString("mail eq '$safeEmail' or userPrincipalName eq '$safeEmail'")
+    $filter = [uri]::EscapeDataString("mail eq '$safeEmail' or userPrincipalName eq '$safeEmail' or otherMails/any(m:m eq '$safeEmail')")
     try {
         $result = Invoke-MgGraphRequest -Method GET -Uri "v1.0/users?`$filter=$filter&`$select=id,displayName" -ErrorAction Stop
         if ($result.value -and $result.value.Count -gt 0) {
@@ -1259,75 +1606,7 @@ function Find-NeologikUserByEmail {
 
 #endregion
 
-#region Subscription and Resource Group Management
-
-function New-NeologikSubscription {
-    <#
-    .SYNOPSIS
-        Selects an Azure subscription by name. The script never calls this function.
-        The script uses the subscription of the sign-in.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$SubscriptionName
-    )
-
-    Write-Log "Looking for the subscription $SubscriptionName..." -Level Info
-
-    try {
-        $subscription = Get-AzSubscription -SubscriptionName $SubscriptionName -ErrorAction SilentlyContinue
-
-        if ($subscription) {
-            Write-Log "Subscription '$SubscriptionName' exists, id $($subscription.Id)" -Level Info
-            $script:ConfigData['SubscriptionName'] = $subscription.Name
-            $script:ConfigData['SubscriptionId'] = $subscription.Id
-            
-            # Select this subscription in the Azure session
-            Set-AzContext -SubscriptionId $subscription.Id | Out-Null
-            Write-Log "Selected the subscription $SubscriptionName" -Level Success
-        }
-        else {
-            Write-Log "Subscription '$SubscriptionName' not found." -Level Warning
-            Write-Log "Note: the creation of a subscription requires an Enterprise Agreement or a Microsoft Customer Agreement." -Level Warning
-            
-            # List the available subscriptions
-            $existingSubscriptions = Get-AzSubscription
-            if ($existingSubscriptions) {
-                # An unattended run must name a subscription that exists.
-                if ($script:NonInteractiveMode) {
-                    throw "Subscription '$SubscriptionName' not found. An unattended run cannot ask for another subscription. Give a valid -SubscriptionName."
-                }
-                Write-Host "`nAvailable subscriptions:" -ForegroundColor Yellow
-                $existingSubscriptions | ForEach-Object { Write-Host "  - $($_.Name) ($($_.Id))" }
-
-                Write-Host "`nUse an existing subscription? (Y/N): " -NoNewline -ForegroundColor Cyan
-                $useExisting = Read-Host
-                if ($useExisting -eq 'Y' -or $useExisting -eq 'y' -or [string]::IsNullOrWhiteSpace($useExisting)) {
-                    Write-Host "Enter the name of the subscription: " -NoNewline -ForegroundColor Cyan
-                    $subName = Read-Host
-                    $subscription = Get-AzSubscription -SubscriptionName $subName -ErrorAction Stop
-                    $script:ConfigData['SubscriptionName'] = $subscription.Name
-                    $script:ConfigData['SubscriptionId'] = $subscription.Id
-                    Set-AzContext -SubscriptionId $subscription.Id | Out-Null
-                    Write-Log "Using the existing subscription $subName" -Level Success
-                }
-                else {
-                    throw "The administrator stopped the selection of the subscription."
-                }
-            }
-            else {
-                throw "No subscription found. Create a subscription first."
-            }
-        }
-
-        return $subscription
-    }
-    catch {
-        Write-Log "The selection of the subscription failed: $_" -Level Error
-        throw
-    }
-}
+#region Resource Group Management
 
 function New-NeologikResourceGroup {
     <#
@@ -1601,11 +1880,11 @@ function Invoke-ExistingAccountResolution {
         function sends no invitation.
     .DESCRIPTION
         The script calls the function when the administrator declined invitation and
-        chose to add existing accounts. The function looks up each address by mail
-        address and by user principal name. The function adds each account found to
-        the list. The function reports an address that matches no account and
-        continues. An administrator can add such an account in Microsoft Entra ID
-        later.
+        chose to add existing accounts. The function finds each account by the mail
+        address, the user principal name or another mail address of the account. The
+        function adds each account found to the list. The function reports an address
+        that matches no account and continues. An administrator can add such an
+        account in Microsoft Entra ID later.
     #>
     [CmdletBinding()]
     param(
@@ -1635,7 +1914,7 @@ function Invoke-ExistingAccountResolution {
             }
         }
         else {
-            Write-Log "No account in this tenant has the mail address or the user principal name $email. The script continues without the account. Create the account and add the account to the security groups in Microsoft Entra ID later." -Level Warning
+            Write-Log "No account in this tenant has $email as the mail address, the user principal name or another mail address. The script continues without the account. Create the account and add the account to the security groups in Microsoft Entra ID later." -Level Warning
         }
     }
 
@@ -1686,22 +1965,22 @@ function New-NeologikSecurityGroups {
         $groups = @()
         $groups += @{
             Name = "Neologik User Group$groupSuffix"
-            Description = 'Default Neologik users group - assign to agent channels created in the NCE'
+            Description = 'This security group holds the people who use the Neologik agents of this environment. In the Neologik Admin Tool, each channel of a Neologik agent names the security group whose members can use the Neologik agent.'
         }
         # The two security groups for roles in the Neologik Admin Tool: contributors and administrators.
         # When the contributors group exists under another recognised name, the script renames the group. The group keeps the id.
         $groups += @{
             Name = "Neologik NCE Contributors$groupSuffix"
-            Description = 'NCE contributor role - create and change platform configuration in the Neologik Admin Tool'
+            Description = 'Members of this security group hold the contributor role in the Neologik Admin Tool. A member can create and change the configuration of the Neologik Platform.'
             PreviousNames = @("Neologik NCE User Group$groupSuffix", "Neologik Harness User Group$groupSuffix")
         }
         $groups += @{
             Name = "Neologik NCE Admins$groupSuffix"
-            Description = 'NCE admin role - full access including Blueprints, Audit and the Admin page'
+            Description = 'Members of this security group hold the administrator role in the Neologik Admin Tool. A member has full access to the Neologik Admin Tool, including the Blueprints, Audit and Admin pages.'
         }
         $groups += @{
             Name = "Neologik Admin User Group$groupSuffix"
-            Description = 'Users who will administer and support the resources'
+            Description = 'Members of this security group administer and support the Azure resources of this Neologik Platform environment. This security group holds Azure roles on the resource group of the environment.'
         }
 
         $createdGroups = @()
@@ -1727,6 +2006,19 @@ function New-NeologikSecurityGroups {
             if ($existingGroup) {
                 Write-Log "Security group '$($groupDef.Name)' already exists, id $($existingGroup.Id)" -Level Info
                 $group = $existingGroup
+
+                # A security group from an earlier run can hold the description of an earlier version of the
+                # script. The script then writes the description of this version. A failed update leaves the
+                # earlier description, and the run continues.
+                if ([string]$existingGroup.Description -cne $groupDef.Description) {
+                    try {
+                        Update-MgGroup -GroupId $existingGroup.Id -Description $groupDef.Description -ErrorAction Stop
+                        Write-Log "Description of the security group '$($groupDef.Name)' updated" -Level Success
+                    }
+                    catch {
+                        Write-Log "Warning: the script could not update the description of the security group '$($groupDef.Name)': $_" -Level Warning
+                    }
+                }
             }
             else {
                 Write-Log "Creating the security group $($groupDef.Name)..." -Level Info
@@ -2339,13 +2631,6 @@ function Set-NeologikLimitedSubscriptionRole {
     .SYNOPSIS
         Assigns the limited Role Based Access Control Administrator role to the
         deployment identity on the subscription.
-    .DESCRIPTION
-        The role carries a condition that limits the roles the deployment identity may
-        assign to Reader and Cost Management Reader, for service principals only. An assignment
-        that already carries the condition is reported. An assignment without the
-        condition, or with another condition, is removed and created again with
-        the condition, because Azure keeps the condition of an existing assignment
-        on an update. An absent assignment is created.
     #>
     [CmdletBinding()]
     param(
@@ -2356,13 +2641,43 @@ function Set-NeologikLimitedSubscriptionRole {
         [string]$SubscriptionId
     )
 
-    $scope = "/subscriptions/$SubscriptionId"
+    Set-NeologikConditionedRole -ObjectId $ServicePrincipalId `
+        -Scope "/subscriptions/$SubscriptionId" `
+        -Condition $script:LimitedSubRoleCondition `
+        -Description 'limited to two roles'
+}
+
+function Set-NeologikConditionedRole {
+    <#
+    .SYNOPSIS
+        Assigns Role Based Access Control Administrator at one scope, with a condition.
+    .DESCRIPTION
+        An assignment that already carries the condition is reported. An assignment without the
+        condition, or with another condition, is removed and created again with
+        the condition, because Azure keeps the condition of an existing assignment
+        on an update. An absent assignment is created.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ObjectId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Scope,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Condition,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Description
+    )
+
     $roleName = $script:LimitedSubRole
-    $wanted = ($script:LimitedSubRoleCondition -replace '\s', '').ToLowerInvariant()
-    Write-Log "Assigning the role $roleName, limited to two roles..." -Level Info
+    $wanted = ($Condition -replace '\s', '').ToLowerInvariant()
+    Write-Log "Assigning the role $roleName, $Description..." -Level Info
 
     try {
-        $assignments = @(Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
+        $assignments = @(Get-AzRoleAssignment -ObjectId $ObjectId `
             -RoleDefinitionName $roleName `
             -Scope $scope `
             -ErrorAction Stop | Where-Object { $_.Scope -eq $scope })
@@ -2385,14 +2700,14 @@ function Set-NeologikLimitedSubscriptionRole {
         # assignment and creates it again below with the limit. Azure answers a read
         # with the removed assignment for a while, so the script waits until the read
         # no longer returns it before creating the new one.
-        Remove-AzRoleAssignment -ObjectId $ServicePrincipalId `
+        Remove-AzRoleAssignment -ObjectId $ObjectId `
             -RoleDefinitionName $roleName `
             -Scope $scope `
             -ErrorAction Stop | Out-Null
         Write-Log "$roleName role: the existing assignment is removed, so the limit can be applied" -Level Info
         $removeChecks = 0
         while ($removeChecks -lt 12) {
-            $remaining = @(Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
+            $remaining = @(Get-AzRoleAssignment -ObjectId $ObjectId `
                 -RoleDefinitionName $roleName `
                 -Scope $scope `
                 -ErrorAction SilentlyContinue | Where-Object { $_.Scope -eq $scope })
@@ -2409,10 +2724,10 @@ function Set-NeologikLimitedSubscriptionRole {
     $roleAssigned = $false
     while (-not $roleAssigned -and $retryCount -lt $maxRetries) {
         try {
-            New-AzRoleAssignment -ObjectId $ServicePrincipalId `
+            New-AzRoleAssignment -ObjectId $ObjectId `
                 -RoleDefinitionId $script:LimitedSubRoleId `
                 -Scope $scope `
-                -Condition $script:LimitedSubRoleCondition `
+                -Condition $Condition `
                 -ConditionVersion $script:LimitedSubRoleConditionVersion `
                 -ErrorAction Stop | Out-Null
 
@@ -2423,7 +2738,7 @@ function Set-NeologikLimitedSubscriptionRole {
             if ($_.Exception.Message -match "RoleAssignmentExists|already exists") {
                 # The assignment exists: with the limit, the script is done; without it,
                 # Azure answered for a removed assignment, and the script tries again.
-                $held = @(Get-AzRoleAssignment -ObjectId $ServicePrincipalId `
+                $held = @(Get-AzRoleAssignment -ObjectId $ObjectId `
                     -RoleDefinitionName $roleName `
                     -Scope $scope `
                     -ErrorAction SilentlyContinue | Where-Object {
@@ -3131,7 +3446,7 @@ function New-NeologikAgentBlueprint {
                 name                     = $credName
                 issuer                   = 'https://token.actions.githubusercontent.com'
                 audiences                = @('api://AzureADTokenExchange')
-                description              = "Neologik deployment pipeline ($($repo.Name)) acts as this blueprint to mint agent identities and users"
+                description              = "This federated credential lets a Neologik deployment run in the Neologik GitHub repository $($repo.Name) sign in as this agent identity blueprint with no stored secret. The Neologik deployment then creates the agent identities and the agent users of this environment."
                 claimsMatchingExpression = @{ value = $expression; languageVersion = 1 }
             } | ConvertTo-Json -Depth 5 -Compress
             Invoke-MgGraphRequest -Method POST -Uri "$graphBeta/applications/$blueprintObjectId/federatedIdentityCredentials" `
@@ -3845,8 +4160,8 @@ function New-NeologikStorageAccount {
 function New-NeologikManagedIdentities {
     <#
     .SYNOPSIS
-        Creates the two user-assigned managed identities and assigns the roles of
-        each.
+        Creates the four user-assigned managed identities and assigns the roles and
+        permissions of each.
     #>
     [CmdletBinding()]
     param(
@@ -3872,7 +4187,13 @@ function New-NeologikManagedIdentities {
         [string]$ScriptRunnerIdentityName = "",
 
         [Parameter(Mandatory = $false)]
-        [string]$SqlIdentityName = ""
+        [string]$SqlIdentityName = "",
+
+        [Parameter(Mandatory = $false)]
+        [string]$DirectoryIdentityName = "",
+
+        [Parameter(Mandatory = $false)]
+        [string]$SystemTaskIdentityName = ""
     )
 
     Write-Log "Creating the managed identities..." -Level Info
@@ -3894,6 +4215,8 @@ function New-NeologikManagedIdentities {
         # When a checkpoint holds no name, the script uses the standard name.
         $scriptRunnerName = if (-not [string]::IsNullOrWhiteSpace($ScriptRunnerIdentityName)) { $ScriptRunnerIdentityName.Trim() } else { "neologik-script-runner-service-connection$nameSuffix" }
         $sqlIdentityName = if (-not [string]::IsNullOrWhiteSpace($SqlIdentityName)) { $SqlIdentityName.Trim() } else { "neologik-sql-managed-identity$nameSuffix" }
+        $directoryIdentityName = if (-not [string]::IsNullOrWhiteSpace($DirectoryIdentityName)) { $DirectoryIdentityName.Trim() } else { "neologik-directory-managed-identity$nameSuffix" }
+        $systemTaskIdentityName = if (-not [string]::IsNullOrWhiteSpace($SystemTaskIdentityName)) { $SystemTaskIdentityName.Trim() } else { "neologik-system-task-managed-identity$nameSuffix" }
 
         $managedIdentities = @(
             @{
@@ -3903,7 +4226,7 @@ function New-NeologikManagedIdentities {
                 # the runner virtual machine. The scripts read and write secrets in the Key Vault. Every one of these
                 # resources is in the resource group. The managed identity holds no role on the subscription.
                 Roles = @()
-                RGRoles = @('Reader', 'Key Vault Secrets Officer', 'Azure Bot Service Contributor Role')
+                RGRoles = @('Reader', 'Key Vault Secrets Officer')
                 # The script runner identity receives no Microsoft Graph application permission.
             },
             @{
@@ -3911,6 +4234,26 @@ function New-NeologikManagedIdentities {
                 DisplayName = "Neologik SQL Managed Identity$displaySuffix"
                 Roles = @()
                 EntraRole = 'Directory Readers'
+            },
+            @{
+                Name = $directoryIdentityName
+                DisplayName = "Neologik Agent Registration Identity$displaySuffix"
+                # From version 5.2 of the Neologik Platform, this managed identity creates and changes the application
+                # registrations of Neologik agents from inside the environment. The permission changes only the application
+                # registrations that the managed identity owns. The managed identity holds no Azure role. Nothing can
+                # sign in as the managed identity until a deployment by Neologik adds the sign-in credential.
+                Roles = @()
+                GraphAppRoles = @('Application.ReadWrite.OwnedBy')
+            },
+            @{
+                Name = $systemTaskIdentityName
+                DisplayName = "Neologik System Task Managed Identity$displaySuffix"
+                # From version 5.2 of the Neologik Platform, this managed identity creates the identities and role
+                # assignments of Neologik agents from inside the environment. The condition at the top of this script
+                # limits the role. Nothing can sign in as the managed identity until a deployment by Neologik adds the
+                # sign-in credential.
+                Roles = @()
+                ResourceGroupRoleStandard = $true
             }
         )
 
@@ -4102,6 +4445,14 @@ function New-NeologikManagedIdentities {
                 }
             }
 
+            # The role that lets the managed identity assign roles inside the resource group
+            if ($miDef.ResourceGroupRoleStandard) {
+                Set-NeologikConditionedRole -ObjectId $mi.PrincipalId `
+                    -Scope "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName" `
+                    -Condition $script:ResourceGroupRoleCondition `
+                    -Description 'limited so that the identity cannot assign Owner, User Access Administrator or this role'
+            }
+
             # Grant the Microsoft Graph application permissions defined for the identity, if any
             if ($miDef.GraphAppRoles) {
                 Grant-GraphAppRolePermissions -PrincipalId $mi.PrincipalId `
@@ -4215,6 +4566,7 @@ function Export-ConfigurationData {
         # The output. The order of the fields is fixed
         $orderedConfig = [ordered]@{
             'ScriptVersion' = $script:Version
+            'KitVersion' = $script:KitVersion
             'GeneratedAt' = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
             'OrganizationName' = $script:OrganizationName
             'OrganizationCode' = $script:OrganizationCode
@@ -4227,6 +4579,7 @@ function Export-ConfigurationData {
             'SolutionShortName' = $script:ConfigData['SolutionShortName']
             'UserAccount' = $script:ConfigData['UserAccount']
             'AzureRegion' = $script:ConfigData['AzureRegion']
+            'ContentUnderstandingRegion' = $script:ConfigData['ContentUnderstandingRegion']
             'HostName' = $script:ConfigData['HostName']
             'ResourceProvidersPending' = @($script:ConfigData['ResourceProvidersPending'])
             'ResourceTagsEnabled' = [bool]$script:ConfigData['ResourceTagsEnabled']
@@ -4610,6 +4963,116 @@ function Test-AnswerFileComplete {
     return $true
 }
 
+# The list of Azure regions for document analysis. The Neologik Platform analyses documents with Azure
+# Content Understanding. Microsoft lists the regions of that service on this page:
+# https://learn.microsoft.com/azure/ai-services/content-understanding/language-region-support
+$script:DocumentAnalysisRegions = @(
+    'australiaeast', 'canadacentral', 'eastus', 'eastus2', 'japaneast', 'southcentralus',
+    'southeastasia', 'swedencentral', 'uksouth', 'westeurope', 'westus', 'westus3'
+)
+
+function Get-NeologikDocumentAnalysisRegionDefault {
+    # Returns the Azure region of the environment when that region is on the list. Otherwise returns $null.
+    param([string]$AzureRegion)
+    $region = ([string]$AzureRegion).Trim().ToLower()
+    if ($script:DocumentAnalysisRegions -contains $region) { return $region }
+    return $null
+}
+
+function Test-NeologikDocumentAnalysisRegionError {
+    # Returns $null when the region is on the list. Otherwise returns an error message.
+    param([string]$Region)
+    if ($script:DocumentAnalysisRegions -contains ([string]$Region).Trim().ToLower()) { return $null }
+    return "The Azure region '$Region' is not on the list of regions for document analysis. Choose a region from this list: $($script:DocumentAnalysisRegions -join ', ')."
+}
+
+function Resolve-NeologikDocumentAnalysisRegion {
+    <#
+    .SYNOPSIS
+        Chooses the Azure region for document analysis in a run that takes the whole
+        configuration from the answer file. The answer documentAnalysisRegion comes
+        first. Without the answer, the Azure region of the environment applies when
+        that region is on the list. The function throws when neither gives a region
+        from the list. Returns the region.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)][string]$AzureRegion = '',
+        [Parameter(Mandatory = $false)][string]$Answer = ''
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($Answer)) {
+        $answerError = Test-NeologikDocumentAnalysisRegionError $Answer
+        if ($answerError) { throw "documentAnalysisRegion '$Answer': $answerError" }
+        return $Answer.Trim().ToLower()
+    }
+    $regionDefault = Get-NeologikDocumentAnalysisRegionDefault -AzureRegion $AzureRegion
+    if ($regionDefault) { return $regionDefault }
+    throw "documentAnalysisRegion is required, because the Azure region '$AzureRegion' is not on the list of regions for document analysis. Choose a region from this list: $($script:DocumentAnalysisRegions -join ', ')."
+}
+
+function Read-NeologikDocumentAnalysisRegion {
+    <#
+    .SYNOPSIS
+        Asks for the Azure region for document analysis. The question shows the answer
+        from the answer file, or the Azure region of the environment when that region
+        is on the list. Enter accepts the region shown. Without a region to show, the
+        administrator types a region from the list. The function asks again until the
+        region is on the list. Returns the region.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)][string]$AzureRegion = '',
+        [Parameter(Mandatory = $false)][string]$Answer = ''
+    )
+
+    $regionDefault = Get-NeologikDocumentAnalysisRegionDefault -AzureRegion $AzureRegion
+    $shown = $regionDefault
+    if (-not [string]::IsNullOrWhiteSpace($Answer)) {
+        if (Test-NeologikDocumentAnalysisRegionError $Answer) {
+            Write-Host "  [!] The answer file holds the documentAnalysisRegion '$Answer'. The region is not on the list. The script ignores the value." -ForegroundColor Yellow
+        }
+        else {
+            $shown = $Answer.Trim().ToLower()
+        }
+    }
+    $label = Get-PromptLabel $shown $regionDefault
+
+    while ($true) {
+        Write-Host ""
+        Write-Host "Azure Region for Document Analysis:" -ForegroundColor Cyan
+        Write-Host "  Regions for document analysis: $($script:DocumentAnalysisRegions -join ', ')" -ForegroundColor Gray
+        if ($shown) {
+            Write-Host "  $label" -NoNewline -ForegroundColor Gray
+            Write-Host $shown -ForegroundColor Yellow
+            Write-Host "  Press Enter to accept the region shown, or type another region from the list: " -NoNewline -ForegroundColor Gray
+        }
+        else {
+            Write-Host "  The Azure region of the environment, $AzureRegion, is not on the list." -ForegroundColor Gray
+            Write-Host "  Type the region that you agreed with Neologik, from the list: " -NoNewline -ForegroundColor Gray
+        }
+        $typed = [string](Read-Host)
+
+        if ([string]::IsNullOrWhiteSpace($typed)) {
+            if ($shown) {
+                Write-Host "  [OK] Using: $shown" -ForegroundColor Green
+                return $shown
+            }
+            Write-Host "  [X] A region is required. Type a region from the list." -ForegroundColor Red
+            continue
+        }
+
+        $typedError = Test-NeologikDocumentAnalysisRegionError $typed
+        if ($typedError) {
+            Write-Host "  [X] $typedError" -ForegroundColor Red
+            continue
+        }
+        $chosen = $typed.Trim().ToLower()
+        Write-Host "  [OK] Using: $chosen" -ForegroundColor Green
+        return $chosen
+    }
+}
+
 function Get-CafRegionCodes {
     <#
     .SYNOPSIS
@@ -4705,6 +5168,10 @@ function Set-ConfigFromAnswerFile {
     $script:AzureRegion = $rg
     $regionAbbrev = ([string]$script:MicrosoftCAFRegionCodes[$rg]).ToLower()
 
+    # The Azure region for document analysis. Without the answer, the Azure region of the environment
+    # applies when that region is on the list.
+    $script:ConfigData['ContentUnderstandingRegion'] = Resolve-NeologikDocumentAnalysisRegion -AzureRegion $rg -Answer ([string](Get-Answer 'documentAnalysisRegion'))
+
     # Environment index. The default value is '01'
     $ei = [string](Get-Answer 'environmentIndex')
     if ([string]::IsNullOrWhiteSpace($ei)) { $ei = '01' }
@@ -4763,6 +5230,20 @@ function Set-ConfigFromAnswerFile {
     $sqlErr = Test-ManagedIdentityNameError $script:ConfigData['SqlIdentityName']
     if ($sqlErr) { throw "sqlIdentityName '$($script:ConfigData['SqlIdentityName'])': $sqlErr" }
 
+    # The name of the agent registration identity, from the answer file or the standard name.
+    $dirComputed = "neologik-directory-managed-identity-$($script:ConfigData['SolutionShortName'])"
+    $dirAns = [string](Get-Answer 'directoryIdentityName')
+    $script:ConfigData['DirectoryIdentityName'] = if (-not [string]::IsNullOrWhiteSpace($dirAns)) { $dirAns.Trim() } else { $dirComputed }
+    $dirErr = Test-ManagedIdentityNameError $script:ConfigData['DirectoryIdentityName']
+    if ($dirErr) { throw "directoryIdentityName '$($script:ConfigData['DirectoryIdentityName'])': $dirErr" }
+
+    # The name of the system task managed identity, from the answer file or the standard name.
+    $taskComputed = "neologik-system-task-managed-identity-$($script:ConfigData['SolutionShortName'])"
+    $taskAns = [string](Get-Answer 'systemTaskIdentityName')
+    $script:ConfigData['SystemTaskIdentityName'] = if (-not [string]::IsNullOrWhiteSpace($taskAns)) { $taskAns.Trim() } else { $taskComputed }
+    $taskErr = Test-ManagedIdentityNameError $script:ConfigData['SystemTaskIdentityName']
+    if ($taskErr) { throw "systemTaskIdentityName '$($script:ConfigData['SystemTaskIdentityName'])': $taskErr" }
+
     # A platform operator creates agents and channels in the Neologik Admin Tool after the deployment.
 
     # Tags. The answer file can hold a boolean, whose default value is to apply the tags. The answer file
@@ -4787,51 +5268,6 @@ function Set-ConfigFromAnswerFile {
     # The top of this function built the solution name and the short name.
 
     return $regionAbbrev
-}
-
-function Get-UserInput {
-    <#
-    .SYNOPSIS
-        Asks a question that shows a default value. The script never calls this
-        function.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Prompt,
-
-        [Parameter(Mandatory = $true)]
-        [string]$DefaultValue,
-
-        [Parameter(Mandatory = $false)]
-        [switch]$IsSecret
-    )
-
-    Write-Host ""
-    Write-Host $Prompt -ForegroundColor Cyan
-    Write-Host "  Default: " -NoNewline -ForegroundColor Gray
-    Write-Host $DefaultValue -ForegroundColor Yellow
-    
-    if ($IsSecret) {
-        Write-Host "  Press Enter to accept the default value, or type another value. The script hides the characters: " -NoNewline -ForegroundColor Gray
-        $secureInput = Read-Host -AsSecureString
-        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureInput)
-        $userInput = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-    }
-    else {
-        Write-Host "  Press Enter to accept the default value, or type another value: " -NoNewline -ForegroundColor Gray
-        $userInput = Read-Host
-    }
-
-    if ([string]::IsNullOrWhiteSpace($userInput)) {
-        Write-Host "  [OK] Using the default value: $DefaultValue" -ForegroundColor Green
-        return $DefaultValue
-    }
-    else {
-        Write-Host "  [OK] Using: $userInput" -ForegroundColor Green
-        return $userInput
-    }
 }
 
 function Start-NeologikOnboarding {
@@ -5439,6 +5875,10 @@ function Start-NeologikOnboarding {
             }
         }
 
+        # The Azure region for document analysis. The question shows the Azure region of the environment
+        # when that region is on the list.
+        $script:ConfigData['ContentUnderstandingRegion'] = Read-NeologikDocumentAnalysisRegion -AzureRegion $script:AzureRegion -Answer ([string](Get-Answer 'documentAnalysisRegion'))
+
         # Environment index
         # The question shows a valid environment index from the answer file, from 1 to 99.
         $indexDefault = Get-Answer 'environmentIndex'
@@ -5564,6 +6004,22 @@ function Start-NeologikOnboarding {
         $script:ConfigData['SqlIdentityName'] = Read-NameWithDefault -Title 'SQL Managed Identity Name' `
             -DefaultValue $sqlDefault -Validator ${function:Test-ManagedIdentityNameError} `
             -LabelPrefix (Get-PromptLabel $sqlDefault $sqlComputed)
+
+        # The name of the agent registration identity.
+        $dirComputed = "neologik-directory-managed-identity-$($script:ConfigData['SolutionShortName'])"
+        $dirAns = [string](Get-Answer 'directoryIdentityName')
+        $dirDefault = if (-not [string]::IsNullOrWhiteSpace($dirAns)) { $dirAns.Trim() } else { $dirComputed }
+        $script:ConfigData['DirectoryIdentityName'] = Read-NameWithDefault -Title 'Agent Registration Identity Name' `
+            -DefaultValue $dirDefault -Validator ${function:Test-ManagedIdentityNameError} `
+            -LabelPrefix (Get-PromptLabel $dirDefault $dirComputed)
+
+        # The name of the system task managed identity.
+        $taskComputed = "neologik-system-task-managed-identity-$($script:ConfigData['SolutionShortName'])"
+        $taskAns = [string](Get-Answer 'systemTaskIdentityName')
+        $taskDefault = if (-not [string]::IsNullOrWhiteSpace($taskAns)) { $taskAns.Trim() } else { $taskComputed }
+        $script:ConfigData['SystemTaskIdentityName'] = Read-NameWithDefault -Title 'System Task Managed Identity Name' `
+            -DefaultValue $taskDefault -Validator ${function:Test-ManagedIdentityNameError} `
+            -LabelPrefix (Get-PromptLabel $taskDefault $taskComputed)
 
         # A platform operator creates agents and channels in the Neologik Admin Tool after the
         # deployment. A channel uses the standard security group for users that this script creates, or an existing
@@ -5802,8 +6258,9 @@ function Start-NeologikOnboarding {
                         # The administrator types one address on each line. A line can hold several addresses, separated by
                         # commas. An empty line ends the entry.
                         Write-Host "  Enter the email addresses, one on each line. A line can hold several addresses" -ForegroundColor Gray
-                        Write-Host "  separated by commas. Each address must match the mail address or the user" -ForegroundColor Gray
-                        Write-Host "  principal name of the account exactly. Press Enter on an empty line to finish." -ForegroundColor Gray
+                        Write-Host "  separated by commas. The script finds each account by the mail address, the" -ForegroundColor Gray
+                        Write-Host "  user principal name or another mail address of the account. Press Enter on" -ForegroundColor Gray
+                        Write-Host "  an empty line to finish." -ForegroundColor Gray
                         $emails = @(Read-EmailAddressList)
                         if ($emails.Count -eq 0) {
                             Write-Host "  No address entered. The script adds no account to the security groups." -ForegroundColor Yellow
@@ -5851,11 +6308,14 @@ function Start-NeologikOnboarding {
         Write-SummaryRow 'Environment Type' $script:EnvironmentType
         Write-SummaryRow 'Environment Index' $script:EnvironmentIndex
         Write-SummaryRow 'Azure Region' $script:AzureRegion
+        Write-SummaryRow 'Document Analysis' $script:ConfigData['ContentUnderstandingRegion']
         Write-SummaryRow 'Resource Group Name' $script:ResourceGroupName
         Write-SummaryRow 'Key Vault Name' $script:KeyVaultNameOverride
         Write-SummaryRow 'Storage Account Name' $script:ConfigData['DeployStorageAccountName']
         Write-SummaryRow 'Script Runner Identity' $script:ConfigData['ScriptRunnerIdentityName']
         Write-SummaryRow 'SQL Managed Identity' $script:ConfigData['SqlIdentityName']
+        Write-SummaryRow 'Agent Registration Identity' $script:ConfigData['DirectoryIdentityName']
+    Write-SummaryRow 'System Task Managed Identity' $script:ConfigData['SystemTaskIdentityName']
         Write-SummaryRow 'Solution Name' $script:ConfigData['SolutionName']
         Write-SummaryRow 'Solution Short Name' $script:ConfigData['SolutionShortName']
         Write-SummaryRow 'Provider Registration' "$($script:ProviderList.Providers.Count) resource providers and $($script:ProviderList.Features.Count) preview features, from resource-providers.txt"
@@ -5929,6 +6389,12 @@ function Start-NeologikOnboarding {
             if (-not $script:ConfigData.ContainsKey('UseExistingServicePrincipal')) {
                 $script:ConfigData['UseExistingServicePrincipal'] = $false
                 $script:ConfigData['ExistingServicePrincipalObjectId'] = ''
+            }
+
+            # A checkpoint of an earlier version can hold no Azure region for document analysis. The script then
+            # uses the Azure region of the environment when that region is on the list.
+            if ([string]::IsNullOrWhiteSpace([string]$script:ConfigData['ContentUnderstandingRegion'])) {
+                $script:ConfigData['ContentUnderstandingRegion'] = Get-NeologikDocumentAnalysisRegionDefault -AzureRegion $script:AzureRegion
             }
 
             Write-Host "`n  >> The script restored the configuration from the checkpoint and asks no question" -ForegroundColor Gray
@@ -6055,7 +6521,9 @@ function Start-NeologikOnboarding {
             -EnvironmentType $script:EnvironmentType `
             -EnvironmentIndex $script:EnvironmentIndex `
             -ScriptRunnerIdentityName ([string]$script:ConfigData['ScriptRunnerIdentityName']) `
-            -SqlIdentityName ([string]$script:ConfigData['SqlIdentityName'])
+            -SqlIdentityName ([string]$script:ConfigData['SqlIdentityName']) `
+            -DirectoryIdentityName ([string]$script:ConfigData['DirectoryIdentityName']) `
+            -SystemTaskIdentityName ([string]$script:ConfigData['SystemTaskIdentityName'])
 
         # Step 15b: Submit the registration of every other resource provider and every preview feature in the list.
         # The deployment of the Neologik Platform needs them. This run does not. Then confirm every resource provider

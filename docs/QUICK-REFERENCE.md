@@ -21,7 +21,7 @@ The onboarding script prepares your Azure subscription and your Microsoft Entra 
 | Resource group | One |
 | Key Vault | One |
 | Deployment storage account | One |
-| Managed identities | Three |
+| Managed identities | Four |
 
 The onboarding script also registers the Azure resource providers that the Neologik Platform uses. The onboarding script writes a configuration file for Neologik. The configuration file contains no secret.
 
@@ -115,7 +115,7 @@ Sometimes the onboarding script cannot make the check for Global Administrator. 
 
 | Input | Content |
 |---|---|
-| The answer file, `inputs.json`. The answer file is in the folder of the onboarding script, or the parameter `-AnswerFile` names the answer file | The organisation code, the organisation name and the host name. The environment type, the Azure region and the environment index. The resource names and the tags. The choices about guests and existing accounts. The deployment service principal that you created |
+| The answer file, `inputs.json`. The answer file is in the folder of the onboarding script, or the parameter `-AnswerFile` names the answer file | The organisation code, the organisation name and the host name. The environment type, the Azure region, the Azure region for document analysis and the environment index. The resource names and the tags. The choices about guests and existing accounts. The deployment service principal that you created |
 | Command-line parameters | The organisation code, the environment type and the Azure region. The tenant, the subscription and the name of the Key Vault. The deployment service principal that you created. The switches `-NonInteractive`, `-AcceptTerms`, `-FreshRun`, `-SkipModuleInstall`, `-SkipGuestInvitation` and `-SkipPowerShellUpdate` |
 | `NeologikGuestUsers.txt` | The Neologik support accounts that the onboarding script invites as guests, when you choose invitation |
 | `resource-providers.txt` | The list of resource providers and preview features |
@@ -141,7 +141,7 @@ The step numbers match the comments in the onboarding script. The first five row
 | 12b. Platform Sign-in application | Creates the Platform Sign-in application. Creates the client secret, the owners and the group assignments of the Platform Sign-in application |
 | 12c. Agent identity blueprint | Creates the agent identity blueprint and the service principal of the agent identity blueprint. Creates the owners, the Microsoft Graph application permission of the principal and three federated credentials |
 | 14. Storage account | Creates the storage account and three containers. Turns off public blob access and shared key access. Assigns one storage role to the Admin User Group |
-| 15. Managed identities | Creates the script runner managed identity and the SQL managed identity, and assigns the roles of each |
+| 15. Managed identities | Creates the script runner managed identity, the SQL managed identity, the agent registration identity and the system task managed identity, and assigns the roles of each. Grants the agent registration identity one Microsoft Graph application permission |
 | 15b. Resource providers, second part | Submits the registrations of the other resource providers and the preview features that the Neologik Platform requires. Confirms each registration |
 | 15c. Version of the onboarding kit | Records this version of the onboarding kit in the tag `NeologikOnboardingKit`. A resource group that an earlier version prepared keeps the earlier version until this step |
 | 16. Export | Writes the configuration file. Uploads the configuration file and the log to the storage account. Deletes the checkpoint |
@@ -152,9 +152,10 @@ The onboarding script reads each directory object before a write. The onboarding
 
 | Directory object | Call | Properties | When the onboarding script writes |
 |---|---|---|---|
-| Guest invitation | `New-MgInvitation` | The address. A redirect to the Azure portal. An invitation email | You chose invitation, and no account has that mail address or that user principal name |
+| Guest invitation | `New-MgInvitation` | The address. A redirect to the Azure portal. An invitation email | You chose invitation, and no account holds the address as the mail address, the user principal name or another mail address |
 | Security group | `New-MgGroup` | Display name and description. Security enabled. Not mail enabled | The security group is absent |
 | Name of a security group | `Update-MgGroup` | Display name and description | The tenant holds the group `Neologik NCE Contributors - <short name>` under one of two other names that the onboarding script recognises. The security group keeps the id and the members. A new environment holds no security group with either name |
+| Description of a security group | `Update-MgGroup` | Description. See [The descriptions that the onboarding script writes](#the-descriptions-that-the-onboarding-script-writes) | The security group exists with another description. When the update fails, the onboarding script reports a warning and continues |
 | Member of a security group | `New-MgGroupMember` | The invited accounts, the existing accounts and the signed-in administrator. Each account joins all four security groups | The account is not already a member |
 | Deployment application | `New-MgApplication` | Display name `Neologik GitHub Service Connection - <short name>`. Single-tenant sign-in audience | The onboarding script creates the deployment identity, and the application is absent |
 | Deployment service principal | `New-MgServicePrincipal` | Created from the deployment application | The service principal is absent |
@@ -171,6 +172,7 @@ The onboarding script reads each directory object before a write. The onboarding
 | Owner of the agent identity blueprint and of the principal | `POST /applications/{id}/owners/$ref`, `POST /servicePrincipals/{id}/owners/$ref` | The deployment identity as owner | The deployment identity is not already an owner |
 | Microsoft Graph application permission of the service principal of the agent identity blueprint | `POST /servicePrincipals/{id}/appRoleAssignments` | `AgentIdUser.ReadWrite.IdentityParentedBy`. The permission applies only to the agent users of this agent identity blueprint | The principal does not already hold the permission |
 | Federated credentials on the agent identity blueprint | `POST /beta/applications/{id}/federatedIdentityCredentials` | Three federated credentials. See the next section | No federated credential has the name |
+| Microsoft Graph application permission of the agent registration identity | `POST /servicePrincipals/{id}/appRoleAssignments` | `Application.ReadWrite.OwnedBy`. The permission changes only the application registrations that the agent registration identity owns | The agent registration identity does not hold the permission |
 | Directory Readers role | `New-MgDirectoryRole` from the role template, then `New-MgDirectoryRoleMemberByRef` | The SQL managed identity becomes a member. Azure SQL requires the membership to look up Microsoft Entra accounts at sign-in | The onboarding script activates the role only when the role was never activated. The onboarding script adds the membership only when the membership is absent |
 
 The onboarding script gives no administrator consent and creates no permission grant. A Global Administrator gives the consent after the deployment, as described in [FINISHING-STEPS-GUIDE.md](FINISHING-STEPS-GUIDE.md).
@@ -186,6 +188,18 @@ The deployment by Neologik creates agent identities and agent users as the agent
 | Audience | `api://AzureADTokenExchange` |
 | Trust | Each federated credential trusts one repository of the Neologik deployment. Each federated credential names the repository by the repository id, which never changes. A repository that is renamed or copied gains no access through the federated credential |
 
+### The descriptions that the onboarding script writes
+
+The onboarding script writes a description on each security group and on each federated credential that the onboarding script creates. The Microsoft Entra admin center shows each description.
+
+| Directory object | Description |
+|---|---|
+| `Neologik User Group - <short name>` | This security group holds the people who use the Neologik agents of this environment. In the Neologik Admin Tool, each channel of a Neologik agent names the security group whose members can use the Neologik agent. |
+| `Neologik NCE Contributors - <short name>` | Members of this security group hold the contributor role in the Neologik Admin Tool. A member can create and change the configuration of the Neologik Platform. |
+| `Neologik NCE Admins - <short name>` | Members of this security group hold the administrator role in the Neologik Admin Tool. A member has full access to the Neologik Admin Tool, including the Blueprints, Audit and Admin pages. |
+| `Neologik Admin User Group - <short name>` | Members of this security group administer and support the Azure resources of this Neologik Platform environment. This security group holds Azure roles on the resource group of the environment. |
+| Each federated credential on the agent identity blueprint, `github-oidc-<repository>` | This federated credential lets a Neologik deployment run in the Neologik GitHub repository `<repository>` sign in as this agent identity blueprint with no stored secret. The Neologik deployment then creates the agent identities and the agent users of this environment. |
+
 ## Azure writes
 
 | Object | Command | Scope | Roles or properties |
@@ -200,8 +214,10 @@ The deployment by Neologik creates agent identities and agent users as the agent
 | Key Vault secrets | `Set-AzKeyVaultSecret` | Key Vault | The secrets `neologik-deployment-service-principle-secret` and `sp-admin-<solution name>-auth-secret`. The onboarding script stores no client secret of the deployment identity when you name a deployment service principal and give no client secret |
 | Storage account | `New-AzStorageAccount`, `Set-AzStorageAccount`, `New-AzRmStorageContainer` | Resource group | Standard LRS, StorageV2. Public blob access is turned off at creation. Shared key access is turned off on each run. Three private containers: `certificate`, `json` and `logs` |
 | Role of the administrator for the upload | `New-AzRoleAssignment` | Resource group | `Storage Blob Data Contributor` for the signed-in administrator |
-| Script runner managed identity | `New-AzUserAssignedIdentity`, `New-AzRoleAssignment` | Resource group | The name `neologik-script-runner-service-connection-<short name>`. The roles `Reader`, `Key Vault Secrets Officer` and `Azure Bot Service Contributor Role` on the resource group. No role on the subscription |
+| Script runner managed identity | `New-AzUserAssignedIdentity`, `New-AzRoleAssignment` | Resource group | The name `neologik-script-runner-service-connection-<short name>`. The roles `Reader` and `Key Vault Secrets Officer` on the resource group. No role on the subscription |
 | SQL managed identity | `New-AzUserAssignedIdentity` | Resource group | The name `neologik-sql-managed-identity-<short name>`. No Azure role |
+| Agent registration identity | `New-AzUserAssignedIdentity` | Resource group | The name `neologik-directory-managed-identity-<short name>`. No Azure role. The Microsoft Graph application permission `Application.ReadWrite.OwnedBy` |
+| System task managed identity | `New-AzUserAssignedIdentity`, `New-AzRoleAssignment` | Resource group | The name `neologik-system-task-managed-identity-<short name>`. `Role Based Access Control Administrator` on the resource group with a condition that stops the managed identity assigning `Owner`, `User Access Administrator` or `Role Based Access Control Administrator`, and limits every other assignment to service principals |
 | Uploads | `Set-AzStorageBlobContent` | The containers `json` and `logs` | The configuration file and the log. The upload uses Microsoft Entra authentication |
 
 | The thirteen roles of the Admin User Group on the resource group |
@@ -279,7 +295,7 @@ A second run adds no client secret to the Platform Sign-in application while the
 | File | Location | Content |
 |---|---|---|
 | `NeologikOnboarding_<timestamp>.log` | The folder of the onboarding script. The onboarding script uploads a copy to the container `logs` | The log of the run |
-| `Neologik_<org><index>_Configuration_<timestamp>.json` | The folder of the onboarding script. The onboarding script uploads a copy to the container `json` | The name and the id of each object created. The roles assigned. The host name. The sign-in name of the administrator. The addresses of the accounts invited or added. The expiry date of the client secret |
+| `Neologik_<org><index>_Configuration_<timestamp>.json` | The folder of the onboarding script. The onboarding script uploads a copy to the container `json` | The version of the onboarding script and the version of the onboarding kit. The name and the id of each object created. The roles assigned. The host name. The Azure region for document analysis. The sign-in name of the administrator. The addresses of the accounts invited or added. The expiry date of the client secret |
 | `NeologikCheckpoint.json` | The folder of the onboarding script, while a run is incomplete | The configuration collected so far, in the same form as the configuration file. The onboarding script deletes the checkpoint when the run completes |
 
 None of the three files contains a secret. All three files contain personal data, namely sign-in names and email addresses. Handle the three files as personal data.
@@ -300,6 +316,8 @@ The onboarding script makes these changes:
 | The onboarding script marks the PowerShell Gallery as a trusted repository for the user. The setting remains after the run | The onboarding script installs a module |
 | The onboarding script installs the Az modules and the Microsoft Graph modules for the current user | A module is missing, and you accept |
 | The onboarding script updates PowerShell | The PowerShell version is older than 7.4, and you accept |
+| The onboarding script removes each module that the onboarding script installed in the run | A file of an installed module fails the signature check. See [TECHNICAL-REFERENCE.md](TECHNICAL-REFERENCE.md#signature-checks) |
+| The onboarding script deletes the PowerShell installer that the onboarding script downloaded | The installer fails the signature check |
 | The onboarding script clears the stored Azure session and the stored Microsoft Graph session of the user | You choose to sign in again |
 
 ## What the onboarding script never does
@@ -310,6 +328,7 @@ The onboarding script makes these changes:
 - The onboarding script never adds the deployment identity or a managed identity to a security group.
 - The onboarding script never assigns a role on the subscription to a managed identity or to a security group.
 - The onboarding script never prints the value of a secret. The onboarding script never writes the value of a secret to the log, to the configuration file or to the checkpoint.
+- The onboarding script never runs a downloaded PowerShell installer and never imports a downloaded module before the signature of the file passes the check.
 - The onboarding script never deletes a directory object, an Azure resource, a role assignment or a credential.
 
 ## What the log records
@@ -373,11 +392,12 @@ The onboarding script writes a checkpoint at these points:
 |---|---|---|
 | Subscription | Deployment identity | Reader, Cost Management Contributor, and Role Based Access Control Administrator limited to assigning two roles, Reader and Cost Management Reader, to service principals only |
 | Resource group | Deployment identity | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator |
-| Resource group | Script runner managed identity. The deployment runs scripts inside Azure as this managed identity | Reader<br>Key Vault Secrets Officer<br>Azure Bot Service Contributor Role |
+| Resource group | Script runner managed identity. The deployment runs scripts inside Azure as this managed identity | Reader<br>Key Vault Secrets Officer |
 | Resource group | The group `Neologik Admin User Group - <short name>` | The thirteen roles listed under [Azure writes](#azure-writes) |
 | Resource group | The signed-in administrator | Key Vault Secrets Officer and Storage Blob Data Contributor |
 | Microsoft Graph application permissions | Deployment identity | `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Microsoft Graph application permissions | Service principal of the agent identity blueprint | `AgentIdUser.ReadWrite.IdentityParentedBy` |
+| Microsoft Graph application permissions | Agent registration identity | `Application.ReadWrite.OwnedBy` |
 | Microsoft Entra directory roles | SQL managed identity | Directory Readers |
 | Microsoft Entra directory roles | Deployment identity | None |
 | Membership of security groups | Deployment identity and managed identities | None |
